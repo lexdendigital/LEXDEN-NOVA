@@ -1,0 +1,1381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lexden Nova — Intelligent Digital Solutions | Lexden Digital</title>
+<meta name="description" content="Lexden Nova by Lexden Digital: bespoke software, mobile apps, enterprise AI integration, and cybersecurity infrastructure engineered for speed, resilience, and scale.">
+<meta name="theme-color" content="#05070a">
+<link rel="canonical" href="https://www.lexdendigital.com/">
+<!-- 🔧 Update the canonical URL above and the Open Graph fields below once this is live on your real domain -->
+<meta property="og:type" content="website">
+<meta property="og:title" content="Lexden Nova — Intelligent Digital Solutions">
+<meta property="og:description" content="Bespoke software, mobile, enterprise AI, and cybersecurity — engineered under one adaptive core.">
+<meta property="og:url" content="https://www.lexdendigital.com/">
+<meta property="og:image" content="https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=1200&q=60">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Lexden Nova — Intelligent Digital Solutions">
+<meta name="twitter:description" content="Bespoke software, mobile, enterprise AI, and cybersecurity — engineered under one adaptive core.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2305070a'/%3E%3Ccircle cx='32' cy='32' r='11' fill='none' stroke='%2300d2ff' stroke-width='3'/%3E%3Ccircle cx='32' cy='32' r='4' fill='%2300d2ff'/%3E%3Ccircle cx='32' cy='32' r='20' fill='none' stroke='%2300d2ff' stroke-width='1.5' stroke-opacity='0.4'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;800&family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          void: '#05070a',
+          panel: '#0c111a',
+          core: { DEFAULT: '#00d2ff', dim: '#0891b2' },
+          plasma: { DEFAULT: '#8b5cf6', dim: '#6d28d9' }
+        },
+        fontFamily: {
+          display: ['Orbitron', 'sans-serif'],
+          heading: ['"Space Grotesk"', 'sans-serif'],
+          sans: ['Inter', 'sans-serif']
+        },
+        boxShadow: {
+          neon: '0 0 20px rgba(0,210,255,0.35), 0 0 4px rgba(0,210,255,0.6)',
+          'neon-lg': '0 0 40px rgba(0,210,255,0.28)',
+          plasma: '0 0 24px rgba(139,92,246,0.35)'
+        }
+      }
+    }
+  };
+</script>
+<script src="https://unpkg.com/lucide@latest"></script>
+<style>
+  :root {
+    --void: #05070a;
+    --panel: #0c111a;
+    --core: 0,210,255;
+    --plasma: 139,92,246;
+  }
+  html { scroll-behavior: smooth; }
+  body {
+    background:
+      radial-gradient(circle at 15% 8%, rgba(var(--core),0.07), transparent 40%),
+      radial-gradient(circle at 85% 92%, rgba(var(--core),0.05), transparent 40%),
+      var(--void);
+    cursor: auto;
+  }
+  body.has-fine-pointer, body.has-fine-pointer * { cursor: none !important; }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: var(--void); }
+  ::-webkit-scrollbar-thumb { background: #1b2434; border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(var(--core),0.4); }
+
+  .skip-link {
+    position: absolute; left: 1rem; top: -3rem; z-index: 100;
+    background: rgba(0,210,255,0.95); color: #05070a; font-weight: 600;
+    padding: 0.6rem 1.1rem; border-radius: 0.5rem; transition: top 0.2s ease;
+  }
+  .skip-link:focus { top: 1rem; }
+
+  .glass { background: rgba(255,255,255,0.04); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border: 1px solid rgba(255,255,255,0.08); }
+  .neon-border { border: 1px solid rgba(var(--core),0.45); box-shadow: 0 0 0 1px rgba(var(--core),0.08) inset, 0 0 18px rgba(var(--core),0.22); }
+  .text-glow { color: #00d2ff; text-shadow: 0 0 10px rgba(var(--core),0.55); }
+  .silver-text { background: linear-gradient(180deg, #f1f5f9, #94a3b8); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .tab-active { color: #00d2ff !important; border-color: #00d2ff !important; }
+
+  /* ===== Signature: The Nova Core ===== */
+  .core-stage { perspective: 1000px; }
+  .core-assembly { transform-style: preserve-3d; transition: transform 0.15s ease-out; will-change: transform; }
+  .core-ring { border-radius: 9999px; border: 1px solid rgba(var(--core),0.35); }
+  @keyframes ringspin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+  @keyframes ringspinrev { from { transform: rotate(360deg); } to { transform: rotate(0deg); } }
+  .ring-a { animation: ringspin 22s linear infinite; }
+  .ring-b { animation: ringspinrev 34s linear infinite; }
+  @keyframes corepulse { 0%, 100% { opacity: .55; transform: scale(1); } 50% { opacity: 1; transform: scale(1.06); } }
+  .core-pulse { animation: corepulse 3.6s ease-in-out infinite; }
+  @keyframes emberrise {
+    0% { transform: translate3d(0,0,0) scale(0.6); opacity: 0; }
+    12% { opacity: 0.9; }
+    100% { transform: translate3d(var(--dx,10px), -140px, 0) scale(1); opacity: 0; }
+  }
+  .ember { position: absolute; bottom: 0; left: 50%; width: 4px; height: 4px; border-radius: 9999px; background: #00d2ff; box-shadow: 0 0 8px 2px rgba(0,210,255,0.8); animation: emberrise linear infinite; }
+  @keyframes auroradrift {
+    0%, 100% { transform: translate(-6%, -4%) rotate(0deg) scale(1); }
+    50% { transform: translate(6%, 4%) rotate(8deg) scale(1.08); }
+  }
+  .aurora-wisp { position: absolute; border-radius: 9999px; filter: blur(60px); animation: auroradrift 18s ease-in-out infinite; }
+
+  @keyframes floatUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+  .toast-in { animation: floatUp .25s ease-out; }
+
+  /* Scroll reveal */
+  .reveal { opacity: 0; transform: translateY(18px); transition: opacity 0.6s ease, transform 0.6s ease; }
+  .reveal.is-visible { opacity: 1; transform: translateY(0); }
+
+  /* Custom cursor */
+  #cursor-dot, #cursor-ring { position: fixed; top: 0; left: 0; pointer-events: none; z-index: 200; border-radius: 9999px; opacity: 0; transition: opacity 0.2s ease; }
+  #cursor-dot { width: 6px; height: 6px; background: #00d2ff; box-shadow: 0 0 8px rgba(0,210,255,0.8); }
+  #cursor-ring { width: 32px; height: 32px; border: 1px solid rgba(0,210,255,0.5); transition: opacity 0.2s ease, transform 0.15s ease, width 0.15s ease, height 0.15s ease; }
+  body.has-fine-pointer #cursor-dot, body.has-fine-pointer #cursor-ring { opacity: 1; }
+  #cursor-ring.is-active { transform: scale(1.5); border-color: rgba(139,92,246,0.7); }
+
+  button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible {
+    outline: 2px solid #00d2ff; outline-offset: 2px;
+  }
+
+  .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .loader-hide { opacity: 0; pointer-events: none; transition: opacity 0.5s ease; }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+    .core-assembly { transform: none !important; }
+  }
+  @media (max-width: 767px) {
+    .ember, .aurora-wisp { display: none; }
+  }
+</style>
+</head>
+<body class="bg-void text-slate-200 font-sans antialiased selection:bg-cyan-400/30">
+<a href="#main-content" class="skip-link">Skip to content</a>
+
+<!-- Boot loader -->
+<div id="boot-loader" class="fixed inset-0 z-[100] bg-void flex items-center justify-center transition-opacity duration-500" aria-hidden="true">
+  <div class="relative w-16 h-16">
+    <div class="absolute inset-0 rounded-full border-2 border-cyan-400/20"></div>
+    <div class="absolute inset-0 rounded-full border-t-2 border-cyan-400 core-pulse" style="animation: ringspin 1s linear infinite;"></div>
+  </div>
+</div>
+
+<!-- Custom cursor (desktop only, added by JS) -->
+<div id="cursor-dot"></div>
+<div id="cursor-ring"></div>
+
+<!-- Mobile brand strip -->
+<header id="mobile-topbar" class="md:hidden fixed top-0 inset-x-0 z-40 h-14 flex items-center px-5 glass">
+  <div id="brand-mobile"></div>
+</header>
+
+<!-- Desktop top nav -->
+<header id="topnav" class="hidden md:flex fixed top-0 inset-x-0 z-40 h-16 items-center justify-between px-8 glass">
+  <div id="brand-desktop" class="flex items-center gap-3"></div>
+  <nav class="flex items-center gap-8 text-sm font-heading tracking-wide text-slate-300" aria-label="Primary">
+    <button data-action="nav" data-target="hero" class="hover:text-cyan-400 transition-colors duration-300">Home</button>
+    <button data-action="nav" data-target="products" class="hover:text-cyan-400 transition-colors duration-300">Explore</button>
+    <button data-action="nav" data-target="stats" class="hover:text-cyan-400 transition-colors duration-300">Impact</button>
+    <button data-action="nav" data-target="recommended" class="hover:text-cyan-400 transition-colors duration-300">AI Recs</button>
+  </nav>
+  <div id="social-desktop" class="flex items-center gap-4"></div>
+</header>
+
+<!-- Mobile bottom nav -->
+<nav id="mobilenav" class="md:hidden fixed bottom-0 inset-x-0 z-40 glass border-t border-white/5" aria-label="Primary">
+  <div class="grid grid-cols-4 h-16">
+    <button data-action="nav" data-target="hero" class="flex flex-col items-center justify-center gap-1 text-slate-300 hover:text-cyan-400 transition-colors duration-300">
+      <i data-lucide="home" class="w-5 h-5" aria-hidden="true"></i><span class="text-[10px] font-heading">Home</span>
+    </button>
+    <button data-action="nav" data-target="products" class="flex flex-col items-center justify-center gap-1 text-slate-300 hover:text-cyan-400 transition-colors duration-300">
+      <i data-lucide="compass" class="w-5 h-5" aria-hidden="true"></i><span class="text-[10px] font-heading">Explore</span>
+    </button>
+    <button data-action="nav" data-target="recommended" class="flex flex-col items-center justify-center gap-1 text-slate-300 hover:text-cyan-400 transition-colors duration-300">
+      <i data-lucide="sparkles" class="w-5 h-5" aria-hidden="true"></i><span class="text-[10px] font-heading">AI Recs</span>
+    </button>
+    <button data-action="open-admin-gate" class="flex flex-col items-center justify-center gap-1 text-slate-700 hover:text-slate-600 transition-colors duration-300" aria-label="Admin access">
+      <span class="w-1.5 h-1.5 rounded-full bg-slate-700" aria-hidden="true"></span>
+    </button>
+  </div>
+</nav>
+
+<!-- Nova AI Core telemetry widget -->
+<div id="telemetry" class="fixed z-30 top-16 right-3 w-32 md:top-20 md:right-6 md:w-52 glass neon-border rounded-xl p-2.5 md:p-3 text-[10px] md:text-xs font-heading" role="status" aria-label="System telemetry">
+  <div class="flex items-center gap-1.5 text-cyan-400 mb-2">
+    <span class="w-1.5 h-1.5 rounded-full bg-cyan-400 core-pulse" aria-hidden="true"></span>
+    <span class="truncate">Nova AI Core</span>
+  </div>
+  <p id="telemetry-status" class="text-slate-300 mb-2">Status: Optimal</p>
+  <div class="flex justify-between text-slate-400"><span>Latency</span><span id="telemetry-latency" class="text-slate-200">—</span></div>
+  <div class="flex justify-between text-slate-400 mb-2"><span>Integrity</span><span id="telemetry-integrity" class="text-slate-200">—</span></div>
+  <div id="telemetry-log" class="hidden md:block border-t border-white/5 pt-2 space-y-1 text-[10px] text-slate-500 max-h-16 overflow-hidden" aria-live="off"></div>
+</div>
+
+<main id="main-content">
+  <!-- Hero -->
+  <section id="hero" class="relative pt-28 md:pt-40 pb-24 px-6 md:px-12 overflow-hidden">
+    <div class="aurora-wisp w-[380px] h-[380px] -left-20 top-10 bg-cyan-400/10" aria-hidden="true"></div>
+    <div class="aurora-wisp w-[320px] h-[320px] -right-16 bottom-0 bg-plasma/10" style="animation-delay:-9s" aria-hidden="true"></div>
+
+    <div class="relative max-w-4xl mx-auto text-center core-stage">
+      <div id="core-assembly" class="core-assembly relative w-40 h-40 md:w-52 md:h-52 mx-auto mb-8" aria-hidden="true">
+        <div class="absolute inset-0 rounded-full bg-cyan-400/10 blur-[70px] core-pulse"></div>
+        <div class="core-ring ring-a absolute inset-0"></div>
+        <div class="core-ring ring-b absolute inset-4 border-plasma/25"></div>
+        <div class="absolute inset-[38%] rounded-full bg-cyan-400 core-pulse shadow-neon-lg"></div>
+        <div id="ember-field" class="absolute inset-0 overflow-visible"></div>
+      </div>
+      <p class="font-heading text-cyan-400 text-xs tracking-[0.3em] uppercase mb-4">Lexden Digital Presents</p>
+      <h1 class="font-display text-4xl md:text-6xl silver-text leading-tight mb-5">Welcome to <span class="text-glow">Lexden Nova</span></h1>
+      <p class="font-sans text-slate-400 text-base md:text-lg max-w-xl mx-auto mb-9">Intelligent digital solutions engineered for speed, resilience, and scale — software, mobile, AI, and security under one adaptive core.</p>
+      <button data-action="nav" data-target="products" class="inline-flex items-center gap-2 font-heading text-sm tracking-wide px-7 py-3.5 rounded-full bg-cyan-400 text-slate-950 font-semibold shadow-neon hover:shadow-neon-lg hover:scale-[1.03] active:scale-95 transition-all duration-300">
+        Explore Products <i data-lucide="arrow-down" class="w-4 h-4" aria-hidden="true"></i>
+      </button>
+    </div>
+  </section>
+
+  <!-- Stats dashboard -->
+  <section id="stats" class="px-6 md:px-12 py-16 max-w-7xl mx-auto">
+    <div class="mb-8 reveal">
+      <p class="font-heading text-cyan-400 text-xs tracking-[0.25em] uppercase mb-2">By The Numbers</p>
+      <h2 class="font-heading text-2xl md:text-3xl text-slate-100 font-semibold">Impact At A Glance</h2>
+    </div>
+    <div id="stats-grid" class="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6"></div>
+  </section>
+
+  <!-- Media feed -->
+  <section id="media" class="px-6 md:px-12 py-16 max-w-7xl mx-auto">
+    <div class="mb-8 reveal">
+      <p class="font-heading text-cyan-400 text-xs tracking-[0.25em] uppercase mb-2">Live Feed</p>
+      <h2 class="font-heading text-2xl md:text-3xl text-slate-100 font-semibold">Latest From Lexden</h2>
+    </div>
+    <div id="media-grid" class="grid grid-cols-1 md:grid-cols-2 gap-6"></div>
+  </section>
+
+  <!-- Products -->
+  <section id="products" class="px-6 md:px-12 py-16 max-w-7xl mx-auto">
+    <div class="mb-8 reveal">
+      <p class="font-heading text-cyan-400 text-xs tracking-[0.25em] uppercase mb-2">Catalog</p>
+      <h2 class="font-heading text-2xl md:text-3xl text-slate-100 font-semibold">Products &amp; Services</h2>
+    </div>
+    <div id="products-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"></div>
+  </section>
+
+  <!-- Recommended -->
+  <section id="recommended" class="px-6 md:px-12 py-16 max-w-7xl mx-auto">
+    <div class="mb-8 reveal">
+      <p class="font-heading text-cyan-400 text-xs tracking-[0.25em] uppercase mb-2">Nova Intelligence</p>
+      <h2 class="font-heading text-2xl md:text-3xl text-slate-100 font-semibold">Recommended For You</h2>
+    </div>
+    <div id="recommended-track" class="flex gap-5 overflow-x-auto pb-3 snap-x snap-mandatory"></div>
+    <p id="recommended-empty" class="text-slate-500 text-sm">Browse a few products and Nova will start tailoring picks here.</p>
+  </section>
+</main>
+
+<!-- Footer -->
+<footer id="site-footer" class="border-t border-white/5 mt-10 px-6 md:px-12 py-10 pb-28 md:pb-10">
+  <div class="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6 text-sm text-slate-500 text-center md:text-left">
+    <div id="brand-footer" class="font-heading text-slate-300"></div>
+    <div id="social-footer" class="flex items-center gap-4"></div>
+    <p>&copy; <span id="footer-year"></span> Lexden Digital. All rights reserved. <button data-action="open-admin-gate" class="text-slate-800 hover:text-slate-700 cursor-default select-none" aria-label="Admin access">&middot;</button></p>
+  </div>
+</footer>
+
+<!-- Nova Assistant -->
+<button id="assistant-fab" data-action="toggle-assistant" class="fixed z-40 bottom-20 md:bottom-6 right-4 md:right-6 w-14 h-14 rounded-full bg-cyan-400 text-slate-950 shadow-neon-lg flex items-center justify-center hover:scale-105 active:scale-95 transition-all duration-300" aria-label="Open Nova Assistant" aria-expanded="false" aria-controls="assistant-panel">
+  <i data-lucide="brain-circuit" class="w-6 h-6" aria-hidden="true"></i>
+</button>
+<div id="assistant-panel" class="hidden fixed z-40 bottom-36 md:bottom-24 right-4 md:right-6 left-4 md:left-auto glass neon-border rounded-2xl w-auto md:w-96 max-h-[70vh] flex flex-col overflow-hidden" role="dialog" aria-label="Nova Assistant" aria-modal="false">
+  <div class="p-4 border-b border-white/5 flex items-center justify-between shrink-0">
+    <div>
+      <p class="font-heading text-slate-100 font-semibold text-sm flex items-center gap-2"><i data-lucide="sparkles" class="w-4 h-4 text-cyan-400" aria-hidden="true"></i>Nova Assistant</p>
+      <p class="text-[11px] text-slate-500 mt-0.5">Smart product finder — matches your needs to our catalog.</p>
+    </div>
+    <button data-action="toggle-assistant" class="text-slate-500 hover:text-slate-300" aria-label="Close assistant"><i data-lucide="x" class="w-5 h-5" aria-hidden="true"></i></button>
+  </div>
+  <div id="assistant-log" class="p-4 space-y-3 overflow-y-auto flex-1 text-sm" aria-live="polite"></div>
+  <div id="assistant-chips" class="px-4 pb-2 flex flex-wrap gap-2"></div>
+  <form id="assistant-form" class="p-3 border-t border-white/5 flex items-center gap-2 shrink-0">
+    <label for="assistant-input" class="sr-only">Tell Nova what you need</label>
+    <input id="assistant-input" type="text" autocomplete="off" placeholder="Tell Nova what you need…" class="flex-1 rounded-full border border-white/10 bg-panel px-4 py-2 text-sm text-slate-100 focus:outline-none focus:border-cyan-400/60">
+    <button type="submit" class="w-9 h-9 shrink-0 rounded-full bg-cyan-400 text-slate-950 flex items-center justify-center hover:shadow-neon transition-all duration-300" aria-label="Send"><i data-lucide="arrow-up" class="w-4 h-4" aria-hidden="true"></i></button>
+  </form>
+</div>
+
+<!-- Passkey modal -->
+<div id="passkey-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-6" role="dialog" aria-modal="true" aria-labelledby="passkey-title">
+  <div class="glass neon-border rounded-2xl p-6 w-full max-w-sm">
+    <div class="flex items-center justify-between mb-4">
+      <h3 id="passkey-title" class="font-heading text-slate-100 font-semibold">System Access</h3>
+      <button data-action="close-passkey" class="text-slate-500 hover:text-slate-300" aria-label="Close"><i data-lucide="x" class="w-5 h-5" aria-hidden="true"></i></button>
+    </div>
+    <p class="text-xs text-slate-500 mb-4">Enter the access passkey to continue.</p>
+    <form id="passkey-form">
+      <label for="passkey-input" class="sr-only">Passkey</label>
+      <input id="passkey-input" type="password" class="w-full rounded-lg border border-white/10 bg-panel px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-cyan-400/60 mb-2" placeholder="Passkey" autocomplete="off">
+      <p id="passkey-error" class="hidden text-xs text-red-400 mb-3" role="alert">Incorrect passkey.</p>
+      <button type="submit" class="w-full font-heading text-sm px-4 py-2.5 rounded-full bg-cyan-400 text-slate-950 font-semibold hover:shadow-neon transition-all duration-300">Unlock</button>
+    </form>
+  </div>
+</div>
+
+<!-- Admin console -->
+<div id="admin-console" class="hidden fixed inset-0 z-50 bg-void/98 overflow-y-auto" role="dialog" aria-modal="true" aria-labelledby="admin-title">
+  <div class="max-w-5xl mx-auto px-6 py-8">
+    <div class="flex items-center justify-between mb-8">
+      <h2 id="admin-title" class="font-heading text-xl text-slate-100 font-semibold flex items-center gap-2"><i data-lucide="terminal" class="w-5 h-5 text-cyan-400" aria-hidden="true"></i>Admin Console</h2>
+      <button data-action="close-admin" class="text-slate-500 hover:text-slate-300" aria-label="Close admin console"><i data-lucide="x" class="w-6 h-6" aria-hidden="true"></i></button>
+    </div>
+
+    <div class="flex gap-2 mb-8 border-b border-white/10 overflow-x-auto" role="tablist" aria-label="Admin sections">
+      <button data-action="admin-tab" data-tab="brand" class="admin-tab-btn tab-active px-4 py-3 text-sm font-heading border-b-2 border-transparent -mb-px transition-colors duration-300 whitespace-nowrap" role="tab" aria-selected="true">Brand Config</button>
+      <button data-action="admin-tab" data-tab="inventory" class="admin-tab-btn px-4 py-3 text-sm font-heading border-b-2 border-transparent -mb-px transition-colors duration-300 text-slate-400 whitespace-nowrap" role="tab" aria-selected="false">Inventory Manager</button>
+      <button data-action="admin-tab" data-tab="stats" class="admin-tab-btn px-4 py-3 text-sm font-heading border-b-2 border-transparent -mb-px transition-colors duration-300 text-slate-400 whitespace-nowrap" role="tab" aria-selected="false">Statistics</button>
+      <button data-action="admin-tab" data-tab="system" class="admin-tab-btn px-4 py-3 text-sm font-heading border-b-2 border-transparent -mb-px transition-colors duration-300 text-slate-400 whitespace-nowrap" role="tab" aria-selected="false">System</button>
+    </div>
+
+    <!-- Brand -->
+    <div id="admin-panel-brand" class="admin-panel space-y-8" role="tabpanel">
+      <div class="glass border border-white/5 rounded-2xl p-6">
+        <h3 class="font-heading text-slate-200 font-semibold mb-4">Logo</h3>
+        <div class="grid md:grid-cols-2 gap-4">
+          <label class="block text-xs text-slate-400">Logo Type
+            <select id="brand-logo-type" class="mt-1.5 w-full rounded-lg border border-white/10 bg-panel px-3 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-cyan-400/60">
+              <option value="text">Text</option>
+              <option value="image">Image URL</option>
+              <option value="svg">SVG Markup</option>
+            </select>
+          </label>
+          <label class="block text-xs text-slate-400">Logo Text
+            <input id="brand-logo-text" type="text" class="mt-1.5 w-full rounded-lg border border-white/10 bg-panel px-3 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-cyan-400/60" placeholder="LEXDEN NOVA">
+          </label>
+          <label class="block text-xs text-slate-400 md:col-span-2">Logo Image URL
+            <input id="brand-logo-image" type="url" class="mt-1.5 w-full rounded-lg border border-white/10 bg-panel px-3 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-cyan-400/60" placeholder="https://...">
+          </label>
+          <label class="block text-xs text-slate-400 md:col-span-2">Logo SVG Markup
+            <textarea id="brand-logo-svg" rows="3" class="mt-1.5 w-full rounded-lg border border-white/10 bg-panel px-3 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-cyan-400/60 font-mono text-xs" placeholder="<svg>...</svg>"></textarea>
+          </label>
+        </div>
+      </div>
+      <div class="glass border border-white/5 rounded-2xl p-6">
+        <h3 class="font-heading text-slate-200 font-semibold mb-4">Social Links</h3>
+        <div class="grid md:grid-cols-2 gap-4">
+          <label class="block text-xs text-slate-400">Twitter / X
+            <input id="brand-twitter" type="url" class="mt-1.5 w-full rounded-lg border border-white/10 bg-panel px-3 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-cyan-400/60">
+          </label>
+          <label class="block text-xs text-slate-400">Instagram
+            <input id="brand-instagram" type="url" class="mt-1.5 w-full rounded-lg border border-white/10 bg-panel px-3 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-cyan-400/60">
+          </label>
+          <label class="block text-xs text-slate-400">Facebook
+            <input id="brand-facebook" type="url" class="mt-1.5 w-full rounded-lg border border-white/10 bg-panel px-3 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-cyan-400/60">
+          </label>
+          <label class="block text-xs text-slate-400">WhatsApp
+            <input id="brand-whatsapp" type="url" class="mt-1.5 w-full rounded-lg border border-white/10 bg-panel px-3 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-cyan-400/60">
+          </label>
+        </div>
+      </div>
+      <button data-action="save-brand" class="font-heading text-sm px-6 py-3 rounded-full bg-cyan-400 text-slate-950 font-semibold hover:shadow-neon transition-all duration-300">Save Brand</button>
+    </div>
+
+    <!-- Inventory -->
+    <div id="admin-panel-inventory" class="admin-panel hidden space-y-8" role="tabpanel">
+      <div class="glass border border-white/5 rounded-2xl p-6">
+        <h3 class="font-heading text-slate-200 font-semibold mb-4">Add / Edit Product</h3>
+        <div class="grid md:grid-cols-2 gap-4">
+          <label class="block text-xs text-slate-400">Product Name
+            <input id="pf-name" type="text" class="mt-1.5 w-full rounded-lg border border-white/10 bg-panel px-3 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-cyan-400/60">
+          </label>
+          <label class="block text-xs text-slate-400">Unique Item Code
+            <input id="pf-code" type="text" class="mt-1.5 w-full rounded-lg border border-white/10 bg-panel px-3 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-cyan-400/60" placeholder="LXD-007">
+          </label>
+          <label class="block text-xs text-slate-400 md:col-span-2">Description
+            <textarea id="pf-description" rows="3" class="mt-1.5 w-full rounded-lg border border-white/10 bg-panel px-3 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-cyan-400/60"></textarea>
+          </label>
+          <label class="block text-xs text-slate-400">Price (NGN)
+            <input id="pf-price" type="number" min="0" class="mt-1.5 w-full rounded-lg border border-white/10 bg-panel px-3 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-cyan-400/60">
+          </label>
+          <label class="block text-xs text-slate-400">Sale Price (NGN, optional)
+            <input id="pf-saleprice" type="number" min="0" class="mt-1.5 w-full rounded-lg border border-white/10 bg-panel px-3 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-cyan-400/60">
+          </label>
+          <label class="block text-xs text-slate-400 md:col-span-2">External Checkout / Product Link
+            <input id="pf-link" type="url" class="mt-1.5 w-full rounded-lg border border-white/10 bg-panel px-3 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-cyan-400/60" placeholder="https://...">
+          </label>
+          <label class="block text-xs text-slate-400 md:col-span-2">Cover Image URL
+            <input id="pf-image" type="url" class="mt-1.5 w-full rounded-lg border border-white/10 bg-panel px-3 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-cyan-400/60" placeholder="https://...">
+          </label>
+          <label class="block text-xs text-slate-400 md:col-span-2">Extra Gallery Images (comma separated URLs)
+            <input id="pf-images" type="text" class="mt-1.5 w-full rounded-lg border border-white/10 bg-panel px-3 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-cyan-400/60" placeholder="https://img1..., https://img2...">
+          </label>
+          <label class="block text-xs text-slate-400 md:col-span-2">Product Video URL (YouTube or MP4, optional)
+            <input id="pf-video" type="url" class="mt-1.5 w-full rounded-lg border border-white/10 bg-panel px-3 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-cyan-400/60" placeholder="https://youtube.com/watch?v=...">
+          </label>
+          <label class="block text-xs text-slate-400 md:col-span-2">Tags (comma separated)
+            <input id="pf-tags" type="text" class="mt-1.5 w-full rounded-lg border border-white/10 bg-panel px-3 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-cyan-400/60" placeholder="software, enterprise">
+          </label>
+        </div>
+        <div class="flex items-center gap-3 mt-5">
+          <button id="pf-submit" data-action="submit-product" class="font-heading text-sm px-6 py-3 rounded-full bg-cyan-400 text-slate-950 font-semibold hover:shadow-neon transition-all duration-300">Add Product</button>
+          <button id="pf-cancel" data-action="cancel-edit-product" class="hidden font-heading text-sm px-6 py-3 rounded-full border border-white/10 text-slate-300 hover:border-white/30 transition-all duration-300">Cancel</button>
+        </div>
+      </div>
+      <div>
+        <h3 class="font-heading text-slate-200 font-semibold mb-4">Current Products</h3>
+        <div id="inventory-list" class="space-y-2"></div>
+      </div>
+    </div>
+
+    <!-- Statistics -->
+    <div id="admin-panel-stats" class="admin-panel hidden space-y-6" role="tabpanel">
+      <div class="glass border border-white/5 rounded-2xl p-6">
+        <h3 class="font-heading text-slate-200 font-semibold mb-2">Impact Stats</h3>
+        <p class="text-sm text-slate-400 mb-5">These power the animated counters on the homepage.</p>
+        <div id="stats-editor" class="space-y-4"></div>
+      </div>
+      <button data-action="save-stats" class="font-heading text-sm px-6 py-3 rounded-full bg-cyan-400 text-slate-950 font-semibold hover:shadow-neon transition-all duration-300">Save Statistics</button>
+    </div>
+
+    <!-- System -->
+    <div id="admin-panel-system" class="admin-panel hidden space-y-6" role="tabpanel">
+      <div class="glass border border-white/5 rounded-2xl p-6">
+        <h3 class="font-heading text-slate-200 font-semibold mb-2 flex items-center gap-2"><i data-lucide="shield-alert" class="w-4 h-4 text-amber-400" aria-hidden="true"></i>Change Passkey</h3>
+        <p class="text-xs text-slate-500 mb-4">Heads up: this passkey only deters casual visitors. Anyone can view this page's source code and read the check that guards it, so treat it as a light front door, not real security — don't gate anything truly sensitive behind it.</p>
+        <div class="grid md:grid-cols-3 gap-4">
+          <label class="block text-xs text-slate-400">Current Passkey
+            <input id="sec-current" type="password" autocomplete="off" class="mt-1.5 w-full rounded-lg border border-white/10 bg-panel px-3 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-cyan-400/60">
+          </label>
+          <label class="block text-xs text-slate-400">New Passkey
+            <input id="sec-new" type="password" autocomplete="off" class="mt-1.5 w-full rounded-lg border border-white/10 bg-panel px-3 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-cyan-400/60">
+          </label>
+          <label class="block text-xs text-slate-400">Confirm New Passkey
+            <input id="sec-confirm" type="password" autocomplete="off" class="mt-1.5 w-full rounded-lg border border-white/10 bg-panel px-3 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-cyan-400/60">
+          </label>
+        </div>
+        <button data-action="change-passkey" class="mt-4 font-heading text-sm px-6 py-3 rounded-full bg-cyan-400 text-slate-950 font-semibold hover:shadow-neon transition-all duration-300">Update Passkey</button>
+      </div>
+
+      <div class="glass border border-white/5 rounded-2xl p-6">
+        <h3 class="font-heading text-slate-200 font-semibold mb-2">Data Backup</h3>
+        <p class="text-sm text-slate-400 mb-5">Save every product, brand setting, and stat as a JSON file, or restore from a previous backup.</p>
+        <div class="flex flex-wrap gap-3">
+          <button data-action="export-json" class="font-heading text-sm px-5 py-2.5 rounded-full border border-white/10 text-slate-200 hover:border-cyan-400/50 hover:text-cyan-400 transition-all duration-300 inline-flex items-center gap-2"><i data-lucide="download" class="w-4 h-4" aria-hidden="true"></i>Export Data (JSON)</button>
+          <label class="font-heading text-sm px-5 py-2.5 rounded-full border border-white/10 text-slate-200 hover:border-cyan-400/50 hover:text-cyan-400 transition-all duration-300 inline-flex items-center gap-2 cursor-pointer">
+            <i data-lucide="upload" class="w-4 h-4" aria-hidden="true"></i>Import Data (JSON)
+            <input id="import-json-input" type="file" accept="application/json" class="hidden">
+          </label>
+        </div>
+      </div>
+
+      <div class="glass border border-white/5 rounded-2xl p-6">
+        <h3 class="font-heading text-slate-200 font-semibold mb-3">System Deployment</h3>
+        <p class="text-sm text-slate-400 mb-6">Bake every live edit into fresh copies of your site files. The exported files become the new default state for anyone who opens them — re-upload them to your host to make changes visible to all visitors.</p>
+        <div class="flex flex-wrap gap-3">
+          <button data-action="export-index" class="font-heading text-sm px-6 py-3 rounded-full bg-cyan-400 text-slate-950 font-semibold hover:shadow-neon transition-all duration-300 inline-flex items-center gap-2">
+            <i data-lucide="download" class="w-4 h-4" aria-hidden="true"></i>Export index.html
+          </button>
+          <button data-action="export-product-template" class="font-heading text-sm px-6 py-3 rounded-full border border-white/10 text-slate-200 hover:border-cyan-400/50 hover:text-cyan-400 transition-all duration-300 inline-flex items-center gap-2">
+            <i data-lucide="download" class="w-4 h-4" aria-hidden="true"></i>Export product.html
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast-container" class="fixed bottom-20 md:bottom-6 left-1/2 -translate-x-1/2 z-[60] flex flex-col items-center gap-2 pointer-events-none" aria-live="polite"></div>
+
+<script>
+(() => {
+  'use strict';
+
+  /* ================= Default State ================= */
+  // === DEFAULT_STATE_START ===
+  const DEFAULT_STATE = {
+    logo: { type: 'text', text: 'LEXDEN NOVA', imageUrl: '', svg: '' },
+    social: {
+      twitter: 'https://twitter.com/lexdendigital',
+      instagram: 'https://instagram.com/lexdendigital',
+      facebook: 'https://facebook.com/lexdendigital',
+      whatsapp: 'https://wa.me/2340000000000'
+    },
+    security: { passkey: 'Password15' },
+    stats: [
+      { id: 's1', label: 'Projects Shipped', value: 120, suffix: '+' },
+      { id: 's2', label: 'Enterprise Clients', value: 38, suffix: '' },
+      { id: 's3', label: 'Countries Served', value: 14, suffix: '' },
+      { id: 's4', label: 'Platform Uptime', value: 99.9, suffix: '%' }
+    ],
+    products: [
+      { id: 'LXD-001', name: 'Nova Custom Software Suite', description: 'End-to-end bespoke software built around your workflow, from architecture to deployment.', price: 850000, salePrice: null, image: 'https://images.unsplash.com/photo-1517430816045-df4b7de11d1d?w=800&q=60', images: [], video: '', link: 'https://lexdendigital.com/software', tags: ['software', 'enterprise'] },
+      { id: 'LXD-002', name: 'Lexden Mobile App Package', description: 'Native-feel Android and iOS apps designed for low-bandwidth, high-impact markets.', price: 620000, salePrice: 499000, image: 'https://images.unsplash.com/photo-1512941937669-90a1b58e7e9c?w=800&q=60', images: [], video: '', link: 'https://lexdendigital.com/mobile', tags: ['mobile', 'software'] },
+      { id: 'LXD-003', name: 'Enterprise AI Integration', description: 'Embed AI copilots and automation directly into your existing enterprise systems.', price: 1450000, salePrice: null, image: 'https://images.unsplash.com/photo-1555255707-c07966088b7b?w=800&q=60', images: [], video: 'https://www.youtube.com/watch?v=jNQXAC9IVRw', link: 'https://lexdendigital.com/ai', tags: ['ai', 'enterprise'] },
+      { id: 'LXD-004', name: 'Cybersecurity Infrastructure Audit', description: 'Full-stack security hardening, threat modeling, and infrastructure lockdown.', price: 980000, salePrice: null, image: 'https://images.unsplash.com/photo-1550751827-4bd374c3f58b?w=800&q=60', images: [], video: '', link: 'https://lexdendigital.com/security', tags: ['security', 'enterprise'] },
+      { id: 'LXD-005', name: 'Lexden Academy: Dev Bootcamp', description: 'Cohort-based training scaling tech talent from zero to deployable engineer.', price: 120000, salePrice: 95000, image: 'https://images.unsplash.com/photo-1522202176988-66273c2fd55f?w=800&q=60', images: [], video: '', link: 'https://lexdenacademy.com/bootcamp', tags: ['academy', 'education'] },
+      { id: 'LXD-006', name: 'Digital Literacy Micro-Course', description: 'A compact, mobile-first course bringing practical tech fluency to new learners.', price: 15000, salePrice: null, image: 'https://images.unsplash.com/photo-1509062522246-3755977927d7?w=800&q=60', images: [], video: '', link: 'https://lexdenacademy.com/literacy', tags: ['academy', 'education'] }
+    ],
+    media: [
+      { id: 'm1', type: 'youtube', url: 'https://www.youtube.com/watch?v=jNQXAC9IVRw', caption: 'Sample clip — replace with your own footage in Admin → Inventory.', productId: 'LXD-003' },
+      { id: 'm2', type: 'image', url: 'https://images.unsplash.com/photo-1461749280684-dccba630e2f6?w=1000&q=60', caption: 'The latest Lexden Academy cohort shipping their first live product.', productId: 'LXD-005' },
+      { id: 'm3', type: 'image', url: 'https://images.unsplash.com/photo-1563986768609-322da13575f3?w=1000&q=60', caption: 'A look inside a recent infrastructure lockdown engagement.', productId: 'LXD-004' },
+      { id: 'm4', type: 'image', url: 'https://images.unsplash.com/photo-1551650975-87deedd944c3?w=1000&q=60', caption: 'Mobile-first builds, designed for markets running on tight data.', productId: 'LXD-002' }
+    ]
+  };
+  // === DEFAULT_STATE_END ===
+
+  const STORAGE_KEY = 'lexdenNovaState';
+  const HISTORY_KEY = 'lexdenNovaHistory';
+
+  /* ================= State ================= */
+  function loadState() {
+    let state = JSON.parse(JSON.stringify(DEFAULT_STATE));
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        state = {
+          ...state,
+          ...parsed,
+          logo: { ...state.logo, ...(parsed.logo || {}) },
+          social: { ...state.social, ...(parsed.social || {}) },
+          security: { ...state.security, ...(parsed.security || {}) },
+          stats: Array.isArray(parsed.stats) ? parsed.stats : state.stats,
+          products: Array.isArray(parsed.products) ? parsed.products : state.products,
+          media: Array.isArray(parsed.media) ? parsed.media : state.media
+        };
+      }
+    } catch (e) { console.warn('Lexden Nova: failed to parse saved state', e); }
+    return state;
+  }
+
+  window.appState = loadState();
+
+  function saveState() {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(window.appState)); }
+    catch (e) { console.warn('Lexden Nova: failed to persist state', e); }
+  }
+
+  function loadHistory() {
+    try { return JSON.parse(localStorage.getItem(HISTORY_KEY)) || []; }
+    catch (e) { return []; }
+  }
+  let browsingHistory = loadHistory();
+  function saveHistory() {
+    try { localStorage.setItem(HISTORY_KEY, JSON.stringify(browsingHistory.slice(-60))); }
+    catch (e) { /* ignore */ }
+  }
+
+  /* ================= Utilities ================= */
+  function formatPrice(n) {
+    if (n === null || n === undefined || n === '') return '';
+    return '\u20a6' + Number(n).toLocaleString('en-NG');
+  }
+
+  function getYouTubeId(url) {
+    if (!url) return '';
+    const m = url.match(/(?:youtu\.be\/|v=|embed\/)([A-Za-z0-9_-]{11})/);
+    return m ? m[1] : '';
+  }
+
+  function placeholderDataUri(label) {
+    const initials = (label || 'LX').trim().split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase() || 'LX';
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300">'
+      + '<rect width="100%" height="100%" fill="#0c111a"/>'
+      + '<rect x="4" y="4" width="392" height="292" fill="none" stroke="#00d2ff" stroke-opacity="0.35"/>'
+      + '<text x="50%" y="52%" font-family="sans-serif" font-size="42" fill="#00d2ff" fill-opacity="0.65" text-anchor="middle" dominant-baseline="middle">' + initials + '</text>'
+      + '</svg>';
+    return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
+  }
+
+  function escapeHtml(str) {
+    return String(str == null ? '' : str).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  function toast(message, tone) {
+    const container = document.getElementById('toast-container');
+    if (!container) return;
+    const el = document.createElement('div');
+    const toneClass = tone === 'error' ? 'border-red-400/40 text-red-300' : 'border-cyan-400/30 text-slate-100';
+    el.className = 'toast-in glass ' + toneClass + ' border rounded-full px-5 py-2.5 text-xs font-heading pointer-events-auto';
+    el.textContent = message;
+    container.appendChild(el);
+    setTimeout(() => {
+      el.style.opacity = '0';
+      el.style.transition = 'opacity .3s';
+      setTimeout(() => el.remove(), 300);
+    }, 2600);
+  }
+
+  /* ================= Telemetry ================= */
+  let integrity = 100;
+  const telemetryEvents = [];
+  function logTelemetry(msg) {
+    const time = new Date().toLocaleTimeString('en-GB', { hour12: false });
+    telemetryEvents.unshift(time + ' \u2014 ' + msg);
+    telemetryEvents.length = Math.min(telemetryEvents.length, 4);
+    renderTelemetryLog();
+  }
+  function renderTelemetryLog() {
+    const el = document.getElementById('telemetry-log');
+    if (!el) return;
+    el.innerHTML = telemetryEvents.map(e => '<div class="truncate">' + escapeHtml(e) + '</div>').join('');
+  }
+  let telemetryTimer = null;
+  function tickTelemetry() {
+    if (document.hidden) return;
+    const latency = 8 + Math.round(Math.random() * 11);
+    if (integrity < 100) integrity += 1;
+    const jitter = (integrity === 100 && Math.random() > 0.85) ? -1 : 0;
+    const displayIntegrity = Math.max(96, Math.min(100, integrity + jitter));
+    const latEl = document.getElementById('telemetry-latency');
+    const intEl = document.getElementById('telemetry-integrity');
+    if (latEl) latEl.textContent = latency + 'ms';
+    if (intEl) intEl.textContent = displayIntegrity + '%';
+  }
+  function reportSelfHeal(label) {
+    integrity = Math.max(92, integrity - (3 + Math.round(Math.random() * 3)));
+    logTelemetry('Self-healed asset: ' + label);
+  }
+
+  /* ================= Recommendation Engine ================= */
+  function trackInteraction(productId) {
+    const product = window.appState.products.find(p => p.id === productId);
+    if (!product) return;
+    (product.tags || []).forEach(tag => browsingHistory.push(tag));
+    saveHistory();
+    renderRecommended();
+  }
+
+  function scoreProducts(tagsWanted) {
+    const freq = {};
+    tagsWanted.forEach(tag => { freq[tag] = (freq[tag] || 0) + 1; });
+    return window.appState.products
+      .map(p => ({ product: p, score: (p.tags || []).reduce((sum, t) => sum + (freq[t] || 0), 0) }))
+      .filter(s => s.score > 0)
+      .sort((a, b) => b.score - a.score);
+  }
+
+  function renderRecommended() {
+    const track = document.getElementById('recommended-track');
+    const empty = document.getElementById('recommended-empty');
+    if (!track || !empty) return;
+    const scored = scoreProducts(browsingHistory).slice(0, 6);
+    if (scored.length === 0) {
+      track.innerHTML = '';
+      empty.classList.remove('hidden');
+      return;
+    }
+    empty.classList.add('hidden');
+    track.innerHTML = scored.map(s => productCardHTML(s.product, true)).join('');
+  }
+
+  /* ================= Rendering: Logo / Social ================= */
+  function renderLogo() {
+    const logo = window.appState.logo;
+    let inner;
+    if (logo.type === 'image' && logo.imageUrl) {
+      inner = '<img src="' + escapeHtml(logo.imageUrl) + '" alt="Lexden Nova" class="h-8 w-auto" data-fallback-label="Lexden Nova">';
+    } else if (logo.type === 'svg' && logo.svg) {
+      inner = logo.svg;
+    } else {
+      inner = '<span class="font-display text-base md:text-lg tracking-wide silver-text">' + escapeHtml(logo.text || 'LEXDEN NOVA') + '</span>';
+    }
+    const desktop = document.getElementById('brand-desktop');
+    const mobile = document.getElementById('brand-mobile');
+    const footer = document.getElementById('brand-footer');
+    if (desktop) desktop.innerHTML = inner;
+    if (mobile) mobile.innerHTML = inner;
+    if (footer) footer.innerHTML = inner;
+  }
+
+  function socialIconsHTML() {
+    const social = window.appState.social;
+    const items = [
+      { icon: 'twitter', url: social.twitter, label: 'Twitter / X' },
+      { icon: 'instagram', url: social.instagram, label: 'Instagram' },
+      { icon: 'facebook', url: social.facebook, label: 'Facebook' },
+      { icon: 'message-circle', url: social.whatsapp, label: 'WhatsApp' }
+    ].filter(i => i.url);
+    return items.map(i => '<a href="' + escapeHtml(i.url) + '" target="_blank" rel="noopener" aria-label="' + escapeHtml(i.label) + '" class="text-slate-500 hover:text-cyan-400 transition-colors duration-300"><i data-lucide="' + i.icon + '" class="w-4 h-4" aria-hidden="true"></i></a>').join('');
+  }
+  function renderSocial() {
+    const desktop = document.getElementById('social-desktop');
+    const footer = document.getElementById('social-footer');
+    if (desktop) desktop.innerHTML = socialIconsHTML();
+    if (footer) footer.innerHTML = socialIconsHTML();
+    if (window.lucide) lucide.createIcons();
+  }
+
+  /* ================= Rendering: Stats ================= */
+  function statCardHTML(stat) {
+    return '<div class="stat-card glass border border-white/5 rounded-2xl p-5 md:p-6 text-center reveal" data-value="' + stat.value + '" data-suffix="' + escapeHtml(stat.suffix || '') + '">'
+      + '<p class="font-display text-3xl md:text-4xl text-glow mb-1"><span class="stat-num">0</span>' + escapeHtml(stat.suffix || '') + '</p>'
+      + '<p class="text-xs md:text-sm text-slate-400 font-heading">' + escapeHtml(stat.label) + '</p>'
+      + '</div>';
+  }
+  function renderStats() {
+    const grid = document.getElementById('stats-grid');
+    if (grid) grid.innerHTML = window.appState.stats.map(statCardHTML).join('');
+    observeReveals();
+  }
+
+  function animateCounter(el) {
+    const target = Number(el.dataset.value) || 0;
+    const numEl = el.querySelector('.stat-num');
+    if (!numEl) return;
+    const isDecimal = String(target).includes('.');
+    const duration = 1400;
+    const start = performance.now();
+    function step(now) {
+      const progress = Math.min(1, (now - start) / duration);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      const current = target * eased;
+      numEl.textContent = isDecimal ? current.toFixed(1) : Math.round(current).toLocaleString('en-NG');
+      if (progress < 1) requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
+  }
+
+  /* ================= Rendering: Media ================= */
+  function mediaCardHTML(media) {
+    const product = window.appState.products.find(p => p.id === media.productId);
+    let visual;
+    if (media.type === 'youtube') {
+      const vid = getYouTubeId(media.url);
+      visual = '<iframe src="https://www.youtube.com/embed/' + vid + '" class="w-full h-full" loading="lazy" allowfullscreen title="' + escapeHtml(media.caption) + '"></iframe>';
+    } else {
+      visual = '<img src="' + escapeHtml(media.url) + '" alt="' + escapeHtml(media.caption) + '" class="w-full h-full object-cover" loading="lazy" data-fallback-label="' + escapeHtml(media.caption).slice(0, 24) + '">';
+    }
+    const linkButtons = product
+      ? '<div class="flex gap-3">'
+        + '<a href="product.html?code=' + encodeURIComponent(product.id) + '" class="flex-1 text-center text-xs font-heading tracking-wide px-4 py-2.5 rounded-full border border-cyan-400/40 text-cyan-400 hover:bg-cyan-400/10 transition-all duration-300">Learn More</a>'
+        + '<button data-action="get-now" data-product-id="' + escapeHtml(product.id) + '" class="flex-1 text-xs font-heading tracking-wide px-4 py-2.5 rounded-full bg-cyan-400 text-slate-950 font-semibold hover:shadow-neon transition-all duration-300">Get Now</button>'
+        + '</div>'
+      : '';
+    return '<article class="glass rounded-2xl overflow-hidden border border-white/5 hover:border-cyan-400/30 transition-colors duration-300 reveal">'
+      + '<div class="aspect-video bg-black/40">' + visual + '</div>'
+      + '<div class="p-5"><p class="text-sm text-slate-400 mb-4">' + escapeHtml(media.caption) + '</p>' + linkButtons + '</div>'
+      + '</article>';
+  }
+  function renderMedia() {
+    const grid = document.getElementById('media-grid');
+    if (grid) grid.innerHTML = window.appState.media.map(mediaCardHTML).join('');
+    observeReveals();
+  }
+
+  /* ================= Rendering: Products ================= */
+  function isOnSale(product) {
+    return product.salePrice !== null && product.salePrice !== undefined && product.salePrice !== '' && Number(product.salePrice) < Number(product.price);
+  }
+
+  function productCardHTML(product, compact) {
+    const onSale = isOnSale(product);
+    const saleBadge = onSale ? '<span class="shrink-0 text-[10px] font-heading px-2 py-0.5 rounded-full bg-plasma/15 text-plasma border border-plasma/30">SALE</span>' : '';
+    const priceHtml = onSale
+      ? '<span class="text-slate-500 line-through text-xs mr-2">' + formatPrice(product.price) + '</span><span class="text-cyan-400 font-heading font-semibold text-sm">' + formatPrice(product.salePrice) + '</span>'
+      : '<span class="text-slate-100 font-heading font-semibold text-sm">' + formatPrice(product.price) + '</span>';
+    const description = !compact ? '<p class="text-sm text-slate-400 mb-4 line-clamp-2">' + escapeHtml(product.description) + '</p>' : '';
+    const sizeClass = compact ? 'min-w-[240px] max-w-[240px] snap-start' : '';
+    return '<article id="product-' + escapeHtml(product.id) + '" class="product-card glass rounded-2xl border border-white/5 hover:border-cyan-400/40 transition-colors duration-300 overflow-hidden flex flex-col reveal ' + sizeClass + '">'
+      + '<div class="aspect-[4/3] bg-black/40 overflow-hidden"><img src="' + escapeHtml(product.image) + '" alt="' + escapeHtml(product.name) + '" class="w-full h-full object-cover" loading="lazy" data-fallback-label="' + escapeHtml(product.name) + '"></div>'
+      + '<div class="p-5 flex flex-col flex-1">'
+      + '<div class="flex items-start justify-between gap-2 mb-1.5"><h3 class="font-heading text-slate-100 font-semibold leading-snug text-sm">' + escapeHtml(product.name) + '</h3>' + saleBadge + '</div>'
+      + '<p class="text-[11px] text-slate-500 mb-3 tracking-wide">' + escapeHtml(product.id) + '</p>'
+      + description
+      + '<div class="mt-auto flex items-center justify-between gap-2"><div>' + priceHtml + '</div>'
+      + '<a href="product.html?code=' + encodeURIComponent(product.id) + '" class="text-[11px] font-heading px-3.5 py-2 rounded-full border border-white/10 text-slate-300 hover:border-cyan-400/50 hover:text-cyan-400 transition-colors duration-300 shrink-0" data-action="view-product-link" data-product-id="' + escapeHtml(product.id) + '">Details</a>'
+      + '</div></div></article>';
+  }
+  function renderProducts() {
+    const grid = document.getElementById('products-grid');
+    if (grid) grid.innerHTML = window.appState.products.map(p => productCardHTML(p, false)).join('');
+    observeReveals();
+  }
+
+  /* ================= Self-healing images ================= */
+  document.addEventListener('error', (e) => {
+    const t = e.target;
+    if (t && t.tagName === 'IMG' && !t.dataset.healed) {
+      t.dataset.healed = '1';
+      const label = t.getAttribute('data-fallback-label') || t.alt || 'asset';
+      t.src = placeholderDataUri(label);
+      reportSelfHeal(label);
+    }
+  }, true);
+
+  /* ================= Navigation ================= */
+  function scrollToSection(id) {
+    const el = document.getElementById(id);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  /* ================= Scroll reveal ================= */
+  let revealObserver = null;
+  function observeReveals() {
+    if (!revealObserver) return;
+    document.querySelectorAll('.reveal:not(.is-visible)').forEach(el => revealObserver.observe(el));
+  }
+  function initRevealObserver() {
+    if (!('IntersectionObserver' in window)) {
+      document.querySelectorAll('.reveal').forEach(el => el.classList.add('is-visible'));
+      return;
+    }
+    revealObserver = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('is-visible');
+          if (entry.target.classList.contains('stat-card')) animateCounter(entry.target);
+          revealObserver.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.2 });
+    observeReveals();
+  }
+
+  /* ================= Custom cursor + 3D core tilt (desktop only) ================= */
+  function initDesktopFlourishes() {
+    const isFinePointer = window.matchMedia('(pointer: fine)').matches;
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (!isFinePointer || reducedMotion || window.innerWidth < 768) return;
+
+    document.body.classList.add('has-fine-pointer');
+    const dot = document.getElementById('cursor-dot');
+    const ring = document.getElementById('cursor-ring');
+    let mouseX = 0, mouseY = 0, ringX = 0, ringY = 0;
+    document.addEventListener('mousemove', (e) => {
+      mouseX = e.clientX; mouseY = e.clientY;
+      dot.style.transform = 'translate(' + (mouseX - 3) + 'px,' + (mouseY - 3) + 'px)';
+      const hovered = e.target.closest('button, a, input, textarea, select, [data-action]');
+      ring.classList.toggle('is-active', !!hovered);
+    });
+    function tickRing() {
+      ringX += (mouseX - ringX) * 0.18;
+      ringY += (mouseY - ringY) * 0.18;
+      ring.style.transform = 'translate(' + (ringX - 16) + 'px,' + (ringY - 16) + 'px)';
+      requestAnimationFrame(tickRing);
+    }
+    requestAnimationFrame(tickRing);
+
+    const stage = document.getElementById('hero');
+    const assembly = document.getElementById('core-assembly');
+    if (stage && assembly) {
+      stage.addEventListener('mousemove', (e) => {
+        const rect = stage.getBoundingClientRect();
+        const px = (e.clientX - rect.left) / rect.width - 0.5;
+        const py = (e.clientY - rect.top) / rect.height - 0.5;
+        assembly.style.transform = 'rotateY(' + (px * 14) + 'deg) rotateX(' + (py * -14) + 'deg)';
+      });
+      stage.addEventListener('mouseleave', () => { assembly.style.transform = 'rotateY(0deg) rotateX(0deg)'; });
+    }
+  }
+
+  function initEmberField() {
+    const field = document.getElementById('ember-field');
+    if (!field || window.matchMedia('(prefers-reduced-motion: reduce)').matches || window.innerWidth < 768) return;
+    for (let i = 0; i < 10; i++) {
+      const em = document.createElement('span');
+      em.className = 'ember';
+      const dx = (Math.random() * 60 - 30).toFixed(0) + 'px';
+      em.style.setProperty('--dx', dx);
+      em.style.left = (40 + Math.random() * 20) + '%';
+      em.style.animationDuration = (3 + Math.random() * 2.5) + 's';
+      em.style.animationDelay = (Math.random() * 4) + 's';
+      field.appendChild(em);
+    }
+  }
+
+  /* ================= Admin: Passkey Gate ================= */
+  function openPasskeyModal() {
+    document.getElementById('passkey-input').value = '';
+    document.getElementById('passkey-error').classList.add('hidden');
+    document.getElementById('passkey-modal').classList.remove('hidden');
+    document.getElementById('passkey-input').focus();
+  }
+  function closePasskeyModal() { document.getElementById('passkey-modal').classList.add('hidden'); }
+  function submitPasskey() {
+    const val = document.getElementById('passkey-input').value;
+    if (val === window.appState.security.passkey) {
+      closePasskeyModal();
+      openAdminConsole();
+    } else {
+      document.getElementById('passkey-error').classList.remove('hidden');
+    }
+  }
+
+  /* ================= Admin: Console ================= */
+  function openAdminConsole() {
+    populateBrandForm();
+    renderInventoryList();
+    renderStatsEditor();
+    document.getElementById('admin-console').classList.remove('hidden');
+    if (window.lucide) lucide.createIcons();
+  }
+  function closeAdminConsole() { document.getElementById('admin-console').classList.add('hidden'); }
+
+  function switchAdminTab(tab) {
+    document.querySelectorAll('.admin-panel').forEach(p => p.classList.add('hidden'));
+    const panel = document.getElementById('admin-panel-' + tab);
+    if (panel) panel.classList.remove('hidden');
+    document.querySelectorAll('.admin-tab-btn').forEach(b => {
+      const active = b.dataset.tab === tab;
+      b.classList.toggle('tab-active', active);
+      b.classList.toggle('text-slate-400', !active);
+      b.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+  }
+
+  function populateBrandForm() {
+    const logo = window.appState.logo;
+    const social = window.appState.social;
+    document.getElementById('brand-logo-type').value = logo.type;
+    document.getElementById('brand-logo-text').value = logo.text || '';
+    document.getElementById('brand-logo-image').value = logo.imageUrl || '';
+    document.getElementById('brand-logo-svg').value = logo.svg || '';
+    document.getElementById('brand-twitter').value = social.twitter || '';
+    document.getElementById('brand-instagram').value = social.instagram || '';
+    document.getElementById('brand-facebook').value = social.facebook || '';
+    document.getElementById('brand-whatsapp').value = social.whatsapp || '';
+  }
+
+  function saveBrand() {
+    window.appState.logo = {
+      type: document.getElementById('brand-logo-type').value,
+      text: document.getElementById('brand-logo-text').value.trim(),
+      imageUrl: document.getElementById('brand-logo-image').value.trim(),
+      svg: document.getElementById('brand-logo-svg').value.trim()
+    };
+    window.appState.social = {
+      twitter: document.getElementById('brand-twitter').value.trim(),
+      instagram: document.getElementById('brand-instagram').value.trim(),
+      facebook: document.getElementById('brand-facebook').value.trim(),
+      whatsapp: document.getElementById('brand-whatsapp').value.trim()
+    };
+    saveState();
+    renderLogo();
+    renderSocial();
+    toast('Brand updated.');
+  }
+
+  /* ================= Admin: Statistics ================= */
+  function renderStatsEditor() {
+    const wrap = document.getElementById('stats-editor');
+    if (!wrap) return;
+    wrap.innerHTML = window.appState.stats.map((s, idx) =>
+      '<div class="grid grid-cols-1 md:grid-cols-[2fr_1fr_1fr] gap-3 items-end" data-stat-row="' + idx + '">'
+      + '<label class="block text-xs text-slate-400">Label<input type="text" class="stat-label-input mt-1.5 w-full rounded-lg border border-white/10 bg-panel px-3 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-cyan-400/60" value="' + escapeHtml(s.label) + '"></label>'
+      + '<label class="block text-xs text-slate-400">Value<input type="number" step="any" class="stat-value-input mt-1.5 w-full rounded-lg border border-white/10 bg-panel px-3 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-cyan-400/60" value="' + s.value + '"></label>'
+      + '<label class="block text-xs text-slate-400">Suffix<input type="text" class="stat-suffix-input mt-1.5 w-full rounded-lg border border-white/10 bg-panel px-3 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-cyan-400/60" value="' + escapeHtml(s.suffix || '') + '" placeholder="+, %, none"></label>'
+      + '</div>'
+    ).join('');
+  }
+  function saveStats() {
+    const rows = document.querySelectorAll('[data-stat-row]');
+    const stats = [];
+    rows.forEach((row, idx) => {
+      const label = row.querySelector('.stat-label-input').value.trim();
+      const value = Number(row.querySelector('.stat-value-input').value) || 0;
+      const suffix = row.querySelector('.stat-suffix-input').value.trim();
+      if (label) stats.push({ id: 's' + (idx + 1), label, value, suffix });
+    });
+    if (stats.length === 0) { toast('Add at least one statistic.', 'error'); return; }
+    window.appState.stats = stats;
+    saveState();
+    renderStats();
+    toast('Statistics updated.');
+  }
+
+  /* ================= Admin: Security ================= */
+  function changePasskey() {
+    const current = document.getElementById('sec-current').value;
+    const next = document.getElementById('sec-new').value;
+    const confirmVal = document.getElementById('sec-confirm').value;
+    if (current !== window.appState.security.passkey) { toast('Current passkey is incorrect.', 'error'); return; }
+    if (!next || next.length < 4) { toast('New passkey must be at least 4 characters.', 'error'); return; }
+    if (next !== confirmVal) { toast('New passkey and confirmation do not match.', 'error'); return; }
+    window.appState.security.passkey = next;
+    saveState();
+    document.getElementById('sec-current').value = '';
+    document.getElementById('sec-new').value = '';
+    document.getElementById('sec-confirm').value = '';
+    toast('Passkey updated.');
+  }
+
+  /* ================= Admin: Data Backup ================= */
+  function downloadBlob(content, filename, type) {
+    const blob = new Blob([content], { type });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  }
+  function exportJsonData() {
+    downloadBlob(JSON.stringify(window.appState, null, 2), 'lexden-nova-data.json', 'application/json');
+    toast('Data exported.');
+  }
+  function importJsonData(file) {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(reader.result);
+        window.appState = {
+          ...window.appState,
+          ...parsed,
+          logo: { ...window.appState.logo, ...(parsed.logo || {}) },
+          social: { ...window.appState.social, ...(parsed.social || {}) },
+          security: { ...window.appState.security, ...(parsed.security || {}) },
+          stats: Array.isArray(parsed.stats) ? parsed.stats : window.appState.stats,
+          products: Array.isArray(parsed.products) ? parsed.products : window.appState.products,
+          media: Array.isArray(parsed.media) ? parsed.media : window.appState.media
+        };
+        saveState();
+        renderLogo(); renderSocial(); renderMedia(); renderProducts(); renderRecommended(); renderStats();
+        populateBrandForm(); renderInventoryList(); renderStatsEditor();
+        toast('Data imported.');
+      } catch (e) {
+        toast('Import failed: invalid JSON file.', 'error');
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  /* ================= Admin: Inventory CRUD ================= */
+  let editingProductId = null;
+  const PRODUCT_FORM_FIELDS = ['pf-name', 'pf-description', 'pf-price', 'pf-saleprice', 'pf-code', 'pf-link', 'pf-image', 'pf-images', 'pf-video', 'pf-tags'];
+
+  function clearProductForm() {
+    editingProductId = null;
+    PRODUCT_FORM_FIELDS.forEach(id => { document.getElementById(id).value = ''; });
+    document.getElementById('pf-cancel').classList.add('hidden');
+    document.getElementById('pf-submit').textContent = 'Add Product';
+  }
+
+  function fillProductForm(product) {
+    editingProductId = product.id;
+    document.getElementById('pf-name').value = product.name;
+    document.getElementById('pf-description').value = product.description;
+    document.getElementById('pf-price').value = product.price;
+    document.getElementById('pf-saleprice').value = product.salePrice === null || product.salePrice === undefined ? '' : product.salePrice;
+    document.getElementById('pf-code').value = product.id;
+    document.getElementById('pf-link').value = product.link;
+    document.getElementById('pf-image').value = product.image;
+    document.getElementById('pf-images').value = (product.images || []).join(', ');
+    document.getElementById('pf-video').value = product.video || '';
+    document.getElementById('pf-tags').value = (product.tags || []).join(', ');
+    document.getElementById('pf-cancel').classList.remove('hidden');
+    document.getElementById('pf-submit').textContent = 'Save Changes';
+    document.getElementById('admin-panel-inventory').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function submitProductForm() {
+    const name = document.getElementById('pf-name').value.trim();
+    const code = document.getElementById('pf-code').value.trim();
+    const priceRaw = document.getElementById('pf-price').value;
+    if (!name || !code || priceRaw === '') {
+      toast('Name, item code, and price are required.', 'error');
+      return;
+    }
+    const salePriceRaw = document.getElementById('pf-saleprice').value;
+    const product = {
+      id: code,
+      name: name,
+      description: document.getElementById('pf-description').value.trim(),
+      price: Number(priceRaw),
+      salePrice: salePriceRaw === '' ? null : Number(salePriceRaw),
+      link: document.getElementById('pf-link').value.trim(),
+      image: document.getElementById('pf-image').value.trim() || placeholderDataUri(name),
+      images: document.getElementById('pf-images').value.split(',').map(s => s.trim()).filter(Boolean),
+      video: document.getElementById('pf-video').value.trim(),
+      tags: document.getElementById('pf-tags').value.split(',').map(t => t.trim()).filter(Boolean)
+    };
+
+    if (editingProductId) {
+      const idx = window.appState.products.findIndex(p => p.id === editingProductId);
+      if (idx === -1) { toast('Original product not found.', 'error'); return; }
+      if (editingProductId !== code && window.appState.products.some(p => p.id === code)) {
+        toast('Item code already in use.', 'error');
+        return;
+      }
+      if (editingProductId !== code) {
+        window.appState.media.forEach(m => { if (m.productId === editingProductId) m.productId = code; });
+      }
+      window.appState.products[idx] = product;
+    } else {
+      if (window.appState.products.some(p => p.id === code)) {
+        toast('Item code already in use.', 'error');
+        return;
+      }
+      window.appState.products.push(product);
+    }
+
+    saveState();
+    renderProducts();
+    renderMedia();
+    renderRecommended();
+    renderInventoryList();
+    clearProductForm();
+    toast('Product saved.');
+  }
+
+  function deleteProduct(id) {
+    window.appState.products = window.appState.products.filter(p => p.id !== id);
+    window.appState.media = window.appState.media.filter(m => m.productId !== id);
+    saveState();
+    renderProducts();
+    renderMedia();
+    renderRecommended();
+    renderInventoryList();
+    if (editingProductId === id) clearProductForm();
+    toast('Product removed.');
+  }
+
+  function renderInventoryList() {
+    const list = document.getElementById('inventory-list');
+    if (!list) return;
+    list.innerHTML = window.appState.products.map(p =>
+      '<div class="flex items-center justify-between gap-3 glass border border-white/5 rounded-xl px-4 py-3">'
+      + '<div class="min-w-0"><p class="text-sm text-slate-200 font-heading truncate">' + escapeHtml(p.name) + '</p>'
+      + '<p class="text-xs text-slate-500">' + escapeHtml(p.id) + ' \u00b7 ' + formatPrice(p.price) + '</p></div>'
+      + '<div class="flex items-center gap-2 shrink-0">'
+      + '<a href="product.html?code=' + encodeURIComponent(p.id) + '" target="_blank" rel="noopener" class="text-xs px-3 py-1.5 rounded-full border border-white/10 text-slate-300 hover:border-cyan-400/50 hover:text-cyan-400 transition-colors duration-300">View</a>'
+      + '<button data-action="edit-product" data-product-id="' + escapeHtml(p.id) + '" class="text-xs px-3 py-1.5 rounded-full border border-white/10 text-slate-300 hover:border-cyan-400/50 hover:text-cyan-400 transition-colors duration-300">Edit</button>'
+      + '<button data-action="delete-product" data-product-id="' + escapeHtml(p.id) + '" class="text-xs px-3 py-1.5 rounded-full border border-red-400/20 text-red-300/80 hover:bg-red-400/10 transition-colors duration-300">Delete</button>'
+      + '</div></div>'
+    ).join('');
+  }
+
+  /* ================= Admin: Export baked files ================= */
+  function closeAllOverlays() {
+    document.getElementById('admin-console').classList.add('hidden');
+    document.getElementById('passkey-modal').classList.add('hidden');
+  }
+  function bakeStateInto(snapshot) {
+    const startMarker = '// === DEFAULT_STATE_START ===';
+    const endMarker = '// === DEFAULT_STATE_END ===';
+    const startIdx = snapshot.indexOf(startMarker);
+    const endIdx = snapshot.indexOf(endMarker);
+    if (startIdx === -1 || endIdx === -1) return null;
+    const before = snapshot.slice(0, startIdx + startMarker.length);
+    const after = snapshot.slice(endIdx);
+    const newStateBlock = '\n  const DEFAULT_STATE = ' + JSON.stringify(window.appState, null, 2) + ';\n  ';
+    return '<!DOCTYPE html>\n' + before + newStateBlock + after;
+  }
+  function exportIndexHtml() {
+    closeAllOverlays();
+    const snapshot = document.documentElement.outerHTML;
+    const finalHtml = bakeStateInto(snapshot);
+    if (!finalHtml) { toast('Export failed: state markers not found.', 'error'); return; }
+    downloadBlob(finalHtml, 'index.html', 'text/html');
+    toast('Updated index.html downloaded.');
+  }
+  function exportProductTemplate() {
+    if (!window.__productTemplateHtml) { toast('Product template not loaded yet — try again in a moment.', 'error'); return; }
+    const startMarker = '// === DEFAULT_STATE_START ===';
+    const endMarker = '// === DEFAULT_STATE_END ===';
+    const snapshot = window.__productTemplateHtml;
+    const startIdx = snapshot.indexOf(startMarker);
+    const endIdx = snapshot.indexOf(endMarker);
+    if (startIdx === -1 || endIdx === -1) { toast('Export failed: template markers not found.', 'error'); return; }
+    const before = snapshot.slice(0, startIdx + startMarker.length);
+    const after = snapshot.slice(endIdx);
+    const newStateBlock = '\n  const DEFAULT_STATE = ' + JSON.stringify(window.appState, null, 2) + ';\n  ';
+    downloadBlob('<!DOCTYPE html>\n' + before + newStateBlock + after, 'product.html', 'text/html');
+    toast('Updated product.html downloaded.');
+  }
+
+  /* ================= Nova Assistant ================= */
+  const assistantSeen = new Set();
+  function assistantSay(html) {
+    const log = document.getElementById('assistant-log');
+    const bubble = document.createElement('div');
+    bubble.className = 'glass border border-white/5 rounded-xl px-3.5 py-2.5 text-slate-300';
+    bubble.innerHTML = html;
+    log.appendChild(bubble);
+    log.scrollTop = log.scrollHeight;
+  }
+  function renderAssistantChips() {
+    const chips = document.getElementById('assistant-chips');
+    const allTags = [...new Set(window.appState.products.flatMap(p => p.tags || []))].slice(0, 6);
+    chips.innerHTML = allTags.map(t => '<button type="button" data-action="assistant-chip" data-tag="' + escapeHtml(t) + '" class="text-[11px] font-heading px-3 py-1.5 rounded-full border border-white/10 text-slate-400 hover:border-cyan-400/50 hover:text-cyan-400 transition-colors duration-300">' + escapeHtml(t) + '</button>').join('');
+  }
+  function assistantRespond(queryRaw) {
+    const query = queryRaw.trim().toLowerCase();
+    if (!query) return;
+    if (!assistantSeen.size) {
+      assistantSay('Got it — here\'s what Nova found for <strong>&ldquo;' + escapeHtml(queryRaw) + '&rdquo;</strong>:');
+    }
+    if (/contact|reach|whatsapp|talk|email/.test(query)) {
+      const wa = window.appState.social.whatsapp;
+      assistantSay(wa ? 'You can reach the team directly on <a href="' + escapeHtml(wa) + '" target="_blank" rel="noopener" class="text-cyan-400 underline">WhatsApp</a>.' : 'Add a WhatsApp link in Admin → Brand Config so I can point people there.');
+      return;
+    }
+    const words = query.split(/\s+/).filter(Boolean);
+    const matches = window.appState.products.filter(p => {
+      const haystack = (p.name + ' ' + p.description + ' ' + (p.tags || []).join(' ')).toLowerCase();
+      return words.some(w => haystack.includes(w));
+    }).slice(0, 4);
+    if (matches.length === 0) {
+      const allTags = [...new Set(window.appState.products.flatMap(p => p.tags || []))];
+      assistantSay('No exact matches yet. Try a keyword like ' + allTags.slice(0, 4).map(t => '<strong>' + escapeHtml(t) + '</strong>').join(', ') + '.');
+      return;
+    }
+    assistantSay('<div class="space-y-2">' + matches.map(p =>
+      '<a href="product.html?code=' + encodeURIComponent(p.id) + '" class="block glass border border-white/5 hover:border-cyan-400/40 rounded-lg px-3 py-2 transition-colors duration-300">'
+      + '<p class="text-slate-100 font-heading text-xs">' + escapeHtml(p.name) + '</p>'
+      + '<p class="text-slate-500 text-[11px]">' + formatPrice(isOnSale(p) ? p.salePrice : p.price) + '</p></a>'
+    ).join('') + '</div>');
+  }
+  function toggleAssistant() {
+    const panel = document.getElementById('assistant-panel');
+    const fab = document.getElementById('assistant-fab');
+    const willOpen = panel.classList.contains('hidden');
+    panel.classList.toggle('hidden');
+    fab.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+    if (willOpen) {
+      if (!assistantSeen.size) {
+        assistantSay('Hi, I\'m Nova. Tell me what you\'re looking for, or tap a tag below.');
+      }
+      renderAssistantChips();
+      document.getElementById('assistant-input').focus();
+    }
+  }
+
+  /* ================= Event Delegation ================= */
+  document.addEventListener('click', (e) => {
+    const target = e.target.closest('[data-action]');
+    if (!target) return;
+    const action = target.dataset.action;
+    switch (action) {
+      case 'nav':
+        scrollToSection(target.dataset.target);
+        break;
+      case 'open-admin-gate':
+        openPasskeyModal();
+        break;
+      case 'close-passkey':
+        closePasskeyModal();
+        break;
+      case 'close-admin':
+        closeAdminConsole();
+        break;
+      case 'admin-tab':
+        switchAdminTab(target.dataset.tab);
+        break;
+      case 'save-brand':
+        saveBrand();
+        break;
+      case 'save-stats':
+        saveStats();
+        break;
+      case 'change-passkey':
+        changePasskey();
+        break;
+      case 'export-json':
+        exportJsonData();
+        break;
+      case 'export-index':
+        exportIndexHtml();
+        break;
+      case 'export-product-template':
+        exportProductTemplate();
+        break;
+      case 'submit-product':
+        submitProductForm();
+        break;
+      case 'cancel-edit-product':
+        clearProductForm();
+        break;
+      case 'edit-product': {
+        const p = window.appState.products.find(p => p.id === target.dataset.productId);
+        if (p) fillProductForm(p);
+        break;
+      }
+      case 'delete-product':
+        if (confirm('Remove this product? This cannot be undone.')) deleteProduct(target.dataset.productId);
+        break;
+      case 'view-product-link':
+        trackInteraction(target.dataset.productId);
+        break;
+      case 'get-now': {
+        trackInteraction(target.dataset.productId);
+        const product = window.appState.products.find(p => p.id === target.dataset.productId);
+        if (product && product.link) window.open(product.link, '_blank', 'noopener');
+        break;
+      }
+      case 'toggle-assistant':
+        toggleAssistant();
+        break;
+      case 'assistant-chip':
+        document.getElementById('assistant-input').value = target.dataset.tag;
+        assistantRespond(target.dataset.tag);
+        break;
+      default:
+        break;
+    }
+  });
+
+  document.getElementById('passkey-form').addEventListener('submit', (e) => { e.preventDefault(); submitPasskey(); });
+  document.getElementById('assistant-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const input = document.getElementById('assistant-input');
+    const val = input.value;
+    if (!val.trim()) return;
+    assistantSay('<strong>' + escapeHtml(val) + '</strong>');
+    assistantRespond(val);
+    input.value = '';
+  });
+  document.getElementById('import-json-input').addEventListener('change', (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (file) importJsonData(file);
+    e.target.value = '';
+  });
+
+  document.querySelectorAll('#passkey-modal, #admin-console').forEach(modal => {
+    modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.add('hidden'); });
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (!document.getElementById('passkey-modal').classList.contains('hidden')) closePasskeyModal();
+    if (!document.getElementById('assistant-panel').classList.contains('hidden')) toggleAssistant();
+  });
+
+  /* ================= Structured data (SEO) ================= */
+  function injectStructuredData() {
+    const data = {
+      '@context': 'https://schema.org',
+      '@type': 'Organization',
+      name: window.appState.logo.text || 'Lexden Nova',
+      url: 'https://www.lexdendigital.com/',
+      sameAs: Object.values(window.appState.social).filter(Boolean)
+    };
+    const script = document.createElement('script');
+    script.type = 'application/ld+json';
+    script.textContent = JSON.stringify(data);
+    document.head.appendChild(script);
+  }
+
+  /* ================= Preload product template for export ================= */
+  function preloadProductTemplate() {
+    fetch('product.html').then(r => r.ok ? r.text() : null).then(html => {
+      if (html) window.__productTemplateHtml = html;
+    }).catch(() => { /* offline / file:// context — export-product-template will warn if used */ });
+  }
+
+  /* ================= Init ================= */
+  function init() {
+    const yearEl = document.getElementById('footer-year');
+    if (yearEl) yearEl.textContent = new Date().getFullYear();
+    renderLogo();
+    renderSocial();
+    renderStats();
+    renderMedia();
+    renderProducts();
+    renderRecommended();
+    renderTelemetryLog();
+    injectStructuredData();
+    tickTelemetry();
+    telemetryTimer = setInterval(tickTelemetry, 2600);
+    initRevealObserver();
+    initEmberField();
+    initDesktopFlourishes();
+    preloadProductTemplate();
+    if (window.lucide) lucide.createIcons();
+    const loader = document.getElementById('boot-loader');
+    if (loader) setTimeout(() => { loader.classList.add('loader-hide'); setTimeout(() => loader.remove(), 550); }, 350);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();
+</script>
+</body>
+</html>
