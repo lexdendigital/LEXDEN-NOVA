@@ -123,4 +123,5 @@ export default async function handler(request) {
     return new Response(JSON.stringify({ text: "Something went wrong reaching Gemini. Try again in a moment." }), {
       status: 200, headers: { "Content-Type": "application/json", ...corsHeaders(origin) },
     });                                                 
-    
+  }
+}  
