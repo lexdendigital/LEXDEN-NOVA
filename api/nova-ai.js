@@ -2,8 +2,7 @@ export const config = {
   runtime: 'edge', // Runs on Vercel's global edge network
 };
 
-const GEMINI_API_KEY = "GEMINI_API_KEY";
-const GEMINI_MODEL = "gemini-1.5-flash";
+const GEMINI_MODEL = "gemini-2.5-flash";
 
 const ALLOWED_ORIGINS = [
   "https://lexdendigital.github.io",
@@ -72,7 +71,7 @@ export default async function handler(request) {
   }
 
   // Vercel reads Environment Variables from process.env
-  const apiKey = process.env.GEMINI_API_KEY || GEMINI_API_KEY;
+  const apiKey = process.env.GEMINI_API_KEY;
 
   if (!apiKey) {
     return new Response(JSON.stringify({ text: "Server is missing its API key — please configure GEMINI_API_KEY in Vercel settings." }), {
@@ -95,11 +94,11 @@ export default async function handler(request) {
               parts: [{ text: message.slice(0, 2000) }]
             }
           ],
-          system_instruction: {
+          systemInstruction: {
             parts: [{ text: buildSystemPrompt(context || {}) }]
           },
-          generation_config: {
-            max_output_tokens: 600
+          generationConfig: {
+            maxOutputTokens: 600
           }
         }),
       }
@@ -107,6 +106,26 @@ export default async function handler(request) {
 
     if (!geminiRes.ok) {
       const errText = await geminiRes.text();
+      console.error("Gemini API error:", geminiRes.status, errText);
+      return new Response(JSON.stringify({ text: "I couldn't reach my full brain just now — please try again shortly." }), {
+        status: 200, headers: { "Content-Type": "application/json", ...corsHeaders(origin) },
+      });
+    }
+
+    const data = await geminiRes.json();
+    const html = data.candidates?.[0]?.content?.parts?.[0]?.text || "Sorry, I couldn't generate a response.";
+
+    return new Response(JSON.stringify({ html }), {
+      headers: { "Content-Type": "application/json", ...corsHeaders(origin) },
+    });
+  } catch (err) {
+    console.error("Handler error:", err);
+    return new Response(JSON.stringify({ text: "Something went wrong reaching Gemini. Try again in a moment." }), {
+      status: 200, headers: { "Content-Type": "application/json", ...corsHeaders(origin) },
+    });
+  }
+                                                       }
+          const errText = await geminiRes.text();
       console.error("Gemini API error:", geminiRes.status, errText);
       return new Response(JSON.stringify({ text: "I couldn't reach my full brain just now — please try again shortly." }), {
         status: 200, headers: { "Content-Type": "application/json", ...corsHeaders(origin) },
