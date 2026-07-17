@@ -2,7 +2,7 @@ export const config = {
   runtime: 'edge', // Runs on Vercel's global edge network
 };
 
-const GEMINI_API_KEY = "AQ.Ab8RN6LkHDUfZN4OaDzqKbkocEawOiD0w3AspbD0trHbsFfe_A";
+const GEMINI_API_KEY = "GEMINI_API_KEY";
 const GEMINI_MODEL = "gemini-1.5-flash";
 
 const ALLOWED_ORIGINS = [
