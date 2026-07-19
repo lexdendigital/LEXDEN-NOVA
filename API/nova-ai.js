@@ -4,12 +4,27 @@ export const config = {
 
 const GEMINI_MODEL = "gemini-2.5-flash";
 
+// Exact origins that are always allowed (add your custom domain here if you buy one)
 const ALLOWED_ORIGINS = [
   "https://lexdendigital.github.io",
+  "https://lexden-nova.vercel.app",
 ];
 
+// Every Vercel preview/branch deployment gets its own random subdomain
+// (e.g. lexden-nova-8kjmtzjvj-lexdendigitals-projects.vercel.app), so instead
+// of listing each one, allow anything under your own project/team.
+function isAllowedOrigin(origin) {
+  if (ALLOWED_ORIGINS.includes(origin)) return true;
+  try {
+    const host = new URL(origin).hostname;
+    return host.startsWith("lexden-nova-") && host.endsWith("-lexdendigitals-projects.vercel.app");
+  } catch {
+    return false;
+  }
+}
+
 function corsHeaders(origin) {
-  const allow = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
+  const allow = isAllowedOrigin(origin) ? origin : ALLOWED_ORIGINS[0];
   return {
     "Access-Control-Allow-Origin": allow,
     "Access-Control-Allow-Methods": "POST, OPTIONS",
@@ -122,6 +137,7 @@ export default async function handler(request) {
     console.error("Handler error:", err);
     return new Response(JSON.stringify({ text: "Something went wrong reaching Gemini. Try again in a moment." }), {
       status: 200, headers: { "Content-Type": "application/json", ...corsHeaders(origin) },
-    });                                                 
+    });
   }
-}  
+}
+
