@@ -1,0 +1,42 @@
+rules_version = '2';
+
+// Firebase Storage rules for LEXDEN NOVA's admin media uploads
+// (Admin → Products → "upload a file" next to any Media slot).
+//
+// Same admin-email approach as firestore.rules. If the admin account is
+// ever recreated, update the literal email below AND in firestore.rules'
+// isAdmin() AND ADMIN_EMAIL in index.html — all three must match exactly.
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /products/{fileName} {
+      // Anyone can view product media (it's shown on the public storefront).
+      allow read: if true;
+      // Only the signed-in admin can upload/overwrite/delete, and files
+      // are capped at 25MB (also enforced client-side before upload).
+      allow write: if request.auth != null
+                   && request.auth.token.email == 'ruthanselem2@gmail.com'
+                   && request.resource.size < 25 * 1024 * 1024;
+    }
+
+    // PHASE 3: Product PDFs — for direct delivery after verified payment.
+    // Anyone can download (after payment verification triggers it client-side),
+    // but only admin can upload. Files are capped at 50MB.
+    match /products/pdfs/{fileName} {
+      allow read: if true;
+      allow write: if request.auth != null
+                   && request.auth.token.email == 'ruthanselem2@gmail.com'
+                   && request.resource.size < 50 * 1024 * 1024;
+    }
+
+    // Shopper profile pictures (Sign Up screen) — each signed-in user may
+    // only read/write files inside their own uid folder, capped at 8MB
+    // (also enforced client-side before upload).
+    match /avatars/{uid}/{fileName} {
+      allow read: if true;
+      allow write: if request.auth != null
+                   && request.auth.uid == uid
+                   && request.resource.size < 8 * 1024 * 1024;
+    }
+  }
+}
