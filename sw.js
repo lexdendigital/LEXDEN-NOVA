@@ -1,106 +1,100 @@
 /* LEXDEN NOVA — service worker
- * Scope: app-shell caching only. This file deliberately does NOT touch
- * anything that must always be fresh — Firestore reads/writes, the
- * /api/verify-paystack payment-verification call, the /api/nova-ai AI
- * assistant call, or the open.er-api.com exchange-rate lookup. Those are
- * all left to hit the network untouched (see shouldBypass() below).
- *
- * BUMP THIS on every deploy that changes index.html/manifest/icons —
- * it's the only thing that forces old caches to be dropped and a fresh
- * shell to be fetched. Forgetting to bump it means returning users can
- * keep seeing a stale cached shell indefinitely.
- */
-const CACHE_VERSION = 'nova-shell-v1';
+   Two jobs:
+   1. PWA app-shell caching (stale-while-revalidate) — installability +
+      fast repeat loads. Only the shell (this file's own cache) is
+      cached; product/catalog DATA always comes live from Firestore, never
+      from this cache, so shoppers never see stale prices/products.
+   2. Firebase Cloud Messaging background push — shows a system
+      notification when an "Important" feed post triggers a push and the
+      app isn't open/focused.
 
-// Precached app shell — kept intentionally short because this is a
-// single-file SPA; there is no separate bundled CSS/JS to list.
-const SHELL_ASSETS = [
+   *** BUMP CACHE_VERSION EVERY TIME YOU REDEPLOY index.html ***
+   Browsers can hold on to an old cached copy of the app shell otherwise —
+   this is almost always the real cause of "I edited it but my other
+   device doesn't show the change": the DATA (Firestore) synced fine, but
+   the CODE FILE on that other device's browser was still the cached one.
+   Bumping this version forces every device to fetch the new shell on next
+   load. */
+const CACHE_VERSION = 'nova-shell-v1';
+const SHELL_FILES = [
   './',
   './index.html',
   './manifest.json',
-  './icon-192.png',
-  './icon-512.png',
-  './icon-maskable-512.png',
 ];
-
-// Third-party origins that are safe to cache because they're static,
-// versioned-by-URL assets (fonts, the Paystack popup SDK) — never API
-// responses or anything containing live data.
-const CACHEABLE_CROSS_ORIGIN = [
-  'fonts.googleapis.com',
-  'fonts.gstatic.com',
-  'js.paystack.co',
-];
-
-// Anything matching these must NEVER be served from cache or intercepted —
-// always go straight to the network. This is the actual safety boundary.
-function shouldBypass(url) {
-  return (
-    url.hostname.includes('firestore.googleapis.com') ||
-    url.hostname.includes('firebaseinstallations.googleapis.com') ||
-    url.hostname.includes('firebaseappcheck.googleapis.com') ||
-    (url.hostname.includes('googleapis.com') && url.pathname.includes('identitytoolkit')) ||
-    url.hostname.includes('open.er-api.com') ||          // exchange rates — must always be live
-    url.pathname.includes('/api/verify-paystack') ||     // payment verification — must always be live
-    url.pathname.includes('/api/nova-ai') ||             // AI assistant call — must always be live
-    url.hostname.includes('generativelanguage.googleapis.com') ||
-    url.hostname.includes('api.paystack.co')
-  );
-}
 
 self.addEventListener('install', (event) => {
+  self.skipWaiting();
   event.waitUntil(
-    caches.open(CACHE_VERSION)
-      .then((cache) => cache.addAll(SHELL_ASSETS))
-      .then(() => self.skipWaiting())
+    caches.open(CACHE_VERSION).then((cache) => cache.addAll(SHELL_FILES).catch(() => {}))
   );
 });
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys()
-      .then((keys) => Promise.all(
-        keys.filter((k) => k !== CACHE_VERSION).map((k) => caches.delete(k))
-      ))
-      .then(() => self.clients.claim())
+    caches.keys().then((keys) =>
+      Promise.all(keys.filter((k) => k !== CACHE_VERSION).map((k) => caches.delete(k)))
+    ).then(() => self.clients.claim())
   );
 });
 
 self.addEventListener('fetch', (event) => {
   const req = event.request;
-
-  // Only ever intercept simple GETs. POST (Firestore writes, payment
-  // verification, the AI call) always passes straight through untouched.
   if (req.method !== 'GET') return;
-
   const url = new URL(req.url);
-  if (shouldBypass(url)) return; // let the browser handle it normally
+  // Only cache same-origin app-shell files. Everything else (Firestore,
+  // images, fonts, Paystack SDK, etc.) goes straight to the network.
+  if (url.origin !== self.location.origin) return;
 
-  const isSameOrigin = url.origin === self.location.origin;
-  const isCacheableCrossOrigin = CACHEABLE_CROSS_ORIGIN.some((h) => url.hostname.includes(h));
-  if (!isSameOrigin && !isCacheableCrossOrigin) return; // e.g. Unsplash images — just go to network
-
-  // Stale-while-revalidate: answer instantly from cache if we have it,
-  // and refresh the cache in the background so the *next* load is current.
-  // This is what makes a repeat visit on a bad connection feel instant
-  // while still self-healing within a load or two after a new deploy.
   event.respondWith(
     caches.open(CACHE_VERSION).then(async (cache) => {
       const cached = await cache.match(req);
-      const networkFetch = fetch(req)
-        .then((res) => {
-          if (res && res.ok) cache.put(req, res.clone());
-          return res;
-        })
-        .catch(() => null);
-      return cached || (await networkFetch) || Response.error();
+      const network = fetch(req).then((res) => {
+        if (res && res.ok) cache.put(req, res.clone());
+        return res;
+      }).catch(() => cached);
+      return cached || network;
     })
   );
 });
 
-// Lets index.html tell a waiting worker to activate immediately after the
-// person taps "Refresh" on the update banner, instead of waiting for every
-// tab to close.
-self.addEventListener('message', (event) => {
-  if (event.data === 'SKIP_WAITING') self.skipWaiting();
+/* ---------------- Firebase Cloud Messaging (background push) ---------------- */
+importScripts('https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js');
+importScripts('https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js');
+
+// Same values as firebaseConfig in index.html — messaging needs its own
+// compat-style init inside the service worker (modular SDK can't run
+// here the same way).
+firebase.initializeApp({
+  apiKey: "AIzaSyBk4WD0D5m6386sb62KC-5KKMpUuOLC9fs",
+  authDomain: "lexden-nova.firebaseapp.com",
+  projectId: "lexden-nova",
+  storageBucket: "lexden-nova.firebasestorage.app",
+  messagingSenderId: "421157476875",
+  appId: "1:421157476875:web:c42a605fdb056c8282450e",
+});
+
+try {
+  const messaging = firebase.messaging();
+  messaging.onBackgroundMessage((payload) => {
+    const title = (payload.notification && payload.notification.title) || 'LEXDEN NOVA';
+    const body = (payload.notification && payload.notification.body) || '';
+    const icon = (payload.notification && payload.notification.icon) || './icon-192.png';
+    self.registration.showNotification(title, { body, icon, data: payload.data || {} });
+  });
+} catch (e) {
+  // If messaging init fails (e.g. unsupported), the app-shell caching
+  // above still works fine on its own.
+  console.warn('FCM background init failed', e);
+}
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const postId = event.notification.data && event.notification.data.postId;
+  const targetUrl = self.registration.scope + (postId ? `#feed/${postId}` : '#home');
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
+      for (const c of list) { if ('focus' in c) { c.navigate(targetUrl); return c.focus(); } }
+      if (clients.openWindow) return clients.openWindow(targetUrl);
+    })
+  );
 });
