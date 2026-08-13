@@ -1,10 +1,9 @@
 {
-  "name": "lexden-nova-functions",
-  "engines": { "node": "20" },
-  "main": "index.js",
+  "name": "lexden-nova-api",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Serverless API functions for LEXDEN NOVA (Paystack payment verification).",
   "dependencies": {
-    "firebase-admin": "^12.1.0",
-    "firebase-functions": "^5.0.0"
-  },
-  "private": true
+    "firebase-admin": "^12.6.0"
+  }
 }
