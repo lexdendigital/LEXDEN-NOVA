@@ -1,0 +1,6 @@
+{
+  "rewrites": [
+    { "source": "/feed/:id", "destination": "/api/feed?id=:id" },
+    { "source": "/product/:id", "destination": "/api/product?id=:id" }
+  ]
+}
