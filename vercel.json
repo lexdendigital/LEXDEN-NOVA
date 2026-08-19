@@ -1,7 +1,0 @@
-{
-  "rewrites": [
-    { "source": "/", "destination": "/api/index" },
-    { "source": "/feed/:id", "destination": "/api/feed/:id" },
-    { "source": "/product/:id", "destination": "/api/product/:id" }
-  ]
-}
