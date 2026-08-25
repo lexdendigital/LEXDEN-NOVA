@@ -2,7 +2,10 @@ export const config = {
   runtime: 'edge', // Runs on Vercel's global edge network
 };
 
-const GEMINI_MODEL = "gemini-2.5-flash"; // multimodal — accepts image parts alongside text
+// Configurable via Vercel env var so a model swap never needs a code
+// deploy — falls back to gemini-2.5-flash (multimodal — accepts image
+// parts alongside text) if GEMINI_MODEL isn't set.
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
 
 // Exact origins that are always allowed (add your custom domain here if you buy one)
 const ALLOWED_ORIGINS = [
@@ -70,10 +73,17 @@ let rotateCursor = 0;
 
 // Cap how many keys we'll actually try per single request, so one
 // unlucky message can't chain through all 30 keys and time out the
-// function. With 30 keys configured this tries 8 before giving up —
-// plenty of fallback room without a slow reply.
-const MAX_KEY_ATTEMPTS = 8;
-const PER_ATTEMPT_TIMEOUT_MS = 9000;
+// function.
+//
+// FIX (was 8 attempts x 9s = 72s worst case, unacceptable for an
+// interactive chat widget): this now caps the *total* wall-clock time
+// for the whole rotation at OVERALL_DEADLINE_MS, in addition to capping
+// attempt count and per-attempt timeout. Whichever limit is hit first
+// stops the loop, so the shopper never waits more than ~12s before
+// getting the "couldn't reach my full brain" fallback message.
+const MAX_KEY_ATTEMPTS = 4;
+const PER_ATTEMPT_TIMEOUT_MS = 4000;
+const OVERALL_DEADLINE_MS = 12000;
 
 async function callGeminiWithRotation(keys, requestBody) {
   if (keys.length === 0) {
@@ -82,12 +92,20 @@ async function callGeminiWithRotation(keys, requestBody) {
   const attempts = Math.min(MAX_KEY_ATTEMPTS, keys.length);
   const startIdx = rotateCursor % keys.length;
   rotateCursor = (rotateCursor + 1) % keys.length;
+  const deadlineAt = Date.now() + OVERALL_DEADLINE_MS;
 
   let lastErr = null;
   for (let i = 0; i < attempts; i++) {
+    const timeLeft = deadlineAt - Date.now();
+    if (timeLeft <= 250) {
+      // Not enough time left for another attempt to plausibly finish —
+      // stop now instead of starting a request we'll likely abort anyway.
+      lastErr = lastErr || { status: 504, body: "overall_deadline_exceeded" };
+      break;
+    }
     const key = keys[(startIdx + i) % keys.length];
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), PER_ATTEMPT_TIMEOUT_MS);
+    const timer = setTimeout(() => controller.abort(), Math.min(PER_ATTEMPT_TIMEOUT_MS, timeLeft));
     try {
       const res = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${key}`,
