@@ -1,4 +1,0 @@
-User-agent: *
-Allow: /
-
-Sitemap: https://lexdendigital.github.io/LEXDEN-NOVA/sitemap.xml
