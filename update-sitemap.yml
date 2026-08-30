@@ -1,0 +1,43 @@
+name: Update sitemap.xml
+
+# Free, uses only what GitHub already gives every repo — no secrets to
+# add, no extra service to sign up for. Regenerates sitemap.xml from
+# your live Firestore catalog and commits it back to the repo:
+#   - on every push to main (so a deploy never ships a stale sitemap)
+#   - once a day at 03:00 UTC, in case you add/remove products or feed
+#     posts from the admin portal without also pushing code that day
+#   - manually, any time, from the Actions tab ("Run workflow")
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  update-sitemap:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Regenerate sitemap.xml
+        run: node scripts/generate-sitemap.js
+
+      - name: Commit if changed
+        run: |
+          if git diff --quiet -- sitemap.xml; then
+            echo "sitemap.xml unchanged — nothing to commit."
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add sitemap.xml
+            git commit -m "chore: auto-update sitemap.xml [skip ci]"
+            git push
+          fi
