@@ -1,9 +1,0 @@
-{
-  "name": "lexden-nova-api",
-  "version": "1.0.0",
-  "private": true,
-  "description": "Serverless API functions for LEXDEN NOVA (Paystack payment verification).",
-  "dependencies": {
-    "firebase-admin": "^12.6.0"
-  }
-}
