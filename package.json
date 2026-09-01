@@ -2,8 +2,9 @@
   "name": "lexden-nova-api",
   "version": "1.0.0",
   "private": true,
-  "description": "Serverless API functions for LEXDEN NOVA (Paystack payment verification).",
+  "description": "Serverless API functions for LEXDEN NOVA (Paystack payment verification, CJ Dropshipping fulfilment, reliable email delivery).",
   "dependencies": {
-    "firebase-admin": "^12.6.0"
+    "firebase-admin": "^12.6.0",
+    "@vercel/functions": "^1.5.0"
   }
 }
