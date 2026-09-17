@@ -1,0 +1,337 @@
+rules_version = '2';
+
+// LEXDEN NOVA v2.0.1 — Firestore security rules.
+//
+// v2.0.1 CHANGE: the previous firestore.rules.txt only defined the
+// "orders" collection and explicitly said other collections needed to be
+// merged in by hand. This file was built by reading every
+// collection(fbDb, "...") / doc(fbDb, "...") call in index.html and
+// writing a rule for each one based on how the app actually reads/writes
+// it — nothing here is guessed. Deploy with:
+//   firebase deploy --only firestore:rules
+//
+// If you've added collections since this was generated, they are NOT
+// covered — anything not matched below falls through to the final
+// catch-all (deny), so a missed collection fails safely (no access)
+// rather than silently open. Add a matching block for anything new.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Must exactly match ADMIN_EMAIL in index.html.
+    function isAdmin() {
+      return request.auth != null && request.auth.token.email == "ruthanselem2@gmail.com";
+    }
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    // For per-shopper docs keyed by their own uid as the document ID
+    // (wishlists/{uid}, likedPosts/{uid}, users/{uid}).
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    // ---- catalog/{products|categories|settings} ----
+    // Admin-authored storefront data (product list, categories, site
+    // settings incl. exchange rates). Every shopper's browser reads this
+    // on load, and it's ALSO read publicly (no auth) by the Vercel
+    // link-preview microsite (api/feed.js, api/product.js,
+    // api/verify-paystack.js) via Firestore's REST API — so read must
+    // stay open with no auth requirement. Only admin writes it.
+    match /catalog/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // ---- reviews/{id} ----
+    // Publicly readable (shown on product pages to every visitor,
+    // signed in or not). Any signed-in shopper can create a review, but
+    // only as themselves — the email on the review document must match
+    // their own verified sign-in email, so nobody can post a review
+    // under someone else's name. No client-side edit UI exists, so
+    // updates are admin-only (e.g. moderation); deletes are admin-only
+    // (matches deleteReviewFromCloud, an admin-dashboard-only action).
+    match /reviews/{reviewId} {
+      allow read: if true;
+      allow create: if isSignedIn() && request.resource.data.email == request.auth.token.email;
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ---- orders/{reference} ----
+    // Written ONLY by the /api/verify-paystack serverless function via
+    // the Firebase Admin SDK — Admin SDK calls bypass these rules
+    // entirely, so there is intentionally no create/update clause for
+    // regular clients. A shopper can read their own orders; the admin
+    // can read all of them. Nobody can write from the browser, which is
+    // what stops a shopper from fabricating a "paid" order directly.
+    match /orders/{orderId} {
+      allow read: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
+      allow write: if false;
+    }
+
+    // ---- users/{uid} ----
+    // A shopper's own profile (name/gender/dob/country/state/occupation/
+    // howHeard from the sign-up wizard). A shopper can read/write only
+    // their own document. Admin dashboard's Users tab reads every
+    // profile (getDocs(collection(fbDb,"users"))), so admin gets
+    // collection-wide read too.
+    match /users/{uid} {
+      allow read: if isOwner(uid) || isAdmin();
+      allow write: if isOwner(uid);
+    }
+
+    // ---- wishlists/{uid} & likedPosts/{uid} ----
+    // Private per-shopper lists, doc ID is the shopper's own uid. Only
+    // that shopper (or the admin, for support/debugging) can read or
+    // write their own list.
+    match /wishlists/{uid} {
+      allow read: if isOwner(uid) || isAdmin();
+      allow write: if isOwner(uid);
+    }
+    match /likedPosts/{uid} {
+      allow read: if isOwner(uid) || isAdmin();
+      allow write: if isOwner(uid);
+    }
+
+    // ---- leads/{id} (contact-form submissions) ----
+    // Anyone — including a signed-out visitor — can submit the contact
+    // form, so create must stay open with no auth requirement. Nobody
+    // but the admin should be able to read other people's submitted
+    // messages, so read/update/delete are admin-only (matches the
+    // admin-only Messages tab: refreshLeads, note-saving, delete).
+    match /leads/{leadId} {
+      allow create: if true;
+      allow read: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ---- newsletterSubs/{email-key} ----
+    // Anyone can subscribe (no sign-in required for the newsletter
+    // popup). Only the admin can see/manage the subscriber list.
+    match /newsletterSubs/{subId} {
+      allow create: if true;
+      allow read: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ---- fcmTokens/{token} ----
+    // Push-notification device tokens. Registering a token doesn't need
+    // sign-in (any visitor who allows notifications gets one). The token
+    // itself is effectively a write-only opaque credential to the
+    // client — nothing in the app ever reads this collection back, so
+    // read is admin-only rather than open.
+    match /fcmTokens/{tokenId} {
+      allow create, update: if true;
+      allow read: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ---- feedNotify/{postId} ----
+    // Signal doc written when an admin marks a feed post "Important" to
+    // trigger a push broadcast. Only the admin dashboard writes this;
+    // nothing shopper-facing reads it directly in index.html, so this
+    // stays fully admin-only rather than guessing at a reader.
+    match /feedNotify/{postId} {
+      allow read, write: if isAdmin();
+    }
+
+    // ---- feedLikes/{postId}, feedViews/{postId}, productViews/{id},
+    //      productWishlists/{id} ----
+    // Public aggregate counters (e.g. "128 likes", "1.2k views") shown
+    // to every visitor, incremented by every visitor — including signed-
+    // out ones (a guest can view/like a post). Kept open by design, same
+    // as the original app's own architecture; the one thing rules CAN
+    // meaningfully enforce here is that a write can only ever touch the
+    // `count` field — nothing else can be smuggled onto these documents.
+    // Note: an open counter can still be inflated by a scripted client
+    // spamming increments — that's a product-level tradeoff (no Cloud
+    // Function rate-limiter exists in this project), not a rules gap;
+    // flagging it here so it isn't mistaken for an oversight.
+    // (split into create/update — checking resource.data.diff() on create
+    // would error, since `resource` is null until the document exists)
+    match /feedLikes/{postId} {
+      allow read: if true;
+      allow create: if request.resource.data.keys().hasOnly(['count']);
+      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['count']);
+    }
+    match /feedViews/{postId} {
+      allow read: if true;
+      allow create: if request.resource.data.keys().hasOnly(['count']);
+      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['count']);
+    }
+    match /productViews/{productId} {
+      allow read: if true;
+      allow create: if request.resource.data.keys().hasOnly(['count']);
+      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['count']);
+    }
+    match /productWishlists/{productId} {
+      allow read: if true;
+      allow create: if request.resource.data.keys().hasOnly(['count']);
+      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['count']);
+    }
+    // productClicks/{id}, productShares/{id}, feedShares/{id} — same public
+    // aggregate-counter pattern as the four above, added to feed clicks and
+    // shares into trendingScore()/feedHotScore() on the client.
+    match /productClicks/{productId} {
+      allow read: if true;
+      allow create: if request.resource.data.keys().hasOnly(['count']);
+      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['count']);
+    }
+    match /productShares/{productId} {
+      allow read: if true;
+      allow create: if request.resource.data.keys().hasOnly(['count']);
+      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['count']);
+    }
+    match /feedShares/{postId} {
+      allow read: if true;
+      allow create: if request.resource.data.keys().hasOnly(['count']);
+      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['count']);
+    }
+
+    // ---- clicks/{id} ----
+    // Fire-and-forget product-click analytics events (trackProductClick).
+    // Write-only from the client's perspective — nothing in index.html
+    // reads this collection back, so only the admin can read it.
+    match /clicks/{clickId} {
+      allow create: if true;
+      allow read: if isAdmin();
+      allow update, delete: if isAdmin();
+    }
+
+    // ---- cjSyncLogs/{id} ----
+    // CJ Dropshipping integration audit trail (README §28) — written only
+    // by the Vercel cj-*.js routes via the Admin SDK (writeSyncLog() in
+    // api/cj-shared.js), which bypasses these rules entirely. Readable
+    // only by the admin (Admin → CJ Dropshipping → Sync Logs). No client
+    // write path exists or should ever exist here.
+    match /cjSyncLogs/{logId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // ---- emailQueue/{id} ----
+    // Fallback queue for emails whose first two fast attempts both failed
+    // (see api/email-shared.js / api/process-email-queue.js). Written and
+    // retried only by the Admin SDK; nothing shopper-facing ever reads or
+    // writes this collection directly.
+    match /emailQueue/{id} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // ---- cjAuth/{doc} ----
+    // Cached CJ access/refresh tokens (api/cj-shared.js). Deliberately has
+    // NO match block at all, anywhere in this file — every other
+    // collection above has an explicit rule, even the ones that end up
+    // admin-only, so its total absence here is intentional and load-
+    // bearing: it falls through to Firestore's default deny for BOTH read
+    // and write from every client SDK, admin included, with no rule that
+    // could ever be loosened by mistake. Only the Admin SDK (which
+    // bypasses rules entirely) can ever touch it — see cj-shared.js's own
+    // comment on saveToken()/getValidToken().
+
+    // ---- NOVA AFFILIATE PROGRAM (mega-update) ----
+    // Settings for the program (commission %, fee %, min withdrawal,
+    // WhatsApp/Telegram links) live INSIDE the existing catalog/settings
+    // doc above — no new rule needed for those, the catalog/{docId} block
+    // already covers it.
+
+    // affiliates/{uid} — an affiliate's own account (balances, payout
+    // details, status). Only the backend (Admin SDK, bypasses rules) ever
+    // writes balances or changes status — a client can only ever create
+    // their OWN application doc, pre-approval, with zero balance fields,
+    // matching the onboarding flow in affiliate/index.html exactly.
+    match /affiliates/{affiliateId} {
+      allow read: if isOwner(affiliateId) || isAdmin();
+      allow create: if isOwner(affiliateId)
+        && request.resource.data.status == 'pending'
+        && request.resource.data.balanceAvailable == 0
+        && request.resource.data.totalEarned == 0
+        && request.resource.data.totalWithdrawn == 0;
+      allow update, delete: if isAdmin();
+    }
+
+    // affiliateCommissions/{reference} — one per order that earned a
+    // commission (doc ID = the Paystack reference, same idempotency
+    // pattern as orders/{reference}). Written only by verify-paystack.js
+    // via the Admin SDK.
+    match /affiliateCommissions/{commissionId} {
+      allow read: if isSignedIn() && (resource.data.affiliateId == request.auth.uid || isAdmin());
+      allow write: if false;
+    }
+
+    // affiliateWithdrawals/{id} — written by /api/affiliate-withdraw (the
+    // affiliate's own request) and /api/affiliate-admin (admin decisions),
+    // both via the Admin SDK. No direct client write path.
+    match /affiliateWithdrawals/{withdrawalId} {
+      allow read: if isSignedIn() && (resource.data.affiliateId == request.auth.uid || isAdmin());
+      allow write: if false;
+    }
+
+    // affiliateClicks/{id} — raw click log written by the Render /go/
+    // redirect (Admin SDK). Admin-only read (analytics), no client path.
+    match /affiliateClicks/{clickId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // affiliateLinkStats/{ref_pid} — the fast per-link {clicks, sales}
+    // counters shown on an affiliate's own My Store tab. Doc carries a
+    // `ref` field (the owning affiliate's uid) so ownership can be
+    // checked without the doc ID itself being the uid.
+    match /affiliateLinkStats/{statId} {
+      allow read: if isSignedIn() && (resource.data.ref == request.auth.uid || isAdmin());
+      allow write: if false;
+    }
+
+    // affiliateDailyStats/{ref_date} — daily {clicks, sales, earnings}
+    // rollup that feeds the dashboard graph. Same ownership pattern as
+    // affiliateLinkStats.
+    match /affiliateDailyStats/{statId} {
+      allow read: if isSignedIn() && (resource.data.ref == request.auth.uid || isAdmin());
+      allow write: if false;
+    }
+
+    // affiliateLeaderboard/{uid} — a deliberately MINIMAL, backend-written
+    // mirror of {displayName, totalEarned, salesCount} for the Leaderboard
+    // tab. Readable by any signed-in affiliate (that's the point of a
+    // leaderboard) WITHOUT exposing payout account details, email, or
+    // anything else from the full affiliates/{uid} doc.
+    match /affiliateLeaderboard/{uid} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    // productViewEvents/{id} — feeds the abandoned-product-view reminder
+    // email (requirement #14). NOT the same collection as productViews
+    // above (that one is the public view-count aggregate with a
+    // different {count} shape) — kept separate on purpose so the two
+    // features can never collide or corrupt each other's data. A shopper
+    // can log their own view (their own email attached); only the
+    // backend (process-abandon-emails.js, Admin SDK) reads or marks them
+    // emailed.
+    match /productViewEvents/{eventId} {
+      allow create: if request.resource.data.email is string && request.resource.data.email.size() > 3;
+      allow read, update, delete: if false;
+    }
+
+    // mcpAuthCodes / mcpAccessTokens / mcpRefreshTokens / mcpAuditLog —
+    // added for the Claude MCP connector (see MCP-SETUP.md). The Admin
+    // SDK (mcp/lib/tokens.js, mcp/lib/audit.js) bypasses these rules
+    // entirely, as it does for every other collection in this file — this
+    // block exists purely so a client-side SDK request (which should
+    // NEVER touch these) is explicitly denied rather than relying on
+    // "not matched = denied" for something this sensitive.
+    match /mcpAuthCodes/{id} { allow read, write: if false; }
+    match /mcpAccessTokens/{id} { allow read, write: if false; }
+    match /mcpRefreshTokens/{id} { allow read, write: if false; }
+    match /mcpAuditLog/{id} { allow read, write: if false; }
+
+    // Anything not explicitly matched above is denied by default —
+    // Firestore's rules are deny-by-default outside matched blocks, so
+    // no closing catch-all is needed, but stated here for clarity.
+  }
+}
