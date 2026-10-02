@@ -1,17 +1,9 @@
-// /mcp/index.js
-// MCP (Model Context Protocol) server entry point
-// Exports functions called by server.js during initialization
-
 const admin = require('firebase-admin');
-const { setupOAuth } = require('./oauth');
+const { registerRoutes } = require('./oauth');  // ← CHANGED: registerRoutes, not setupOAuth
 
-/**
- * Mount MCP routes and initialize OAuth server for Claude connector
- * Called during server startup to register all MCP endpoints
- */
 function mountMcp(app) {
   try {
-    setupOAuth(app);
+    registerRoutes(app);  // ← CHANGED: call registerRoutes()
     console.log('MCP OAuth server mounted');
   } catch (err) {
     console.error('Failed to mount MCP:', err.message);
@@ -23,10 +15,6 @@ function mountMcp(app) {
   }
 }
 
-/**
- * Record server errors to Firestore for monitoring (nova_get_recent_server_errors)
- * Non-fatal — errors in this function don't crash the server
- */
 function recordServerError(errorObj) {
   const { type, message, stack, path } = errorObj;
   
@@ -43,7 +31,6 @@ function recordServerError(errorObj) {
     .collection('serverErrors')
     .add(logEntry)
     .catch(err => {
-      // Silent fail — don't crash if Firestore write fails
       console.error('recordServerError failed (non-fatal):', err.message);
     });
 }
