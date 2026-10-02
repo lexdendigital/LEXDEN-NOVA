@@ -246,16 +246,16 @@ service cloud.firestore {
     // matching the onboarding flow in affiliate/index.html exactly.
     match /affiliates/{affiliateId} {
       allow read: if isOwner(affiliateId) || isAdmin();
-      // CHANGED: affiliates now activate immediately on signup — no admin
-      // approval step. status must be 'active' (not 'pending') on create;
-      // approvedAt is set client-side to the same signup moment. Admin
-      // still has full suspend/reactivate control via allow update below —
-      // this only removes the INITIAL gate, not ongoing moderation.
-      allow create: if isOwner(affiliateId)
-        && request.resource.data.status == 'active'
-        && request.resource.data.balanceAvailable == 0
-        && request.resource.data.totalEarned == 0
-        && request.resource.data.totalWithdrawn == 0;
+      // FIX (mega-fix batch #2): signup now goes through
+      // POST /api/affiliate-signup (Admin SDK, bypasses these rules)
+      // instead of a direct client write — see api/affiliate/signup.js.
+      // That endpoint is what decides active vs pending (auto-approve,
+      // with a pending fallback if it can't). Client-side creation is
+      // fully closed off here; this is what makes "signup breaks because
+      // the published rules don't match this version's expected shape"
+      // structurally impossible going forward, instead of something that
+      // has to be kept in sync by hand on every change to the flow.
+      allow create: if false;
       allow update, delete: if isAdmin();
     }
 
@@ -334,6 +334,9 @@ service cloud.firestore {
     match /mcpAccessTokens/{id} { allow read, write: if false; }
     match /mcpRefreshTokens/{id} { allow read, write: if false; }
     match /mcpAuditLog/{id} { allow read, write: if false; }
+    // FIX (MCP fix batch §5): added when /register started persisting
+    // Dynamic Client Registration records — same reasoning as above.
+    match /mcpClients/{id} { allow read, write: if false; }
 
     // Anything not explicitly matched above is denied by default —
     // Firestore's rules are deny-by-default outside matched blocks, so

@@ -11,6 +11,7 @@
 //   -> { ok:true, page, pageSize, total, products:[{pid,name,image,sku,sellPrice,...}] }
 
 const { setCors, cjFetch, writeSyncLog } = require('./cj-shared');
+const { normalizeSearchPayload } = require('./cj-normalize');
 
 // Categories change rarely — small in-memory cache per warm instance.
 let categoryCache = null;
@@ -52,11 +53,15 @@ module.exports = async (req, res) => {
 
     const r = await cjFetch('/product/listV2', {
       query: {
-        pageNum: page,
-        pageSize,
-        productNameEn: keyword || undefined,
+        // listV2 uses its own parameter names (page/size/keyWord). The
+        // pageNum/pageSize/productNameEn names belong to the deprecated
+        // /product/list endpoint and are silently ignored by listV2.
+        page,
+        size: pageSize,
+        keyWord: keyword || undefined,
         categoryId,
         countryCode,
+        features: ['enable_description', 'enable_category', 'enable_video'],
       },
     });
 
@@ -66,77 +71,20 @@ module.exports = async (req, res) => {
       return res.status(200).json({ ok: false, error: r.message });
     }
 
-    console.log('CJ raw response structure:', JSON.stringify(r.data, null, 2));
-const raw = (r.data && (r.data.list || r.data.content || r.data.data)) || [];
-    // ---- Extract the product list -----------------------------------------
-    // CJ's /product/listV2 response shape is not always consistent across
-    // account tiers, API versions, and country filters. We try every known
-    // container key before falling back to an empty array so a shape change
-    // never silently produces zero or stub results.
-    let raw = [];
-    if (r.data) {
-      if (Array.isArray(r.data))              raw = r.data;              // data IS the list
-      else if (Array.isArray(r.data.list))    raw = r.data.list;         // standard v2 shape
-      else if (Array.isArray(r.data.content)) raw = r.data.content;      // Spring-page shape
-      else if (Array.isArray(r.data.data))    raw = r.data.data;         // nested-data shape
-      else if (Array.isArray(r.data.result))  raw = r.data.result;       // result-array shape
-      else if (Array.isArray(r.data.products)) raw = r.data.products;    // labelled-products
-    }
+    // listV2 returns data.content[] groups, and each group contains a
+    // productList[]. Mapping the group itself caused successful searches
+    // to return "results" with nearly every product field null.
+    const payload = r.data && (r.data.data || r.data);
+    const { products, rawCount } = normalizeSearchPayload(payload);
 
-    // ---- Map CJ field names → our canonical shape -------------------------
-    // CJ has changed field names between API versions and product types.
-    // Each property tries every known alias so a rename on CJ's side doesn't
-    // silently null out the whole catalog.
-    const products = raw.map(p => ({
-      pid:
-        p.pid || p.productId || p.id || p.productSid || null,
-
-      name:
-        p.productNameEn || p.nameEn || p.productName ||
-        p.name || p.title || p.productTitle || null,
-
-      image:
-        p.productImage || p.bigImage || p.image ||
-        p.imageUrl || p.mainImage || p.thumbnail || null,
-
-      sku:
-        p.productSku || p.sku || p.skuCode || null,
-
-      sellPrice:
-        p.sellPrice  != null ? Number(p.sellPrice)  :
-        p.price      != null ? Number(p.price)      :
-        p.salePrice  != null ? Number(p.salePrice)  :
-        p.retailPrice != null ? Number(p.retailPrice) : null,
-
-      variantCount:
-        p.variantNum   != null ? p.variantNum   :
-        p.variantCount != null ? p.variantCount :
-        p.skuNum       != null ? p.skuNum       :
-        p.skuCount     != null ? p.skuCount     : null,
-
-      categoryId:   p.categoryId   || null,
-      supplierName: p.supplierName || 'CJ Dropshipping',
-    }));
-
-    // ---- Diagnostics -------------------------------------------------------
-    // When results look thin (< 3), log the raw response shape so the next
-    // sync-log check shows exactly which keys CJ returned — making any future
-    // field-name mismatch immediately visible without needing a network tab.
-    const syncDetail = { keyword, categoryId, page, rawCount: raw.length };
-    if (products.length < 3 && r.data && typeof r.data === 'object') {
-      syncDetail.dataKeys = Object.keys(r.data);
-      if (raw.length > 0 && raw[0] && typeof raw[0] === 'object') {
-        syncDetail.firstItemKeys = Object.keys(raw[0]);
-      }
-    }
-
-    await writeSyncLog({ event: 'products.search', success: true, message: `${products.length} results`, tookMs, detail: syncDetail });
+    const invalidRows = products.filter(p => !p.pid || !p.name).length;
+    await writeSyncLog({ event: 'products.search', success: true, message: `${products.length} results${invalidRows ? `; ${invalidRows} incomplete` : ''}`, tookMs, detail: { keyword, categoryId, page, rawCount, invalidRows } });
     res.setHeader('Cache-Control', 'public, max-age=60');
     return res.status(200).json({
       ok: true,
       page,
       pageSize,
-      total: (r.data && (r.data.total || r.data.totalCount || r.data.totalNum || r.data.count)) || products.length,
+      total: (payload && (payload.totalRecords || payload.total || payload.totalCount)) || products.length,
       products,
     });
   } catch (e) {

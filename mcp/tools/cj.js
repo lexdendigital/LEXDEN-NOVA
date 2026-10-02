@@ -2,6 +2,8 @@
 const { z } = require('zod');
 const { callHandler } = require('../lib/callHandler');
 const { getDb } = require('../../api/affiliate/shared');
+const { listCatalogDoc, upsertCatalogItem } = require('../lib/settings');
+const { uniqueUrls, buildProductSpecs, stockStatusFrom } = require('../lib/productImport');
 const cjShared = require('../../api/cj-shared');
 
 const cjProductsHandler = require('../../api/cj-products');
@@ -36,70 +38,7 @@ function register(server) {
     },
   }, async (args) => {
     const r = await callHandler(cjProductsHandler, { method: 'GET', query: { mode: 'search', ...args } });
-
-    // Attach a ready-to-use physical block template to every product result so
-    // the caller never has to guess the correct structure when building an
-    // import payload for nova_create_product.  All supplier-specific fields are
-    // pre-filled from the search result; the caller only needs to set
-    //   • product.price   (your retail price, higher than supplierCost)
-    //   • product.name / description / tags / specs (localise/enrich as needed)
-    //   • product.category (your store's category slug, e.g. "gadgets")
-    //   • product.itemCode (your internal code, e.g. "LX-GAD-006")
-    //   • physical.routing.active → true only after you have reviewed the product
-    const CJ_SUPPLIER_ID = 'sup1788196152597';
-    const body = r.body;
-    if (body && body.ok && Array.isArray(body.products)) {
-      body.products = body.products.map(p => ({
-        ...p,
-        _importTemplate: {
-          id: '',                          // generate a unique slug, e.g. "gad-powerbank-01"
-          name: p.name || '',
-          description: '',                 // write your own store description
-          price: null,                     // SET THIS — your retail price (USD)
-          salePrice: null,
-          image: p.image || '',
-          gallery: p.image ? [{ type: 'image', url: p.image }] : [],
-          status: 'draft',
-          active: true,
-          category: '',                    // SET THIS — your store category slug ("gadgets")
-          productType: 'PHYSICAL',
-          seller: 'LEXDEN NOVA',
-          itemCode: '',                    // SET THIS — e.g. "LX-GAD-006"
-          tags: [],
-          specs: {},
-          featured: false,
-          trending: false,
-          rating: 0,
-          reviewCount: 0,
-          deliveryLink: '',
-          fileUrl: '',
-          affiliateLink: '',
-          externalPaymentLink: '',
-          physical: {
-            supplierId: CJ_SUPPLIER_ID,
-            supplierCost: p.sellPrice,     // CJ's sell price in USD — your cost
-            supplierCurrency: 'USD',
-            supplierSku: p.sku || '',
-            weight: '',                    // fill from nova_cj_get_product detail
-            dimensions: '',
-            shippingCountries: ['Nigeria'],
-            returnPolicy: '',
-            deliveryEstimate: '',
-            stockMode: 'SUPPLIER_STOCK',
-            stockStatus: 'in_stock',
-            routing: {
-              active: false,               // set true only after reviewing product
-              primarySupplierId: CJ_SUPPLIER_ID,
-              backupSupplierId: '',
-              minMargin: 1,
-              maxCost: 99999,
-            },
-          },
-        },
-      }));
-    }
-
-    return { content: [{ type: 'text', text: JSON.stringify(body, null, 2) }] };
+    return { content: [{ type: 'text', text: JSON.stringify(r.body, null, 2) }] };
   });
 
   server.registerTool('nova_cj_list_categories', {
@@ -118,6 +57,96 @@ function register(server) {
   }, async ({ pid, vid }) => {
     const r = await callHandler(cjProductHandler, { method: 'GET', query: { pid, vid } });
     return { content: [{ type: 'text', text: JSON.stringify(r.body, null, 2) }] };
+  });
+
+  server.registerTool('nova_cj_import_product', {
+    title: 'Import CJ product as an admin draft',
+    description: 'Fetches full CJ product details and variants, then creates an unpublished PHYSICAL product draft in Lexden Nova catalog/products. Includes every source field available to the integration: name, description, supplier price/currency, category/source details, variant identifiers and options, stock snapshot, image gallery and CJ sync metadata. Requires categoryId from nova_list_categories when available. Never publishes automatically; review NGN selling price, shipping, media rights and every admin field before publishing. Duplicate CJ product IDs are rejected. If no usable image is returned, search the web for the exact product/model and only attach a verified match with nova_update_product; never invent an image URL. If no exact match is available, report that instead of using a lookalike.',
+    inputSchema: {
+      pid: z.string().min(1),
+      categoryId: z.string().optional(),
+      categoryName: z.string().optional(),
+      seller: z.string().default('Lexden Digital'),
+    },
+  }, async ({ pid, categoryId, categoryName, seller }) => {
+    const result = await callHandler(cjProductHandler, { method: 'GET', query: { pid } });
+    const response = result.body;
+    if (!response || !response.ok || !response.product) {
+      throw Object.assign(new Error((response && response.error) || 'CJ product detail lookup failed.'), { status: 502 });
+    }
+    const source = response.product;
+    const productId = String(source.pid || pid).trim();
+    const name = String(source.name || '').trim();
+    if (!name) throw Object.assign(new Error('CJ returned no product name; draft was not created.'), { status: 422 });
+
+    const db = getDb();
+    const current = await listCatalogDoc(db, 'products');
+    const duplicate = current.find(p => String(p.physical?.cj?.productId || '') === productId);
+    if (duplicate) throw Object.assign(new Error(`CJ product already imported as ${duplicate.id}.`), { status: 409 });
+
+    const variants = Array.isArray(response.variants) ? response.variants.filter(Boolean) : [];
+    const variantIds = variants.map(v => v.vid).filter(Boolean).slice(0, 20);
+    let stockResult = { body: { ok: false, error: 'No variant identifiers were returned.' } };
+    if (variantIds.length) {
+      try { stockResult = await callHandler(cjStockHandler, { method: 'GET', query: { vid: variantIds.join(',') } }); }
+      catch (error) { stockResult = { body: { ok: false, error: error.message || 'Stock lookup failed.' } }; }
+    }
+    const stockMap = stockResult.body && stockResult.body.stock || {};
+    const firstVariant = variants[0] || {};
+    const images = uniqueUrls([...(Array.isArray(source.images) ? source.images : []), ...variants.map(v => v.image)]);
+    const id = `cj-${productId.replace(/[^a-z0-9_-]/gi, '').slice(-48)}`;
+    const specs = buildProductSpecs(source);
+    const draft = {
+      id,
+      name: name.slice(0, 200),
+      description: String(source.description || ''),
+      categoryId: categoryId || '',
+      categoryName: categoryName || source.categoryName || '',
+      itemCode: `CJ-${productId.slice(-8).toUpperCase()}`,
+      productType: 'PHYSICAL',
+      format: 'Physical item',
+      level: '',
+      price: null,
+      salePrice: null,
+      discount: 0,
+      seller: seller || 'Lexden Digital',
+      affiliateLink: '',
+      affiliateEnabled: false,
+      affiliateCommissionPct: null,
+      tags: ['cj-import', 'physical'],
+      status: 'draft',
+      gallery: images.map((url, index) => ({ url, type: 'image', alt: `${name} product image ${index + 1}` })),
+      images,
+      specs,
+      physical: {
+        stockMode: 'supplier',
+        stockStatus: stockStatusFrom(stockMap, variantIds.length, !!(stockResult.body && stockResult.body.ok)),
+        deliveryEstimate: source.deliveryCycle ? `${source.deliveryCycle} days (supplier estimate; confirm destination)` : '',
+        shippingCountries: [],
+        weight: firstVariant.weight != null ? `${(Number(firstVariant.weight) / 1000).toFixed(3)} kg` : (source.weight == null ? '' : `${(Number(source.weight) / 1000).toFixed(3)} kg`),
+        dimensions: firstVariant.length || firstVariant.width || firstVariant.height
+          ? `${[firstVariant.length, firstVariant.width, firstVariant.height].map(value => value == null ? '?' : (Number(value) / 10)).join(' × ')} cm`
+          : '',
+        returnPolicy: '',
+        supplier: 'CJ Dropshipping',
+        supplierSku: firstVariant.sku || source.sku || '',
+        supplierCost: firstVariant.sellPrice ?? source.sellPrice ?? null,
+        supplierCurrency: 'USD',
+        cj: {
+          productId,
+          variantId: firstVariant.vid || '',
+          sku: firstVariant.sku || source.sku || '',
+          syncEnabled: true,
+          variants: variants.map(v => ({ id: v.vid || '', sku: v.sku || '', name: v.name || '', optionKey: v.variantKey || '', barcode: v.barcode || '', standard: v.standard || '', unit: v.unit || '', image: v.image || '', sellPrice: v.sellPrice ?? null, suggestedSellPrice: v.suggestedSellPrice ?? null, weight: v.weight ?? null, length: v.length ?? null, width: v.width ?? null, height: v.height ?? null, stock: stockMap[v.vid] || null, supplierInventories: v.inventories || [] })),
+          stockCheckError: stockResult.body && stockResult.body.ok ? null : (stockResult.body && stockResult.body.error) || 'Stock could not be verified; refresh inventory before publishing.',
+          videoIds: Array.isArray(source.videoIds) ? source.videoIds : [],
+          lastImportedAt: new Date().toISOString(),
+        },
+      },
+      importSource: { supplier: 'CJ Dropshipping', productId, importedAt: new Date().toISOString(), sourceCategoryId: source.categoryId || '' },
+    };
+    const saved = await upsertCatalogItem(db, 'products', draft, { isNew: true });
+    return { content: [{ type: 'text', text: JSON.stringify({ product: saved, imageCount: images.length, mediaReviewRequired: images.length === 0, publishStatus: 'draft' }, null, 2) }] };
   });
 
   server.registerTool('nova_cj_check_stock', {
