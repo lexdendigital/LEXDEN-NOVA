@@ -66,6 +66,8 @@ module.exports = async (req, res) => {
       return res.status(200).json({ ok: false, error: r.message });
     }
 
+    console.log('CJ raw response structure:', JSON.stringify(r.data, null, 2));
+const raw = (r.data && (r.data.list || r.data.content || r.data.data)) || [];
     // ---- Extract the product list -----------------------------------------
     // CJ's /product/listV2 response shape is not always consistent across
     // account tiers, API versions, and country filters. We try every known
