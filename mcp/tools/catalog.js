@@ -30,6 +30,17 @@ const productShape = z.object({
   status: z.string().optional(),
   tags: z.array(z.string()).optional(),
   images: z.array(z.string()).optional(),
+  options: z.array(z.object({
+    id: z.string(), name: z.string(), values: z.array(z.object({ id: z.string(), label: z.string() }).catchall(z.any())).optional(),
+  }).catchall(z.any())).optional(),
+  variants: z.array(z.object({
+    id: z.string(), title: z.string().optional(), optionValues: z.record(z.string(), z.string()).optional(),
+    price: z.number().nullable().optional(), salePrice: z.number().nullable().optional(), stock: z.number().nullable().optional(),
+    sku: z.string().optional(), active: z.boolean().optional(), available: z.boolean().optional(),
+    deliveryLink: z.string().optional(), fileUrl: z.string().optional(), externalPaymentLink: z.string().optional(),
+    affiliateLink: z.string().optional(), affiliateEnabled: z.boolean().nullable().optional(), affiliateCommissionPct: z.number().nullable().optional(),
+    image: z.string().optional(), cjVariantId: z.string().optional(),
+  }).catchall(z.any())).optional(),
   stock: z.number().optional(),
   active: z.boolean().optional(),
   physical: z.object({

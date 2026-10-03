@@ -40,6 +40,16 @@ test('detail actions use category-specific labels including Install for apps', (
   assert.match(html, /Inside this eBook/);
 });
 
+test('variant editor, storefront selection, and checkout wiring preserve variant identity', () => {
+  assert.match(html, /function buildVariantMatrix\(/);
+  assert.match(html, /function readVariantMatrix\(/);
+  assert.match(html, /function productVariantSelector\(p\)/);
+  assert.match(html, /function selectProductOption\(/);
+  assert.match(html, /selectedVariant&&selectedVariant\.id\|\|null/);
+  assert.match(html, /productId: product\.id, productName: product\.name,[\s\S]{0,80}variantId/);
+  assert.match(html, /variantId: variantId\|\|null/);
+});
+
 test('inline storefront scripts parse without syntax errors', () => {
   const scripts = [...html.matchAll(/<script([^>]*)>([\s\S]*?)<\/script>/gi)];
   const executable = scripts.filter(([, attrs]) => !/\bsrc\s*=/.test(attrs) && !/application\/ld\+json/i.test(attrs) && !/\btype=["']module["']/i.test(attrs));

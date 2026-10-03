@@ -1334,6 +1334,35 @@ img{max-width:100%;display:block;}
 .section-head{gap:12px;}
 .section-head h2{line-height:1.2;}
 .chip,.select-pill{min-height:38px;}
+.admin-variant-editor{margin:18px 0 8px;padding:16px;border:1px solid var(--border);border-radius:16px;background:var(--card-glass);}
+.variant-option-row{display:grid;grid-template-columns:minmax(110px,.7fr) minmax(180px,1.5fr) auto;gap:10px;align-items:end;margin:10px 0;padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--surface);}
+.variant-option-row label,.variant-row-fields label{display:flex;flex-direction:column;gap:5px;color:var(--text-2);font-size:11px;font-weight:600;}
+.variant-option-row input,.variant-row-fields input{width:100%;min-width:0;min-height:42px;padding:9px 10px;border:1px solid var(--border);border-radius:9px;background:var(--card);color:var(--text);font:inherit;font-size:13px;}
+.variant-matrix{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));gap:10px;}
+.variant-row{min-width:0;padding:14px;border:1px solid var(--border);border-radius:14px;background:var(--surface);}
+.variant-row legend{padding:0 6px;color:var(--text);font-size:13px;font-weight:700;}
+.variant-row-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;}
+.variant-row-fields .variant-enabled,.variant-row-fields .variant-affiliate{grid-column:1/-1;display:flex;flex-direction:row;align-items:center;gap:9px;font-size:12px;color:var(--text);}
+.variant-row-fields input[type="checkbox"]{width:20px;min-height:20px;}
+.variant-empty{padding:14px;color:var(--text-2);font-size:12px;border:1px dashed var(--border);border-radius:12px;}
+.variant-selector{margin-top:16px;padding-top:14px;border-top:1px solid var(--border);}
+.variant-choice-group{margin:0 0 14px;padding:0;border:0;}
+.variant-choice-group legend,.variant-choice-group>label{display:block;margin-bottom:8px;color:var(--text-2);font-size:12px;font-weight:700;}
+.variant-choice-list{display:flex;gap:8px;flex-wrap:wrap;}
+.variant-choice{min-width:44px;min-height:44px;padding:9px 13px;border:1px solid var(--border);border-radius:12px;background:var(--surface);color:var(--text);font:inherit;font-size:13px;cursor:pointer;}
+.variant-choice.selected{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,var(--surface));box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 22%,transparent);}
+.variant-choice:disabled{opacity:.42;text-decoration:line-through;cursor:not-allowed;}
+.selected-variant-summary{display:grid;grid-template-columns:1fr auto;gap:5px 12px;padding:13px;border-radius:12px;background:var(--card);font-size:12px;}
+.selected-variant-summary strong{grid-column:2;grid-row:1/3;color:var(--accent);font-size:18px;align-self:center;}
+.selected-variant-summary span:last-child{color:var(--text-2);}
+.variant-unavailable{margin-top:14px;padding:12px;border-radius:12px;background:color-mix(in srgb,var(--warning) 12%,var(--card));color:var(--warning);font-size:12px;}
+.checkout-review{max-width:460px;padding:24px;}
+.checkout-review h2{font-size:22px;margin:0 0 8px;}
+.checkout-review-variant{margin:12px 0;padding:11px 13px;border-radius:11px;background:var(--surface);font-weight:600;}
+.checkout-review-price{display:flex;align-items:center;justify-content:space-between;padding:14px 0;border-top:1px solid var(--border);border-bottom:1px solid var(--border);}
+.checkout-review-price strong{font-size:22px;color:var(--accent);}
+.checkout-review-actions{display:flex;gap:10px;margin-top:20px;}
+.checkout-review-actions .btn{min-height:48px;flex:1;}
 @media(min-width:900px){
   .product-detail-main{grid-template-columns:minmax(0,1.08fr) minmax(340px,.92fr);gap:clamp(24px,4vw,56px);}
   .pd-gallery-column{position:sticky;top:calc(var(--header-h) + 20px);}
@@ -1342,11 +1371,14 @@ img{max-width:100%;display:block;}
   .screen:has(.product-detail-main)>.detail-block,.screen:has(.product-detail-main)>.section{max-width:820px;}
 }
 @media(max-width:479px){
+  .variant-option-row{grid-template-columns:1fr;}
+  .variant-option-row .btn{width:100%;}
   .product-card .info{padding:9px 10px 11px;}
   .product-card .name{font-size:12.5px;}
   .product-card .meta-row{flex-wrap:wrap;}
   .product-card .product-card-action{font-size:10px;}
   .pd-summary-column .pd-price{font-size:24px;}
+  .checkout-review-actions{flex-direction:column-reverse;}
 }
 @media(prefers-reduced-motion:reduce){
   .product-card{transition:none;}
@@ -2737,19 +2769,22 @@ async function fetchMyOrders(){
    adding Flutterwave or another provider later means writing one new
    startXFlutterwaveCheckout()-style function and adding one case here —
    nothing else in the app needs to change. */
-function startCheckout(productId){
+function startCheckout(productId, variantId){
   const p = findProduct(productId);
+  const selectedVariant=(p&&p.variants||[]).find(v=>String(v.id)===String(variantId||appState.selectedVariants[productId]||''));
+  if(p&&(p.variants||[]).length&&!isVariantPurchasable(selectedVariant)){toast('Choose an available product option before continuing.','error');return;}
   // A product can be marked to complete payment on another site entirely
   // (e.g. a seller's own Selar/Gumroad page) instead of the in-app Paystack
   // popup. When set, that always wins — checked before the gateway dispatch
   // below so it works no matter which gateway is configured.
-  if(p && p.externalPaymentLink){
+  const externalPaymentLink=selectedVariant&&(selectedVariant.externalPaymentLink||selectedVariant.affiliateLink)||p&&p.externalPaymentLink;
+  if(p && externalPaymentLink){
     logActivity('User', `Sent to external payment link for "${p.name}"`);
-    window.open(p.externalPaymentLink, '_blank', 'noopener');
+    openCheckoutReviewModal(p,selectedVariant,null,()=>window.open(externalPaymentLink,'_blank','noopener'),true);
     return;
   }
   const gateway = DB.content.paymentGateway || 'paystack';
-  if(gateway === 'paystack') return startPaystackCheckout(productId);
+  if(gateway === 'paystack') return startPaystackCheckout(productId,selectedVariant&&selectedVariant.id||null);
   // Extension point for future gateways, e.g.:
   // if(gateway === 'flutterwave') return startFlutterwaveCheckout(productId);
   // Shoppers never see internal config details — just a plain, friendly
@@ -2759,21 +2794,27 @@ function startCheckout(productId){
   toast('Checkout is temporarily unavailable. Please try again shortly.', 'error');
 }
 
-function startPaystackCheckout(productId){
+function startPaystackCheckout(productId, variantId, deliveryDetails, confirmed){
   const p = findProduct(productId);
   if(!p){ toast('Product not found', 'error'); return; }
+  const selectedVariant=(p.variants||[]).find(v=>String(v.id)===String(variantId||appState.selectedVariants[productId]||''));
+  if((p.variants||[]).length&&!isVariantPurchasable(selectedVariant)){toast('This option is no longer available. Choose another option.','error');return;}
   // PHYSICAL-COMMERCE ADDITION: for a physical product, collect delivery
   // details first, then re-invoke this exact same function's real body —
   // guarded by `deliveryDetails !== undefined so it can never loop or
   // fire twice, and so every DIGITAL/SERVICE product's checkout runs
   // through the untouched original path below with zero behavior change.
-  if(p.productType === 'PHYSICAL' && arguments.length < 2){
+  if(p.productType === 'PHYSICAL' && deliveryDetails === undefined){
     openDeliveryDetailsModal(p, (deliveryDetails)=>{
-      startPaystackCheckout(productId, deliveryDetails);
+      startPaystackCheckout(productId, selectedVariant&&selectedVariant.id||null, deliveryDetails);
     });
     return;
   }
-  const deliveryDetails = arguments[1] || null;
+  deliveryDetails = deliveryDetails || null;
+  if(!confirmed){
+    openCheckoutReviewModal(p,selectedVariant,deliveryDetails,()=>startPaystackCheckout(productId,selectedVariant&&selectedVariant.id||null,deliveryDetails,true));
+    return;
+  }
   const c = DB.content;
   if(!c.paystackPublicKey){
     // Shopper-facing message stays generic — no mention of "admin" or
@@ -2803,7 +2844,8 @@ function startPaystackCheckout(productId){
     // Paystack expects every currency's amount in its smallest subunit
     // (kobo for NGN, cents for USD, etc.) — always base amount * 100,
     // per Paystack's own "Supported currency" docs.
-    const amountMajor = Math.round((p.salePrice || p.price) * rate);
+    const variantPrice=effectiveVariantPrice(p,selectedVariant);
+    const amountMajor = Math.round((variantPrice==null?(p.salePrice || p.price):variantPrice) * rate);
     const amountSubunit = amountMajor * 100;
     const reference = 'LN-' + Date.now() + '-' + Math.random().toString(36).slice(2,8);
     if(chargeCode !== selectedCode){
@@ -2817,6 +2859,7 @@ function startPaystackCheckout(productId){
       ref: reference,
       metadata: {
         productId: p.id, productName: p.name,
+        ...(selectedVariant?{variantId:selectedVariant.id,variantName:variantLabel(p,selectedVariant)}:{}),
         uid: window.__fbUid || 'guest', custom_fields: [],
         // PHYSICAL-COMMERCE ADDITION: absent/undefined for every digital
         // purchase — visible on the Paystack dashboard transaction too,
@@ -2832,8 +2875,8 @@ function startPaystackCheckout(productId){
         // reference isn't lost — it's retried automatically next time the
         // app opens, or manually from Order History, instead of becoming
         // "I paid and got nothing."
-        addPendingPayment(response.reference, p, email, deliveryDetails);
-        verifyPaystackPayment(response.reference, p, email, true, deliveryDetails);
+        addPendingPayment(response.reference, p, email, deliveryDetails,selectedVariant&&selectedVariant.id);
+        verifyPaystackPayment(response.reference, p, email, true, deliveryDetails,selectedVariant&&selectedVariant.id);
       },
       onClose: function(){
         toast('Checkout closed — no charge was made.', 'info');
@@ -2851,6 +2894,31 @@ function startPaystackCheckout(productId){
   } else {
     openCheckoutEmailModal(proceedWithEmail);
   }
+}
+
+function openCheckoutReviewModal(product,variant,delivery,onContinue,external=false){
+  if($('#checkoutReviewOverlay'))return;
+  const overlay=document.createElement('div');overlay.id='checkoutReviewOverlay';overlay.className='modal-backdrop';overlay.setAttribute('role','presentation');
+  const amount=effectiveVariantPrice(product,variant);
+  const selectedName=variantLabel(product,variant);
+  const deliveryCopy=external?'You will continue to the seller’s payment page to complete this order.':product.productType==='PHYSICAL'
+    ? `Ships to ${escapeHtml(delivery&&delivery.country||'your delivery address')}${product.physical&&product.physical.deliveryEstimate?` · ${escapeHtml(product.physical.deliveryEstimate)}`:''}`
+    : 'Digital access or download after payment verification';
+  overlay.innerHTML=`<section class="modal-box checkout-review" role="dialog" aria-modal="true" aria-labelledby="checkoutReviewTitle" aria-describedby="checkoutReviewDelivery">
+    <h2 id="checkoutReviewTitle">Review your selection</h2>
+    <p class="text-2">${escapeHtml(product.name)}</p>
+    ${selectedName?`<div class="checkout-review-variant">${escapeHtml(selectedName)}</div>`:''}
+    <div class="checkout-review-price"><span>Price</span><strong>${amount===0?'Free':fmtPrice(amount)}</strong></div>
+    <p id="checkoutReviewDelivery" class="text-2 small">${deliveryCopy}</p>
+    <div class="checkout-review-actions"><button type="button" class="btn btn-ghost" data-review-cancel>Change selection</button><button type="button" class="btn btn-primary" data-review-continue>Continue to payment</button></div>
+  </section>`;
+  document.body.appendChild(overlay);
+  const close=()=>overlay.remove();
+  overlay.querySelector('[data-review-cancel]')?.addEventListener('click',close);
+  overlay.querySelector('[data-review-continue]')?.addEventListener('click',()=>{close();onContinue();});
+  overlay.addEventListener('click',event=>{if(event.target===overlay)close();});
+  overlay.addEventListener('keydown',event=>{if(event.key==='Escape')close();});
+  overlay.querySelector('[data-review-continue]')?.focus();
 }
 
 /* Guest checkout email capture — replaces the old window.prompt(), which
@@ -2995,12 +3063,12 @@ function hidePaymentPartnerOverlay(){ $('#paymentPartnerOverlay')?.remove(); }
    so a dropped connection retries automatically instead of the shopper
    just losing their money's worth. */
 function getPendingPayments(){ return lsGet(LS_KEYS.pendingPayments, []); }
-function addPendingPayment(reference, product, email, delivery){
+function addPendingPayment(reference, product, email, delivery, variantId){
   const list = getPendingPayments().filter(x=>x.reference!==reference);
   // PHYSICAL-COMMERCE ADDITION: `delivery` is undefined for every existing
   // digital purchase (callers simply don't pass a 4th argument), so this
   // is a pure addition — nothing changes for the digital flow.
-  list.push({ reference, productId: product.id, productName: product.name, email, delivery: delivery || null, at: new Date().toISOString(), attempts: 0 });
+  list.push({ reference, productId: product.id, productName: product.name, variantId: variantId||null, email, delivery: delivery || null, at: new Date().toISOString(), attempts: 0 });
   lsSet(LS_KEYS.pendingPayments, list);
 }
 function removePendingPayment(reference){
@@ -3022,7 +3090,7 @@ async function retryPendingPayments(silent){
   for(const entry of list){
     const product = findProduct(entry.productId);
     if(!product) { removePendingPayment(entry.reference); continue; } // product deleted since — nothing to deliver
-    await verifyPaystackPayment(entry.reference, product, entry.email, !silent, entry.delivery);
+    await verifyPaystackPayment(entry.reference, product, entry.email, !silent, entry.delivery,entry.variantId);
   }
 }
 /* Persistent, un-missable result — replaces relying on a toast (which
@@ -3223,7 +3291,7 @@ async function retrySinglePendingPayment(reference){
   if(!entry){ toast('Nothing to retry — this was already resolved.'); return; }
   const product = findProduct(entry.productId);
   if(!product){ toast('That product no longer exists — contact support with reference ' + reference, 'error'); return; }
-  await verifyPaystackPayment(entry.reference, product, entry.email, true);
+  await verifyPaystackPayment(entry.reference, product, entry.email, true,entry.delivery,entry.variantId);
 }
 
 /* ---------------- RELIABLE FILE DOWNLOAD ----------------
@@ -3277,7 +3345,7 @@ function downloadFilenameFor(product){
   return ((product && product.name) || 'lexden-nova-file').replace(/[^a-z0-9]+/gi,'-').toLowerCase().replace(/^-+|-+$/g,'') || 'lexden-nova-file';
 }
 
-async function verifyPaystackPayment(reference, product, email, showResult, delivery){
+async function verifyPaystackPayment(reference, product, email, showResult, delivery, variantId){
   const c = DB.content;
   // FIX (mega-fix batch #2): this used to hard-stop here — silently
   // skipping verification entirely — whenever the admin's "Verification
@@ -3299,6 +3367,7 @@ async function verifyPaystackPayment(reference, product, email, showResult, deli
         body: JSON.stringify({
           reference, uid: window.__fbUid || null, email,
           productId: product.id, productName: product.name,
+          ...(variantId?{variantId}:{}),
           // PHYSICAL-COMMERCE ADDITION: omitted entirely (undefined) for
           // every digital purchase — only ever set for a PHYSICAL product
           // that went through openDeliveryDetailsModal first. See
@@ -3323,7 +3392,8 @@ async function verifyPaystackPayment(reference, product, email, showResult, deli
       // Gumroad receipt page, another download host) takes priority over
       // the directly uploaded fileUrl when both are set, since it's the
       // more deliberate choice for that specific product.
-      const openOnDelivery = product.deliveryLink || product.fileUrl;
+      const selectedVariant=(product.variants||[]).find(v=>String(v.id)===String(variantId||''));
+      const openOnDelivery = selectedVariant&&(selectedVariant.deliveryLink||selectedVariant.fileUrl) || product.deliveryLink || product.fileUrl;
       if(product.productType === 'PHYSICAL'){
         // Physical orders have nothing to download — a shipping-specific
         // confirmation instead of the digital "here's your file" modal.
@@ -3337,7 +3407,7 @@ async function verifyPaystackPayment(reference, product, email, showResult, deli
         // modal + its own Download button below is the guaranteed
         // fallback either way, so a paid shopper is never left with
         // nothing.
-        const filename = downloadFilenameFor(product);
+        const filename = downloadFilenameFor({...product,name:selectedVariant?`${product.name}-${variantLabel(product,selectedVariant)}`:product.name});
         const downloaded = await forceDownloadFile(openOnDelivery, filename);
         showPaymentResultModal({
           status:'success', reference, downloadLink: openOnDelivery, filename,
@@ -3484,6 +3554,7 @@ function shopperProfile(){
 const appState = {
   route:'#home',
   productFilters:{ category:'all', kind:'all', price:'all', priceMin:null, priceMax:null, sort:'popular', q:'' },
+  selectedVariants:{},
   priceFilterOpen:false,
   wishlistSort:'newest',
   novaOpen:false,
@@ -3649,9 +3720,94 @@ function discountPercent(p){
   return Math.round((1 - (Number(p.salePrice)/Number(p.price))) * 100);
 }
 function priceLabel(p){
-  if(isFreeProduct(p)) return 'Free';
-  const hasSale = p.salePrice && p.salePrice < p.price;
-  return fmtPrice(hasSale ? p.salePrice : p.price);
+  if(isFreeProduct(p) && !(p.variants||[]).length) return 'Free';
+  const variants=(p.variants||[]).filter(v=>isVariantPurchasable(v)).sort((a,b)=>effectiveVariantPrice(p,a)-effectiveVariantPrice(p,b));
+  const variant=variants[0];
+  const current=variant?effectiveVariantPrice(p,variant):effectiveVariantPrice(p,null);
+  const label=current===0?'Free':fmtPrice(current);
+  return variants.length>1?`From ${label}`:label;
+}
+function effectiveVariantPrice(p,variant){
+  const base=variant&&typeof variant.price==='number'?variant.price:(p&&p.price);
+  if(typeof base!=='number'||!Number.isFinite(base)||base<0)return null;
+  const sale=variant&&typeof variant.salePrice==='number'?variant.salePrice:(!variant&&p&&p.salePrice);
+  return typeof sale==='number'&&Number.isFinite(sale)&&sale>=0&&sale<base?sale:base;
+}
+function isVariantPurchasable(variant){return !!variant&&variant.active!==false&&variant.available!==false&&!(variant.stock!==undefined&&variant.stock!==null&&variant.stock!==''&&Number.isFinite(Number(variant.stock))&&Number(variant.stock)<=0);}
+function variantLabel(p,variant){
+  if(!variant)return '';
+  const values=variant.optionValues||{};
+  return (p.options||[]).map(option=>{const value=(option.values||[]).find(item=>String(item.id)===String(values[option.id]));return value?value.label:values[option.id];}).filter(Boolean).join(' • ')||variant.title||variant.name||'';
+}
+function getSelectedProductVariant(p){
+  const variants=(p&&Array.isArray(p.variants)?p.variants:[]);
+  if(!variants.length)return null;
+  let variant=variants.find(v=>String(v.id)===String(appState.selectedVariants[p.id]||''));
+  if(!variant){variant=variants.find(isVariantPurchasable)||null;if(variant)appState.selectedVariants[p.id]=variant.id;}
+  return variant;
+}
+function productVariantSelector(p){
+  const variants=(p.variants||[]); if(!variants.length)return '';
+  const selected=getSelectedProductVariant(p); if(!selected)return `<div class="variant-unavailable" role="status">No options are currently available. Please contact us for help.</div>`;
+  const options=Array.isArray(p.options)?p.options:[];
+  if(!options.length)return `<div class="variant-choice-group" id="variantSelector-${escapeHtml(p.id)}"><label for="variantChoice-${escapeHtml(p.id)}">Choose an option</label><select id="variantChoice-${escapeHtml(p.id)}" onchange="selectProductVariant('${jsStr(p.id)}',this.value)">${variants.map(v=>`<option value="${escapeHtml(v.id)}" ${String(v.id)===String(selected.id)?'selected':''} ${isVariantPurchasable(v)?'':'disabled'}>${escapeHtml(v.title||v.name||v.sku||'Option')} · ${priceLabel({...p,variants:[],price:effectiveVariantPrice(p,v),salePrice:null})}${v.stock===0?' · Out of stock':''}</option>`).join('')}</select><div class="small text-2" id="pdVariantAvailability" aria-live="polite">${selected.stock===0?'Out of stock':selected.stock!=null?`${selected.stock} available`:'Available'}</div></div>`;
+  return `<div class="variant-selector" id="variantSelector-${escapeHtml(p.id)}">${options.map(option=>`<fieldset class="variant-choice-group"><legend>${escapeHtml(option.name)}</legend><div class="variant-choice-list">${(option.values||[]).map(value=>{
+    const active=String((selected.optionValues||{})[option.id])===String(value.id);
+    const available=variants.some(variant=>isVariantPurchasable(variant)&&String((variant.optionValues||{})[option.id])===String(value.id)&&(p.options||[]).every(other=>other.id===option.id||String((variant.optionValues||{})[other.id])===String((selected.optionValues||{})[other.id])));
+    return `<button type="button" class="variant-choice ${active?'selected':''}" aria-pressed="${active}" ${available?'':'disabled'} onclick="selectProductOption('${jsStr(p.id)}','${jsStr(option.id)}','${jsStr(value.id)}')">${escapeHtml(value.label||value.id)}</button>`;
+  }).join('')}</div></fieldset>`).join('')}
+  <div class="selected-variant-summary" aria-live="polite"><span id="pdVariantSummary">${escapeHtml(variantLabel(p,selected))}</span><strong id="pdVariantPrice">${priceLabel({...p,variants:[],price:effectiveVariantPrice(p,selected),salePrice:null})}</strong><span id="pdVariantAvailability">${selected.stock===0?'Out of stock':(p.productType==='PHYSICAL'?'Availability confirmed when ordered':'Available')}</span></div></div>`;
+}
+function selectProductVariant(productId,variantId){
+  const p=findProduct(productId);const variant=(p&&p.variants||[]).find(v=>String(v.id)===String(variantId));
+  if(!isVariantPurchasable(variant)){toast('That option is not available right now.','info');return;}
+  appState.selectedVariants[productId]=variant.id;updateSelectedVariantUI(p,variant);
+}
+function selectProductOption(productId,optionId,valueId){
+  const p=findProduct(productId);if(!p)return;
+  const current=getSelectedProductVariant(p);const values={...(current&&current.optionValues||{}),[optionId]:valueId};
+  const variant=(p.variants||[]).find(v=>isVariantPurchasable(v)&&(p.options||[]).every(option=>String((v.optionValues||{})[option.id])===String(values[option.id])));
+  if(!variant){toast('That combination is not available. Choose another option.','info');return;}
+  selectProductVariant(productId,variant.id);
+}
+function updateSelectedVariantUI(p,variant){
+  const selector=document.getElementById(`variantSelector-${p.id}`);
+  if(selector){const replacement=productVariantSelector(p);selector.outerHTML=replacement;}
+  const current=effectiveVariantPrice(p,variant);
+  const main=$('#pdCurrentPrice');if(main)main.textContent=current===0?'Free':fmtPrice(current);
+  const sticky=$('#pdStickyPrice');if(sticky)sticky.textContent=current===0?'Free':fmtPrice(current);
+  const action=$('#pdStickyAction');if(action)action.innerHTML=stickyPurchaseActionHtml(p,variant);
+  const base=typeof variant.price==='number'?variant.price:p.price;
+  const sale=typeof variant.salePrice==='number'&&variant.salePrice<base?variant.salePrice:null;
+  const priceRow=main&&main.parentElement;
+  let old=$('#pdOldPrice');
+  if(sale!==null&&!old&&priceRow){old=document.createElement('span');old.id='pdOldPrice';old.className='pd-old';priceRow.appendChild(old);}
+  if(old){old.textContent=sale!==null?fmtPrice(base):'';old.hidden=sale===null;}
+  const discount=sale!==null&&base>0?Math.round((1-sale/base)*100):0;
+  let badge=$('#pdDiscountBadge');
+  if(discount>0&&!badge&&priceRow){badge=document.createElement('span');badge.id='pdDiscountBadge';badge.className='chip';badge.style.cssText='background:var(--accent-2);color:#fff;';priceRow.appendChild(badge);}
+  if(badge){badge.textContent=discount?`-${discount}% OFF`:'';badge.hidden=!discount;}
+  const status=$('#pdVariantAvailability');if(status)status.textContent=variant.stock===0?'Out of stock':(variant.stock!=null?`${variant.stock} available`:p.productType==='PHYSICAL'?'Availability confirmed when ordered':'Available');
+  const media=$('#pdMediaMain');
+  if(media){const selectedMedia=variant.image?{url:variant.image,type:'image',alt:variantLabel(p,variant)}:productMedia(p)[0]||{url:p.image,type:'image'};media.innerHTML=mediaHtml(selectedMedia,true);}
+}
+function deliverFreeProduct(productId){
+  const product=findProduct(productId);if(!product)return;
+  const variant=getSelectedProductVariant(product);
+  const url=variant&&(variant.deliveryLink||variant.fileUrl||variant.affiliateLink||variant.externalPaymentLink)||product.deliveryLink||product.fileUrl||product.affiliateLink||'';
+  if(!url||url==='#'){toast('This free resource is not ready yet. Please check back soon.','info');return;}
+  logActivity('User',`Opened free ${productKind(product)} resource "${product.name}"`);
+  trackProductClick(product.id);
+  window.open(url,'_blank','noopener');
+}
+function stickyPurchaseActionHtml(p,variant){
+  if((p.variants||[]).length&&!isVariantPurchasable(variant))return '<button class="btn btn-outline" style="width:100%;" disabled>No options available</button>';
+  const amount=variant?effectiveVariantPrice(p,variant):effectiveVariantPrice(p,null);
+  const free=variant?amount===0:isFreeProduct(p);
+  const actionProduct=variant?{...p,price:amount,salePrice:null}:p;
+  const label=productKind(p)==='course'&&!free?'Get Started':productActionLabel(actionProduct);
+  const action=free?`deliverFreeProduct('${jsStr(p.id)}')`:`startCheckout('${jsStr(p.id)}')`;
+  return `<button class="btn btn-primary" style="width:100%;" onclick="${action}">${escapeHtml(label)} →</button>`;
 }
 async function tryRefreshExchangeRates(){
   const c = DB.content;
@@ -5079,7 +5235,13 @@ function screenProductDetail(id){
   const reviews = DB.testimonials.filter(t=>t.productId===p.id);
   const stats = liveRatingStats(p);
   const c = DB.content;
+  const selectedVariant = getSelectedProductVariant(p);
+  const selectedBasePrice = selectedVariant&&typeof selectedVariant.price==='number'?selectedVariant.price:p.price;
+  const selectedSalePrice = selectedVariant&&typeof selectedVariant.salePrice==='number'&&selectedVariant.salePrice<selectedBasePrice?selectedVariant.salePrice:(selectedVariant?null:(hasSale?p.salePrice:null));
+  const selectedEffectivePrice = selectedSalePrice!==null?selectedSalePrice:selectedBasePrice;
+  const selectedDiscount = selectedSalePrice!==null&&selectedBasePrice>0?Math.round((1-selectedSalePrice/selectedBasePrice)*100):0;
   const media = productMedia(p);
+  if(selectedVariant&&selectedVariant.image&&!media.some(item=>item.url===selectedVariant.image))media.unshift({url:selectedVariant.image,type:'image',alt:variantLabel(p,selectedVariant)});
   const main = media[0] || {url:p.image, type:'image'};
   const descLong = (p.description||'').length > 220;
   return `
@@ -5103,9 +5265,9 @@ function screenProductDetail(id){
     <div class="pd-summary-column">
     <div class="card" style="padding:16px;margin-bottom:4px;">
       <div class="flex" style="align-items:baseline;gap:8px;flex-wrap:wrap;">
-        <span class="pd-price">${priceLabel(p)}</span>
-        ${hasSale?`<span class="pd-old">${fmtPrice(p.price)}</span>`:''}
-        ${discountPercent(p)>0?`<span class="chip" style="background:var(--accent-2);color:#fff;">-${discountPercent(p)}% OFF</span>`:''}
+        <span class="pd-price" id="pdCurrentPrice">${selectedEffectivePrice===0?'Free':fmtPrice(selectedEffectivePrice)}</span>
+        ${selectedSalePrice!==null?`<span class="pd-old" id="pdOldPrice">${fmtPrice(selectedBasePrice)}</span>`:''}
+        ${selectedDiscount>0?`<span class="chip" id="pdDiscountBadge" style="background:var(--accent-2);color:#fff;">-${selectedDiscount}% OFF</span>`:''}
       </div>
       <div class="flex gap-8 mt-8" style="align-items:center;">
         ${stats.count
@@ -5116,6 +5278,7 @@ function screenProductDetail(id){
       <p class="text-2 ${descLong?'pd-desc-clamped':''}" id="pdDesc" style="font-size:13.5px;margin-top:6px;">${escapeHtml(p.description)}</p>
       ${descLong?`<button class="btn-sm btn-ghost" id="pdDescToggle" style="padding:2px 0;color:var(--accent);" onclick="toggleDescExpand()">See more</button>`:''}
       <div class="chip-row mt-8">${(p.tags||[]).map(t=>`<span class="chip">${escapeHtml(t)}</span>`).join('')}</div>
+      ${productVariantSelector(p)}
       ${p.fileUrl && !isFreeProduct(p) ? `<div class="text-2 small" style="margin-top:8px;">📄 Instant PDF download the moment payment is confirmed</div>` : ''}
       ${p.productType==='PHYSICAL' ? physicalStockBlock(p) : ''}
     </div>
@@ -5169,11 +5332,9 @@ function screenProductDetail(id){
     <div class="sticky-buy">
       <div style="flex:1;">
         <div class="small text-2">Price</div>
-        <div style="font-weight:700;font-size:16px;">${priceLabel(p)}</div>
+        <div id="pdStickyPrice" style="font-weight:700;font-size:16px;">${selectedVariant?priceLabel({...p,variants:[],price:effectiveVariantPrice(p,selectedVariant),salePrice:null}):priceLabel(p)}</div>
       </div>
-      ${isFreeProduct(p)
-        ? `<a class="btn btn-primary" style="flex:2;" href="${p.deliveryLink || p.fileUrl || p.affiliateLink || '#'}" target="_blank" rel="noopener sponsored" onclick="logActivity('User','Clicked ${escapeHtml(productActionLabel(p))} on ${escapeHtml(p.name)}'); trackProductClick('${p.id}')">${escapeHtml(productActionLabel(p))} →</a>`
-        : `<button class="btn btn-primary" style="flex:2;" onclick="startCheckout('${p.id}')">${escapeHtml(productKind(p)==='course' ? 'Get Started' : productActionLabel(p))} →</button>`}
+      <div id="pdStickyAction" style="flex:2;">${stickyPurchaseActionHtml(p,selectedVariant)}</div>
     </div>
   </div>`;
 }
@@ -7781,6 +7942,8 @@ function openProductForm(id){
   const existingMedia = p ? productMedia(p) : [];
   const mediaSlots = Array.from({length:8}).map((_,i)=> existingMedia[i]?existingMedia[i].url:'');
   const specs = (p && p.specs) || {};
+  window.__adminExistingVariants = p && Array.isArray(p.variants) ? JSON.parse(JSON.stringify(p.variants)) : [];
+  window.__adminExistingOptions = p && Array.isArray(p.options) ? JSON.parse(JSON.stringify(p.options)) : [];
   const isHardware = HARDWARE_CATEGORY_IDS.includes(p ? p.category : cats[0]?.id);
   wrap.innerHTML = `
   <div class="card" style="padding:18px;margin-bottom:20px;">
@@ -7808,6 +7971,18 @@ function openProductForm(id){
         <label><input type="checkbox" id="f_affiliateEnabled" ${p&&p.affiliateEnabled?'checked':''}> Allow Nova Affiliates to earn commission on this product</label>
       </div>
       <div class="form-field"><label>Nova Affiliate commission % (blank = use Program default)</label><input id="f_affiliateCommissionPct" type="number" min="0" max="100" step="0.5" value="${p&&p.affiliateCommissionPct!=null?p.affiliateCommissionPct:''}" placeholder="e.g. 15"></div>
+    </div>
+    <div class="admin-variant-editor" aria-labelledby="variantEditorHeading">
+      <div class="flex" style="justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;">
+        <div><h4 id="variantEditorHeading" style="font-size:14px;margin-bottom:4px;">Product options and variants</h4><p class="text-2 small">Use one product page for choices such as color, storage, version or license. Each combination can have its own price, stock, delivery, supplier variant and affiliate rate.</p></div>
+        <button type="button" class="btn btn-outline btn-sm" onclick="addVariantOptionRow()">+ Add option</button>
+      </div>
+      <div id="variantOptionsEditor">${variantOptionRowsHtml(p&&p.options||[])}</div>
+      <div class="flex gap-8" style="margin:10px 0;">
+        <button type="button" class="btn btn-outline btn-sm" onclick="buildVariantMatrix()">Build variant combinations</button>
+      </div>
+      <div id="variantMatrix" class="variant-matrix"></div>
+      <p class="text-2 small" style="margin-top:8px;">Publishing a variant product requires an explicit price for every variant (enter 0 for free). Out-of-stock or disabled variants cannot be selected. Legacy products without options keep their existing checkout behavior.</p>
     </div>
     <div class="divider"></div>
     <h4 style="font-size:13px;margin-bottom:8px;">Details</h4>
@@ -7942,7 +8117,130 @@ function openProductForm(id){
       <button class="btn btn-outline" onclick="$('#productFormWrap').innerHTML=''">Cancel</button>
     </div>
   </div>`;
+  renderVariantMatrix(window.__adminExistingVariants);
   wrap.scrollIntoView({behavior:'smooth'});
+}
+function variantSlug(value){return String(value||'').trim().toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,48)||'value';}
+function variantOptionRowsHtml(options){
+  return (options||[]).map((option,index)=>`<div class="variant-option-row" data-variant-option="${index}" data-option-id="${escapeHtml(option.id||'')}">
+    <label>Option name<input class="variant-option-name" value="${escapeHtml(option.name||'')}" placeholder="Color"></label>
+    <label>Choices, separated by commas<input class="variant-option-values" value="${escapeHtml((option.values||[]).map(value=>typeof value==='string'?value:value.label).join(', '))}" placeholder="Black, Blue"></label>
+    <button type="button" class="btn btn-danger btn-sm" aria-label="Remove option" onclick="this.closest('.variant-option-row').remove()">Remove</button>
+  </div>`).join('');
+}
+function addVariantOptionRow(){
+  const wrap=$('#variantOptionsEditor'); if(!wrap)return;
+  wrap.insertAdjacentHTML('beforeend',variantOptionRowsHtml([{name:'',values:[]}]));
+  wrap.lastElementChild?.querySelector('.variant-option-name')?.focus();
+}
+function readVariantOptions(){
+  const seen=new Set();
+  return $all('#variantOptionsEditor .variant-option-row').map(row=>{
+    const name=(row.querySelector('.variant-option-name')?.value||'').trim();
+    const source=(window.__adminExistingOptions||[]).find(option=>option.id===row.dataset.optionId)||null;
+    const id=source&&source.id||variantSlug(name);
+    const labels=(row.querySelector('.variant-option-values')?.value||'').split(',').map(value=>value.trim()).filter(Boolean);
+    if(!name||!labels.length)return null;
+    if(seen.has(id))throw new Error(`Option names must be unique: ${name}`);
+    seen.add(id);
+    const valueSeen=new Set();
+    const values=labels.map(label=>{const old=source&&(source.values||[]).find(value=>String(typeof value==='string'?value:value.label).toLowerCase()===label.toLowerCase());return {id:old&&(typeof old==='string'?variantSlug(old):old.id)||variantSlug(label),label};}).filter(value=>{if(valueSeen.has(value.id))return false;valueSeen.add(value.id);return true;});
+    return {id,name,values};
+  }).filter(Boolean);
+}
+function variantCombinations(options){
+  if(!options.length)return [];
+  return options.reduce((rows,option)=>rows.flatMap(row=>option.values.map(value=>({labels:[...row.labels,value.label],optionValues:{...row.optionValues,[option.id]:value.id}}))),[{labels:[],optionValues:{}}]);
+}
+function renderVariantMatrix(existing){
+  const wrap=$('#variantMatrix'); if(!wrap)return;
+  const options=readVariantOptions();
+  if(!options.length){wrap.innerHTML='<div class="variant-empty">Add an option and its choices, then build the combinations.</div>';return;}
+  const combinations=variantCombinations(options);
+  if(combinations.length>100){wrap.innerHTML='<p class="err">This product creates more than 100 variants. Split the options into separate products or reduce the choice count.</p>';return;}
+  const old=Array.isArray(existing)?existing:(window.__adminExistingVariants||[]);
+  const byCombination=new Map(old.map(variant=>[JSON.stringify(variant.optionValues||{}),variant]));
+  wrap.innerHTML=combinations.map((combination,index)=>{
+    const prior=byCombination.get(JSON.stringify(combination.optionValues))||{};
+    const variant={...prior,id:prior.id||`v-${Object.values(combination.optionValues).join('-')}`,title:combination.labels.join(' • '),optionValues:combination.optionValues};
+    const rate=(DB.content.exchangeRates&&DB.content.exchangeRates.NGN)||1550;
+    return `<fieldset class="variant-row" data-variant-row="${index}" data-option-values="${escapeHtml(JSON.stringify(combination.optionValues))}">
+      <legend>${escapeHtml(variant.title)}</legend>
+      <input type="hidden" class="variant-id" value="${escapeHtml(variant.id)}">
+      <div class="variant-row-fields">
+        <label>Price (₦)<input class="variant-price" type="number" min="0" step="1" value="${typeof variant.price==='number'?Math.round(variant.price*rate):''}" placeholder="Required"></label>
+        <label>Sale price (₦)<input class="variant-sale" type="number" min="0" step="1" value="${typeof variant.salePrice==='number'?Math.round(variant.salePrice*rate):''}"></label>
+        <label>Stock<input class="variant-stock" type="number" min="0" step="1" value="${variant.stock??''}" placeholder="Optional"></label>
+        <label>SKU<input class="variant-sku" value="${escapeHtml(variant.sku||'')}" placeholder="Item code"></label>
+        <label>Delivery link<input class="variant-delivery" type="url" value="${escapeHtml(variant.deliveryLink||'')}" placeholder="Optional"></label>
+        <label>File URL<input class="variant-file" type="url" value="${escapeHtml(variant.fileUrl||'')}" placeholder="Optional"></label>
+        <label>External payment or affiliate link<input class="variant-external-link" type="url" value="${escapeHtml(variant.externalPaymentLink||variant.affiliateLink||'')}" placeholder="Only if this option uses an external link"></label>
+        <label>Variant image URL<input class="variant-image" type="url" value="${escapeHtml(variant.image||'')}" placeholder="Optional exact variant image"></label>
+        <label>CJ variant ID<input class="variant-cj-id" value="${escapeHtml(variant.cjVariantId||'')}" placeholder="Physical products"></label>
+        <label>Affiliate commission %<input class="variant-commission" type="number" min="0" max="100" step="0.5" value="${variant.affiliateCommissionPct??''}" placeholder="Use product default"></label>
+        <label class="variant-enabled"><input class="variant-active" type="checkbox" ${variant.active===false?'':'checked'}> Available for purchase</label>
+        <label class="variant-affiliate">Affiliate eligibility<select class="variant-affiliate-enabled"><option value="inherit" ${variant.affiliateEnabled===undefined||variant.affiliateEnabled===null?'selected':''}>Use product setting</option><option value="yes" ${variant.affiliateEnabled===true?'selected':''}>Enabled</option><option value="no" ${variant.affiliateEnabled===false?'selected':''}>Disabled</option></select></label>
+      </div>
+    </fieldset>`;
+  }).join('');
+  window.__adminExistingVariants=Array.from(wrap.querySelectorAll('.variant-row')).map((row,index)=>{
+    const oldVariant=byCombination.get(JSON.stringify(JSON.parse(row.dataset.optionValues||'{}')))||{};
+    return {...oldVariant,title:combinations[index].labels.join(' • '),optionValues:combinations[index].optionValues};
+  });
+}
+function buildVariantMatrix(){
+  try{
+    const rate=(DB.content.exchangeRates&&DB.content.exchangeRates.NGN)||1550;
+    const rows=$all('#variantMatrix .variant-row');
+    const current=rows.length?readVariantMatrix(rate,'draft',false).variants:(window.__adminExistingVariants||[]);
+    renderVariantMatrix(current);
+    toast('Variant combinations updated','success');
+  }
+  catch(error){toast(error.message||'Check option names and choices','error');}
+}
+function readVariantMatrix(ngnRate,status,requireMatches=true){
+  const rows=$all('#variantMatrix .variant-row');
+  const options=readVariantOptions();
+  if(!rows.length){if(options.length)throw new Error('Build the variant combinations before saving this product.');return {options:[],variants:[]};}
+  if(requireMatches){
+    const combinations=variantCombinations(options);
+    const matches=combinations.length===rows.length&&rows.every((row,index)=>JSON.stringify(JSON.parse(row.dataset.optionValues||'{}'))===JSON.stringify(combinations[index].optionValues));
+    if(!matches)throw new Error('Product choices changed. Build the variant combinations again before saving.');
+  }
+  const variants=rows.map(row=>{
+    const title=row.querySelector('legend')?.textContent||'';
+    const rawPrice=row.querySelector('.variant-price')?.value;
+    const rawSale=row.querySelector('.variant-sale')?.value;
+    const price=rawPrice===''?null:Number(rawPrice)/ngnRate;
+    const salePrice=rawSale===''?null:Number(rawSale)/ngnRate;
+    if(status==='published'&&(price===null||!Number.isFinite(price)))throw new Error(`Enter a valid price for ${title}; enter 0 when this variant is free.`);
+    if(price!==null&&(!Number.isFinite(price)||price<0))throw new Error(`Enter a valid non-negative price for ${title}.`);
+    if(salePrice!==null&&(!Number.isFinite(salePrice)||salePrice<0||(price!==null&&salePrice>=price)))throw new Error(`Sale price for ${title} must be less than its regular price.`);
+    const rawStock=row.querySelector('.variant-stock')?.value;
+    const commission=row.querySelector('.variant-commission')?.value;
+    const stock=rawStock===''?null:Number(rawStock);
+    const commissionPct=commission===''?null:Number(commission);
+    if(stock!==null&&(!Number.isFinite(stock)||stock<0))throw new Error(`Stock for ${title} must be a non-negative number.`);
+    if(commissionPct!==null&&(!Number.isFinite(commissionPct)||commissionPct<0||commissionPct>100))throw new Error(`Affiliate commission for ${title} must be between 0 and 100%.`);
+    return {
+      id:row.querySelector('.variant-id')?.value,
+      title,
+      optionValues:JSON.parse(row.dataset.optionValues||'{}'),
+      ...(price!==null?{price}:{}),
+      salePrice,
+      stock,
+      sku:row.querySelector('.variant-sku')?.value.trim()||'',
+      deliveryLink:row.querySelector('.variant-delivery')?.value.trim()||'',
+      fileUrl:row.querySelector('.variant-file')?.value.trim()||'',
+      externalPaymentLink:row.querySelector('.variant-external-link')?.value.trim()||'',
+      image:row.querySelector('.variant-image')?.value.trim()||'',
+      cjVariantId:row.querySelector('.variant-cj-id')?.value.trim()||'',
+      affiliateEnabled:(row.querySelector('.variant-affiliate-enabled')?.value||'inherit')==='inherit'?null:row.querySelector('.variant-affiliate-enabled')?.value==='yes',
+      affiliateCommissionPct:commissionPct,
+      active:row.querySelector('.variant-active')?.checked!==false,
+    };
+  });
+  return {options,variants};
 }
 function specRowHtml(i,k,v){
   return `<div class="flex gap-8" style="margin-bottom:8px;" data-spec-row="${i}">
@@ -8036,9 +8334,21 @@ async function saveProduct(id){
   // (same base every other currency's rate is defined against) using the
   // current NGN rate, so a blank/zero price correctly means "Free".
   const ngnRate = (DB.content.exchangeRates && DB.content.exchangeRates.NGN) || 1550;
-  const price = (!nairaPrice || nairaPrice<=0) ? 0 : nairaPrice / ngnRate;
+  let price = (!nairaPrice || nairaPrice<=0) ? 0 : nairaPrice / ngnRate;
   const nairaSale = parseFloat($('#f_salePrice').value);
   if(!name){ toast('Product name is required','error'); return; }
+  let variantData;
+  try{variantData=readVariantMatrix(ngnRate,$('#f_status')?.value||'draft');}
+  catch(error){toast(error.message||'Review the variant values before saving.','error');return;}
+  const variantPrices=variantData.variants.map(variant=>variant.price).filter(value=>typeof value==='number'&&Number.isFinite(value));
+  if(variantPrices.length)price=Math.min(...variantPrices);
+  const productType=$('#f_productType')?.value||'DIGITAL';
+  const publishing=$('#f_status')?.value==='published';
+  if(publishing&&productType==='PHYSICAL'){
+    const badVariant=variantData.variants.find(variant=>typeof variant.price!=='number'||variant.price<=0);
+    if(variantData.variants.length&&badVariant){toast(`Set a positive selling price for ${badVariant.title} before publishing a physical product.`,'error');return;}
+    if(!variantData.variants.length&&(!Number.isFinite(price)||price<=0)){toast('Set a positive selling price before publishing a physical product.','error');return;}
+  }
   const specs = {};
   const fmt = $('#f_format')?.value.trim(); if(fmt) specs['Format'] = fmt;
   const lvl = $('#f_level')?.value.trim(); if(lvl) specs['Level'] = lvl;
@@ -8051,7 +8361,10 @@ async function saveProduct(id){
   });
   const data = {
     name, category:$('#f_category').value, price,
-    salePrice: (nairaSale && nairaSale>0) ? nairaSale / ngnRate : null,
+    salePrice: variantData.variants.length ? null : ((nairaSale && nairaSale>0) ? nairaSale / ngnRate : null),
+    options: variantData.options,
+    variants: variantData.variants,
+    pricingReviewRequired: publishing ? false : !!(id&&findProduct(id)?.pricingReviewRequired),
     itemCode:$('#f_itemCode').value, seller:$('#f_seller').value,
     image: coverImage,
     gallery: gallery.length?gallery:[{url:coverImage,type:'image'}], affiliateLink:$('#f_link').value || '#',
@@ -9329,7 +9642,7 @@ async function importCjProduct(pid){
     id: 'p'+Date.now(),
     name: (product.name||'Imported CJ product').slice(0,200),
     category: cats[0]?.id || 'general',
-    price: firstVariant.sellPrice || product.sellPrice || 0,
+    price: 0, // supplier cost is not a shopper price; leave selling price for admin review
     salePrice: null,
     itemCode: 'CJ-'+String(pid).slice(-8),
     seller: 'Lexden Digital',
@@ -9343,6 +9656,15 @@ async function importCjProduct(pid){
     specs: {},
     rating: 4.5, reviewCount: 0, featured: false, trending: false,
     productType: 'PHYSICAL',
+    options: (variants||[]).filter(Boolean).length ? [{
+      id:'cj-variant', name:'Supplier variant', values:(variants||[]).filter(Boolean).map((variant,index)=>({id:`cj-${variant.vid||index}`,label:variant.name||variant.variantKey||variant.sku||`Option ${index+1}`})),
+    }] : [],
+    variants: (variants||[]).filter(Boolean).map((variant,index)=>({
+      id:`cj-${variant.vid||index}`,title:variant.name||variant.variantKey||variant.sku||`Option ${index+1}`,
+      optionValues:{'cj-variant':`cj-${variant.vid||index}`},price:null,salePrice:null,stock:null,
+      sku:variant.sku||'',image:variant.image||'',cjVariantId:variant.vid||'',active:true,
+    })),
+    pricingReviewRequired: true,
     physical: {
       stockMode: 'SUPPLIER_STOCK',
       stockStatus: 'in_stock',
