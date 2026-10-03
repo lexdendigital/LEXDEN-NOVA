@@ -1,5 +1,18 @@
 # LEXDEN NOVA — MCP Implementation Report
 
+## Later update included in this archive (2 October 2026)
+
+The product catalog now includes `nova_upload_product_image`, which
+validates PNG/JPEG/WebP image bytes (maximum 5 MB), uploads to the
+explicit `FIREBASE_STORAGE_BUCKET`, and adds the permanent download URL
+and alt text to the existing product's `gallery` and `images` using a
+Firestore transaction. Product status is not changed. Configure the
+bucket name in Render before calling it. This new storage path has not
+been exercised against production credentials. The current source test
+suite passes 18 tests; the detailed storefront and feature scope is in
+`UPDATE-REPORT.md`. The rest of this report describes the original MCP
+integration validation and remains historical context.
+
 ## What this is
 
 A remote MCP server mounted at `/mcp` on your existing Render backend,

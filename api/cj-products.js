@@ -11,6 +11,7 @@
 //   -> { ok:true, page, pageSize, total, products:[{pid,name,image,sku,sellPrice,...}] }
 
 const { setCors, cjFetch, writeSyncLog } = require('./cj-shared');
+const { normalizeSearchPayload } = require('./cj-normalize');
 
 // Categories change rarely — small in-memory cache per warm instance.
 let categoryCache = null;
@@ -52,11 +53,15 @@ module.exports = async (req, res) => {
 
     const r = await cjFetch('/product/listV2', {
       query: {
-        pageNum: page,
-        pageSize,
-        productNameEn: keyword || undefined,
+        // listV2 uses its own parameter names (page/size/keyWord). The
+        // pageNum/pageSize/productNameEn names belong to the deprecated
+        // /product/list endpoint and are silently ignored by listV2.
+        page,
+        size: pageSize,
+        keyWord: keyword || undefined,
         categoryId,
         countryCode,
+        features: ['enable_description', 'enable_category', 'enable_video'],
       },
     });
 
@@ -66,25 +71,20 @@ module.exports = async (req, res) => {
       return res.status(200).json({ ok: false, error: r.message });
     }
 
-    const raw = (r.data && (r.data.list || r.data.content || r.data.data)) || [];
-    const products = raw.map(p => ({
-      pid: p.pid || p.productId || p.id,
-      name: p.productNameEn || p.nameEn || p.productName || p.name,
-      image: p.productImage || p.bigImage || p.image,
-      sku: p.productSku || p.sku,
-      sellPrice: p.sellPrice != null ? Number(p.sellPrice) : (p.price != null ? Number(p.price) : null),
-      variantCount: p.variantNum || p.variantCount || null,
-      categoryId: p.categoryId || null,
-      supplierName: p.supplierName || 'CJ Dropshipping',
-    }));
+    // listV2 returns data.content[] groups, and each group contains a
+    // productList[]. Mapping the group itself caused successful searches
+    // to return "results" with nearly every product field null.
+    const payload = r.data && (r.data.data || r.data);
+    const { products, rawCount } = normalizeSearchPayload(payload);
 
-    await writeSyncLog({ event: 'products.search', success: true, message: `${products.length} results`, tookMs, detail: { keyword, categoryId, page } });
+    const invalidRows = products.filter(p => !p.pid || !p.name).length;
+    await writeSyncLog({ event: 'products.search', success: true, message: `${products.length} results${invalidRows ? `; ${invalidRows} incomplete` : ''}`, tookMs, detail: { keyword, categoryId, page, rawCount, invalidRows } });
     res.setHeader('Cache-Control', 'public, max-age=60');
     return res.status(200).json({
       ok: true,
       page,
       pageSize,
-      total: (r.data && (r.data.total || r.data.totalCount)) || products.length,
+      total: (payload && (payload.totalRecords || payload.total || payload.totalCount)) || products.length,
       products,
     });
   } catch (e) {

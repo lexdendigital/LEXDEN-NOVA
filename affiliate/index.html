@@ -181,6 +181,39 @@ button{font-family:inherit;}
 .diag-sheet .diag-body{font-size:13.5px;line-height:1.55;color:var(--ink);margin:12px 0;}
 .diag-sheet .diag-body p{margin:0 0 8px;}
 .diag-sheet .diag-meta{font-size:11px;color:var(--ink-dim);font-family:monospace;margin-bottom:10px;}
+
+/* Desktop uses the same affiliate features in a calmer, wider dashboard. */
+:where(a,button,input,select,textarea,[tabindex]):focus-visible{
+  outline:3px solid var(--cyber);outline-offset:3px;scroll-margin-block:96px;
+}
+@media (min-width:900px){
+  .app{max-width:1180px;padding:0 24px 40px;}
+  .topbar{padding:22px 28px;background:rgba(10,17,40,.94);border-bottom:1px solid rgba(255,255,255,.08);}
+  .screen{padding:22px 28px 40px;}
+  .screen:has(.stat-grid){display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;align-items:start;}
+  .screen:has(.stat-grid)>.stat-grid{grid-column:1/-1;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;}
+  .screen:has(.stat-grid)>.card,.screen:has(.stat-grid)>.invite{margin:0;min-width:0;}
+  .tabbar{position:sticky;top:69px;left:auto;right:auto;bottom:auto;max-width:none;margin:0 28px 8px;
+    border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:8px;overflow:visible;}
+  .tab{font-size:12px;min-width:84px;min-height:44px;gap:5px;}
+  .tab svg{width:20px;height:20px;}
+  .card{padding:22px;}
+  .card .big{font-size:30px;}
+  .diag-overlay{align-items:center;padding:24px;}
+  .diag-sheet{border-radius:20px;max-width:560px;}
+}
+@media (min-width:900px) and (max-width:1100px){
+  .screen:has(.stat-grid)>.stat-grid{grid-template-columns:repeat(2,minmax(0,1fr));}
+}
+@media (max-width:380px){
+  .screen{padding-left:12px;padding-right:12px;}
+  .stat-grid{gap:8px;}
+  .card{padding:14px;}
+}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;
+    animation-iteration-count:1!important;transition-duration:.01ms!important;}
+}
 </style>
 </head>
 <body>

@@ -37,11 +37,10 @@ const MAX_KEY_ATTEMPTS = 4;
 const PER_ATTEMPT_TIMEOUT_MS = 4000;
 const OVERALL_DEADLINE_MS = 12000;
 
-async function callGeminiWithRotation(keys, requestBody, modelOverride) {
+async function callGeminiWithRotation(keys, requestBody) {
   if (keys.length === 0) {
     return { ok: false, status: 500, error: "no_keys" };
   }
-  const model = modelOverride || GEMINI_MODEL;
   const attempts = Math.min(MAX_KEY_ATTEMPTS, keys.length);
   const startIdx = rotateCursor % keys.length;
   rotateCursor = (rotateCursor + 1) % keys.length;
@@ -59,7 +58,7 @@ async function callGeminiWithRotation(keys, requestBody, modelOverride) {
     const timer = setTimeout(() => controller.abort(), Math.min(PER_ATTEMPT_TIMEOUT_MS, timeLeft));
     try {
       const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${key}`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },

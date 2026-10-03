@@ -8,6 +8,7 @@
 const { initializeApp, cert, getApps } = require('firebase-admin/app');
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const { getAuth } = require('firebase-admin/auth');
+const { getStorage } = require('firebase-admin/storage');
 
 function getDb() {
   if (!getApps().length) {
@@ -21,7 +22,10 @@ function getDb() {
     if (!projectId || !clientEmail || !privateKey) {
       throw new Error('Missing Firebase Admin env vars. Set FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY.');
     }
-    initializeApp({ credential: cert({ projectId, clientEmail, privateKey }) });
+    const appOptions = { credential: cert({ projectId, clientEmail, privateKey }) };
+    const storageBucket = (process.env.FIREBASE_STORAGE_BUCKET || '').trim();
+    if (storageBucket) appOptions.storageBucket = storageBucket;
+    initializeApp(appOptions);
   }
   return getFirestore();
 }
@@ -99,4 +103,11 @@ function getAuthAdmin() {
   return getAuth();
 }
 
-module.exports = { getDb, getAuthAdmin, FieldValue, requireAffiliateAuth, requireAdminAuth, isAdminEmail, setCors, addNonSundayDays };
+function getFirebaseBucket() {
+  getDb(); // initialize the shared Admin app first
+  const bucketName = (process.env.FIREBASE_STORAGE_BUCKET || '').trim();
+  if (!bucketName) throw new Error('Set FIREBASE_STORAGE_BUCKET to the exact bucket name shown in Firebase Console → Storage before using product image uploads.');
+  return getStorage().bucket(bucketName);
+}
+
+module.exports = { getDb, getAuthAdmin, getFirebaseBucket, FieldValue, requireAffiliateAuth, requireAdminAuth, isAdminEmail, setCors, addNonSundayDays };

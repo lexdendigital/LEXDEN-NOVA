@@ -98,7 +98,10 @@ module.exports = async (req, res) => {
       await writeSyncLog({ event: 'order.create', objectId: reference, success: false, message: 'invalid_product', tookMs: Date.now() - started });
       return res.status(200).json({ ok: false, error: 'invalid_product', message: 'This product is not a valid CJ-fulfilled physical product.' });
     }
-    const cjMapping = product.physical.cj;
+    const selectedVariant=Array.isArray(product.variants)?product.variants.find(variant=>String(variant.id)===String(order.variantId||'')):null;
+    const cjMapping=selectedVariant&&selectedVariant.cjVariantId
+      ? {...(product.physical.cj||{}),variantId:selectedVariant.cjVariantId,sku:selectedVariant.sku||product.physical.cj?.sku}
+      : product.physical.cj;
     if (!cjMapping || !cjMapping.variantId) {
       await writeSyncLog({ event: 'order.create', objectId: reference, success: false, message: 'no_cj_mapping', tookMs: Date.now() - started });
       return res.status(200).json({ ok: false, error: 'invalid_product', message: 'This product has no CJ variant mapping — cannot auto-fulfil.' });
