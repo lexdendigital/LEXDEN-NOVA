@@ -1,7 +1,8 @@
 // mcp/oauth.js
 //
-// OAuth 2.1 authorization-code + PKCE for remote MCP clients including
-// Claude and ChatGPT. See MCP-SETUP.md for setup and why "No sign-in" mode isn't used
+// Claude's "Add custom connector" flow expects a real OAuth 2.1
+// authorization-code + PKCE dance in front of a remote MCP server (see
+// MCP-SETUP.md for the walkthrough + why "No sign-in" mode isn't used
 // here). What follows is the smallest version of that which is still
 // actually secure for a single-admin store:
 //
@@ -118,7 +119,7 @@ function firebaseSignInHtml({ authError }) {
   // bundles); what actually gates access is the email check below.
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>LEXDEN NOVA — Connect AI assistant</title>
+<title>LEXDEN NOVA — Connect Claude</title>
 <style>
   body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:#0b1220;color:#eef2ff;display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0;}
   .card{background:#111a2e;border:1px solid #22304d;border-radius:16px;padding:32px;max-width:380px;width:90%;}
@@ -130,8 +131,8 @@ function firebaseSignInHtml({ authError }) {
 </style></head>
 <body>
   <div class="card">
-    <h1>Connect your AI assistant to LEXDEN NOVA</h1>
-    <p class="sub">Sign in with the admin account to authorize this assistant to access your admin tools.</p>
+    <h1>Connect Claude to LEXDEN NOVA</h1>
+    <p class="sub">Sign in with the admin account to let Claude access your admin portal.</p>
     <div class="err" id="err">${authError ? String(authError).replace(/</g, '&lt;') : ''}</div>
     <input id="email" type="email" placeholder="Admin email" autocomplete="username">
     <input id="pass" type="password" placeholder="Password" autocomplete="current-password">
@@ -186,7 +187,7 @@ function registerRoutes(app) {
     const b = baseUrl(req);
     res.json({ resource: `${b}/mcp`, authorization_servers: [b] });
   });
-  // RFC 9728 path-suffixed form — MCP clients probe this for /mcp.
+  // RFC 9728 path-suffixed form — Claude probes this one first for /mcp.
   app.get('/.well-known/oauth-protected-resource/mcp', (req, res) => {
     const b = baseUrl(req);
     res.json({ resource: `${b}/mcp`, authorization_servers: [b], scopes_supported: ['admin'], bearer_methods_supported: ['header'] });
@@ -205,9 +206,7 @@ function registerRoutes(app) {
       code_challenge_methods_supported: ['S256'],
       token_endpoint_auth_methods_supported: ['none'],
       service_documentation: `${b}/health`,
-      // ChatGPT checks for an advertised refresh scope when it maintains
-      // OAuth sessions. The server issues refresh tokens for this scope.
-      scopes_supported: ['admin', 'offline_access'],
+      scopes_supported: ['admin'],
     });
   });
 
@@ -251,9 +250,7 @@ function registerRoutes(app) {
   app.get('/authorize', async (req, res) => {
     const rid = reqId();
     const { response_type, client_id, redirect_uri, code_challenge, code_challenge_method, resource } = req.query;
-    const registered = await getRegisteredClient(client_id).catch(() => null);
-    const redirectRegistered = !!(registered && Array.isArray(registered.redirectUris) && registered.redirectUris.includes(redirect_uri));
-    if (!redirect_uri || (!allowedRedirectUris().includes(redirect_uri) && !redirectRegistered)) {
+    if (!redirect_uri || !allowedRedirectUris().includes(redirect_uri)) {
       logStep(rid, 'authorize REJECTED redirect_uri not allowlisted', { client: client_id, redirect: redirect_uri });
       return res.status(400).send('This connector is not configured to send you back to that address. Check MCP_EXTRA_REDIRECT_URIS if this is a legitimate client.');
     }
@@ -262,6 +259,7 @@ function registerRoutes(app) {
     // never called /register (CIMD-style, or a hand-configured
     // connector) are still allowed through on the hardcoded-allowlist
     // check above — this is an extra check, not a replacement for it.
+    const registered = await getRegisteredClient(client_id).catch(() => null);
     if (registered && registered.redirectUris.length && !registered.redirectUris.includes(redirect_uri)) {
       logStep(rid, 'authorize REJECTED redirect_uri not in this client\'s registration', { client: client_id });
       return res.status(400).send('redirect_uri does not match what this client registered.');
@@ -283,9 +281,7 @@ function registerRoutes(app) {
     const rid = reqId();
     const { idToken, params } = req.body || {};
     const p = params || {};
-    const registered = await getRegisteredClient(p.client_id).catch(() => null);
-    const redirectRegistered = !!(registered && Array.isArray(registered.redirectUris) && registered.redirectUris.includes(p.redirect_uri));
-    if (!p.redirect_uri || (!allowedRedirectUris().includes(p.redirect_uri) && !redirectRegistered)) {
+    if (!p.redirect_uri || !allowedRedirectUris().includes(p.redirect_uri)) {
       logStep(rid, 'authorize/complete REJECTED bad redirect_uri', { client: p.client_id });
       return res.status(400).json({ error: 'invalid_request', error_description: 'Unrecognized redirect_uri.' });
     }
@@ -308,7 +304,7 @@ function registerRoutes(app) {
       resource: p.resource || null, // FIX (§6)
       email: decoded.email,
       uid: decoded.uid,
-      scope: normalizeScope(p.scope),
+      scope: 'admin',
     });
     logStep(rid, 'authorize/complete 200 firebase_ok=true admin=true auth_code_issued', { client: p.client_id });
     const url = new URL(p.redirect_uri);
@@ -366,14 +362,6 @@ function registerRoutes(app) {
       return res.status(500).json({ error: 'server_error' });
     }
   });
-}
-
-function normalizeScope(value) {
-  const requested = String(value || 'admin offline_access').split(/\s+/).filter(Boolean);
-  const supported = requested.filter(scope => scope === 'admin' || scope === 'offline_access');
-  if (!supported.includes('admin')) supported.unshift('admin');
-  if (!supported.includes('offline_access')) supported.push('offline_access');
-  return [...new Set(supported)].join(' ');
 }
 
 module.exports = { registerRoutes, baseUrl, allowedRedirectUris };

@@ -60,7 +60,6 @@ const { initializeApp, cert, getApps } = require('firebase-admin/app');
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const { queueEmailBackground } = require('./email-shared');
 const cjOrderHandler = require('./cj-order');
-const { resolveProductSelection } = require('./product-variants');
 
 // Mirrors PAYSTACK_CHARGEABLE_CURRENCIES in index.html. Keep these two
 // lists identical — see the comment above that array in index.html.
@@ -116,7 +115,7 @@ async function getCatalogDoc(docId) {
 // side (missing catalog/settings, unknown product, etc.) — callers treat
 // null as "can't validate" rather than "free", so a lookup failure never
 // accidentally lets a payment through.
-async function getExpectedAmount(productId, currency, variantId) {
+async function getExpectedAmount(productId, currency) {
   const [productsDoc, settingsDoc] = await Promise.all([
     getCatalogDoc('products'),
     getCatalogDoc('settings'),
@@ -124,9 +123,13 @@ async function getExpectedAmount(productId, currency, variantId) {
   const list = productsDoc && Array.isArray(productsDoc.list) ? productsDoc.list : null;
   const product = list && list.find(p => p && String(p.id) === String(productId));
   if (!product) return null;
-  if (product.free && !Array.isArray(product.variants)) return { price: 0, variant: null, variantId: null, variantName: null, product };
-  const selection = resolveProductSelection(product, variantId, currency, settingsDoc);
-  return selection ? { ...selection, product } : null;
+  if (product.free) return 0;
+
+  const rates = settingsDoc && settingsDoc.exchangeRates;
+  const rate = (rates && typeof rates[currency] === 'number') ? rates[currency] : 1;
+  const basePrice = (typeof product.salePrice === 'number' ? product.salePrice : product.price);
+  if (typeof basePrice !== 'number') return null;
+  return Math.round(basePrice * rate);
 }
 
 // ---- AFFILIATE PROGRAM — commission attribution (added for the affiliate
@@ -141,22 +144,18 @@ async function getExpectedAmount(productId, currency, variantId) {
 // Products live in catalog/products' `list` array (reuses getCatalogDoc,
 // already defined above) — affiliateEnabled + affiliateCommissionPct are
 // two new optional fields on each product object there.
-async function getAffiliateProductInfo(productId, variantId) {
+async function getAffiliateProductInfo(productId) {
   const productsDoc = await getCatalogDoc('products');
   const list = productsDoc && Array.isArray(productsDoc.list) ? productsDoc.list : null;
   const product = list && list.find(p => p && String(p.id) === String(productId));
-  if (!product) return null;
-  const variant = variantId && Array.isArray(product.variants) ? product.variants.find(v => String(v.id) === String(variantId)) : null;
-  const enabled = variant && typeof variant.affiliateEnabled === 'boolean' ? variant.affiliateEnabled : product.affiliateEnabled === true;
-  if (!enabled) return null;
-  const pct = variant && typeof variant.affiliateCommissionPct === 'number' ? variant.affiliateCommissionPct : product.affiliateCommissionPct;
-  return { commissionPct: typeof pct === 'number' ? pct : null, variantName: variant && (variant.title || variant.name) || null };
+  if (!product || product.affiliateEnabled !== true) return null;
+  return { commissionPct: typeof product.affiliateCommissionPct === 'number' ? product.affiliateCommissionPct : null };
 }
 
 // Fire-and-forget, called only after the order is already written — an
 // affiliate-attribution failure must never affect the payment response,
 // exactly like the email/CJ background calls below it.
-async function attributeAffiliateCommission(db, { reference, buyerUid, productId, variantId, productName, amountMajor, currency, affiliateRef, affiliateRefSource }) {
+async function attributeAffiliateCommission(db, { reference, buyerUid, productId, productName, amountMajor, currency, affiliateRef, affiliateRefSource }) {
   if (!affiliateRef || !buyerUid || affiliateRef === buyerUid) return; // no ref, or self-referral blocked
   if (!amountMajor || amountMajor <= 0) return; // free products earn nothing
 
@@ -172,7 +171,7 @@ async function attributeAffiliateCommission(db, { reference, buyerUid, productId
     if (userSnap.exists && userSnap.data().generalAffiliateConsumed === true) return;
   }
 
-  const productInfo = await getAffiliateProductInfo(productId, variantId);
+  const productInfo = await getAffiliateProductInfo(productId);
   if (!productInfo) return; // product isn't affiliate-enabled
 
   // Settings live in catalog/settings' `content` field — the SAME
@@ -196,8 +195,6 @@ async function attributeAffiliateCommission(db, { reference, buyerUid, productId
       buyerId: buyerUid,
       productId,
       productName: productName || null,
-      variantId: variantId || null,
-      variantName: productInfo.variantName,
       orderId: reference,
       saleAmount: amountMajor,
       currency,
@@ -306,7 +303,7 @@ module.exports = async function handler(req, res) {
     return res.status(405).json({ ok: false, error: 'Method not allowed — use POST.' });
   }
 
-  const { reference, uid, email, productId, productName, variantId, delivery, affiliateRef, affiliateRefSource } = req.body || {};
+  const { reference, uid, email, productId, productName, delivery, affiliateRef, affiliateRefSource } = req.body || {};
 
   if (!reference || typeof reference !== 'string') {
     return res.status(400).json({ ok: false, error: 'Missing payment reference.' });
@@ -407,13 +404,12 @@ module.exports = async function handler(req, res) {
 
   // ---- Reject underpayment. A verified-paid reference alone isn't proof
   // the shopper paid the RIGHT amount — only that some amount was paid.
-  const selection = await getExpectedAmount(productId, paidCurrency, variantId);
-  const expectedAmount = selection && selection.price;
-  if (expectedAmount !== null && expectedAmount !== undefined) {
+  const expectedAmount = await getExpectedAmount(productId, paidCurrency);
+  if (expectedAmount !== null) {
     const tolerance = Math.max(1, Math.ceil(expectedAmount * 0.02)); // 2%, min 1 unit
     if (amountMajor < expectedAmount - tolerance) {
       console.warn(
-        `Underpayment blocked: ref=${reference} product=${productId} variant=${variantId || 'legacy'} ` +
+        `Underpayment blocked: ref=${reference} product=${productId} ` +
         `paid=${amountMajor} ${paidCurrency} expected~=${expectedAmount} ${paidCurrency}`
       );
       return res.status(200).json({
@@ -429,18 +425,12 @@ module.exports = async function handler(req, res) {
     });
   }
 
-  const orderProductName = selection.variantName
-    ? `${selection.product.name || productName || 'Product'} — ${selection.variantName}`
-    : selection.product.name || productName || null;
-
   try {
     await db.collection('orders').doc(reference).set({
       uid: uid || null,
       email: email || paystackData.customer?.email || null,
       productId,
-      productName: orderProductName,
-      variantId: selection.variantId || null,
-      variantName: selection.variantName || null,
+      productName: productName || null,
       paystackReference: reference,
       amount: amountMajor,
       currency: paidCurrency,
@@ -464,7 +454,7 @@ module.exports = async function handler(req, res) {
   if (buyerEmail) {
     sendBrevoTemplate('BREVO_TPL_ORDER', { email: buyerEmail }, {
       order_id: reference,
-      product_name: orderProductName || 'Digital product',
+      product_name: productName || 'Digital product',
       quantity: '1',
       amount: `${paidCurrency} ${amountMajor.toLocaleString()}`,
       payment_status: 'Paid',
@@ -477,7 +467,7 @@ module.exports = async function handler(req, res) {
     user_email: buyerEmail || 'Unknown',
     event_time: orderDate,
     priority: 'Normal',
-    details: `${orderProductName || productId} — ${paidCurrency} ${amountMajor.toLocaleString()}`,
+    details: `${productName || productId} — ${paidCurrency} ${amountMajor.toLocaleString()}`,
   });
 
   // ---- PHYSICAL-COMMERCE: hand off to CJ order creation. Deliberately
@@ -494,7 +484,7 @@ module.exports = async function handler(req, res) {
   // pattern as the CJ order + emails above — never delays or risks the
   // already-successful payment response.
   attributeAffiliateCommission(db, {
-    reference, buyerUid: uid, productId, variantId: selection.variantId, productName: orderProductName, amountMajor,
+    reference, buyerUid: uid, productId, productName, amountMajor,
     currency: paidCurrency, affiliateRef, affiliateRefSource,
   }).catch(e => console.error('affiliate commission attribution failed:', e.message));
 

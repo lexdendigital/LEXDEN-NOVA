@@ -119,29 +119,6 @@ async function upsertCatalogItem(db, docName, item, { isNew }) {
   });
 }
 
-async function appendCatalogProductMedia(db, id, media) {
-  if (!id) throw httpError(400, 'Product id is required.');
-  const ref = db.doc('catalog/products');
-  return db.runTransaction(async (tx) => {
-    const snap = await tx.get(ref);
-    const data = snap.exists ? snap.data() : {};
-    const list = Array.isArray(data.list) ? data.list.slice() : [];
-    const idx = list.findIndex((item) => item.id === id);
-    if (idx < 0) throw httpError(404, `No item with id "${id}".`);
-    const product = list[idx];
-    const gallery = Array.isArray(product.gallery) ? product.gallery : [];
-    if (gallery.length >= 8) throw httpError(409, 'This product already has the maximum of 8 gallery media items.');
-    const images = Array.isArray(product.images) ? product.images : [];
-    list[idx] = {
-      ...product,
-      gallery: [...gallery, media],
-      images: images.includes(media.url) ? images : [...images, media.url],
-    };
-    tx.set(ref, { list }, { merge: true });
-    return list[idx];
-  });
-}
-
 async function deleteCatalogItem(db, docName, id) {
   const ref = db.doc(`catalog/${docName}`);
   return db.runTransaction(async (tx) => {
@@ -159,5 +136,5 @@ module.exports = {
   httpError,
   getSettingsDoc, getContent, updateContent,
   listSection, upsertSectionItem, deleteSectionItem,
-  listCatalogDoc, upsertCatalogItem, appendCatalogProductMedia, deleteCatalogItem,
+  listCatalogDoc, upsertCatalogItem, deleteCatalogItem,
 };

@@ -2,8 +2,8 @@
 const { z } = require('zod');
 const { callHandler } = require('../lib/callHandler');
 const { getDb } = require('../../api/affiliate/shared');
-const { listCatalogDoc, upsertCatalogItem } = require('../lib/settings');
-const { uniqueUrls, buildProductSpecs, stockStatusFrom } = require('../lib/productImport');
+const { upsertCatalogItem, listCatalogDoc } = require('../lib/settings');
+const { hydrateMediaGallery } = require('../lib/media');
 const cjShared = require('../../api/cj-shared');
 
 const cjProductsHandler = require('../../api/cj-products');
@@ -29,8 +29,8 @@ function register(server) {
   });
 
   server.registerTool('nova_cj_search_products', {
-    title: 'Search CJ Dropshipping products',
-    description: 'Searches CJ\'s product catalog by keyword/category — for finding products to import, not your own store catalog (use nova_list_products for that).',
+    title: 'Search CJ Dropshipping products (browse only)',
+    description: 'Browses CJ\'s product catalog by keyword/category to help pick a pid to import — for finding products, not your own store catalog (use nova_list_products for that). IMPORTANT: this is CJ\'s list/search endpoint, which by design returns thin previews — sellPrice, variantNum and categoryId are commonly null here even on a successful search; that is normal and NOT a bug. Never treat these results as import-ready or report them to the human as "missing data" — once you\'ve picked a pid, call nova_cj_import_product (or nova_cj_get_product first if you just want to show full detail) to get the real, complete data.',
     inputSchema: {
       keyword: z.string().optional(), categoryId: z.string().optional(),
       page: z.number().int().min(1).default(1), pageSize: z.number().int().min(1).max(50).default(20),
@@ -60,93 +60,113 @@ function register(server) {
   });
 
   server.registerTool('nova_cj_import_product', {
-    title: 'Import CJ product as an admin draft',
-    description: 'Fetches full CJ product details and variants, then creates an unpublished PHYSICAL product draft in Lexden Nova catalog/products. Includes every source field available to the integration: name, description, supplier price/currency, category/source details, variant identifiers and options, stock snapshot, image gallery and CJ sync metadata. Requires categoryId from nova_list_categories when available. Never publishes automatically; review NGN selling price, shipping, media rights and every admin field before publishing. Duplicate CJ product IDs are rejected. If no usable image is returned, search the web for the exact product/model and only attach a verified match with nova_update_product; never invent an image URL. If no exact match is available, report that instead of using a lookalike.',
+    title: 'Import a CJ product into the Nova catalog (one atomic step)',
+    description: 'THE tool to use when the human asks to import/add a CJ product to the store. Unlike nova_cj_search_products (which only returns a thin preview — pid/name/image, with sellPrice/variantNum/categoryId usually null by design on CJ\'s side), this tool: (1) pulls full detail + ALL variants from CJ, (2) picks a sell price (your markup % over CJ\'s cost, or an explicit price you pass), (3) re-hosts every supplier image/video on Cloudinary so the listing survives even if CJ changes its CDN, and — only if CJ gave NO usable media at all — generates a clean product photo with AI and uploads that instead, so no imported product is ever left without a picture, (4) writes the complete product into catalog/products in the exact shape the storefront and admin panel expect (category, itemCode, price, physical.* shipping/stock/supplier fields, physical.cj.{productId,variantId,sku,syncEnabled}, specs, images) marked productType:"PHYSICAL". Always returns the full saved product so you can show the human exactly what was imported before they publish it — review it with them if anything looks off.',
     inputSchema: {
-      pid: z.string().min(1),
-      categoryId: z.string().optional(),
-      categoryName: z.string().optional(),
-      seller: z.string().default('Lexden Digital'),
+      pid: z.string().describe('CJ product id — from nova_cj_search_products or nova_cj_list_categories results.'),
+      category: z.string().describe('Nova catalog category id to file this under, e.g. "gadgets". Call nova_list_categories first if unsure what exists.'),
+      markupPercent: z.number().min(0).default(35).describe('% markup over CJ\'s unit cost used to set the sell price, when priceOverride is not given.'),
+      priceOverride: z.number().optional().describe('Set an exact NGN sell price instead of computing one from markupPercent.'),
+      status: z.enum(['Published', 'Draft']).default('Draft').describe('Defaults to Draft so a human reviews pricing/media before it goes live.'),
+      allowAffiliateCommission: z.boolean().default(true),
+      affiliateCommissionPercent: z.number().optional(),
+      tags: z.array(z.string()).optional(),
+      shippingCountries: z.array(z.string()).default(['Nigeria']),
+      confirm: z.literal(true).describe('This writes to the live catalog — pass true once the human has agreed to import this specific pid.'),
     },
-  }, async ({ pid, categoryId, categoryName, seller }) => {
-    const result = await callHandler(cjProductHandler, { method: 'GET', query: { pid } });
-    const response = result.body;
-    if (!response || !response.ok || !response.product) {
-      throw Object.assign(new Error((response && response.error) || 'CJ product detail lookup failed.'), { status: 502 });
+  }, async ({ pid, category, markupPercent, priceOverride, status, allowAffiliateCommission, affiliateCommissionPercent, tags, shippingCountries }) => {
+    const detailR = await callHandler(cjProductHandler, { method: 'GET', query: { pid } });
+    if (!detailR.body || detailR.body.ok === false) {
+      return { content: [{ type: 'text', text: JSON.stringify({ imported: false, stage: 'detail_fetch', error: detailR.body?.error || 'CJ detail lookup failed.' }) }] };
     }
-    const source = response.product;
-    const productId = String(source.pid || pid).trim();
-    const name = String(source.name || '').trim();
-    if (!name) throw Object.assign(new Error('CJ returned no product name; draft was not created.'), { status: 422 });
-
-    const db = getDb();
-    const current = await listCatalogDoc(db, 'products');
-    const duplicate = current.find(p => String(p.physical?.cj?.productId || '') === productId);
-    if (duplicate) throw Object.assign(new Error(`CJ product already imported as ${duplicate.id}.`), { status: 409 });
-
-    const variants = Array.isArray(response.variants) ? response.variants.filter(Boolean) : [];
-    const variantIds = variants.map(v => v.vid).filter(Boolean).slice(0, 20);
-    let stockResult = { body: { ok: false, error: 'No variant identifiers were returned.' } };
-    if (variantIds.length) {
-      try { stockResult = await callHandler(cjStockHandler, { method: 'GET', query: { vid: variantIds.join(',') } }); }
-      catch (error) { stockResult = { body: { ok: false, error: error.message || 'Stock lookup failed.' } }; }
+    const { product: d, variants = [] } = detailR.body;
+    if (!d || !d.pid) {
+      return { content: [{ type: 'text', text: JSON.stringify({ imported: false, stage: 'detail_fetch', error: 'CJ returned no product detail for this pid.' }) }] };
     }
-    const stockMap = stockResult.body && stockResult.body.stock || {};
-    const firstVariant = variants[0] || {};
-    const images = uniqueUrls([...(Array.isArray(source.images) ? source.images : []), ...variants.map(v => v.image)]);
-    const id = `cj-${productId.replace(/[^a-z0-9_-]/gi, '').slice(-48)}`;
-    const specs = buildProductSpecs(source);
-    const draft = {
+
+    // CJ's own per-unit cost: cheapest variant's sellPrice (that field IS
+    // populated at this, detail, stage — unlike at search/list stage).
+    const variantPrices = variants.map((v) => v.sellPrice).filter((n) => typeof n === 'number' && n > 0);
+    const unitCostUSD = variantPrices.length ? Math.min(...variantPrices) : null;
+    const USD_TO_NGN = Number(process.env.USD_TO_NGN_RATE) || 1600; // keep in step with admin's Branding & Currency rate until that's wired to live FX
+    const unitCostNGN = unitCostUSD != null ? Math.round(unitCostUSD * USD_TO_NGN) : null;
+    const price = priceOverride != null
+      ? priceOverride
+      : (unitCostNGN != null ? Math.round(unitCostNGN * (1 + markupPercent / 100)) : null);
+
+    if (price == null) {
+      return { content: [{ type: 'text', text: JSON.stringify({ imported: false, stage: 'pricing', error: 'Could not determine a cost to price from (no variant had a sellPrice) and no priceOverride was given. Pass priceOverride explicitly.' }) }] };
+    }
+
+    const specs = {};
+    if (d.sourceCountry) specs['Ships from'] = d.sourceCountry;
+    if (variants.length > 1) specs['Options'] = variants.map((v) => v.variantKey).filter(Boolean).join(', ');
+    if (d.categoryName) specs['Supplier category'] = d.categoryName;
+
+    const media = await hydrateMediaGallery({
+      supplierImages: d.images || [],
+      supplierVideo: d.video,
+      name: d.name,
+      description: d.description,
+      specs,
+    });
+
+    const id = `cj-${d.pid}`;
+    const product = {
       id,
-      name: name.slice(0, 200),
-      description: String(source.description || ''),
-      categoryId: categoryId || '',
-      categoryName: categoryName || source.categoryName || '',
-      itemCode: `CJ-${productId.slice(-8).toUpperCase()}`,
+      name: d.name || `CJ product ${d.pid}`,
+      category,
+      itemCode: `LX-CJ-${String(d.pid).slice(-5).toUpperCase()}`,
+      price,
       productType: 'PHYSICAL',
-      format: 'Physical item',
-      level: '',
-      price: null,
-      salePrice: null,
-      discount: 0,
-      seller: seller || 'Lexden Digital',
-      affiliateLink: '',
-      affiliateEnabled: false,
-      affiliateCommissionPct: null,
-      tags: ['cj-import', 'physical'],
-      status: 'draft',
-      gallery: images.map((url, index) => ({ url, type: 'image', alt: `${name} product image ${index + 1}` })),
-      images,
+      affiliateLink: '#',
+      status,
+      tags: tags || [],
+      allowAffiliateCommission,
+      ...(affiliateCommissionPercent != null ? { affiliateCommissionPercent } : {}),
+      description: d.description || '',
+      images: media.images,
       specs,
       physical: {
-        stockMode: 'supplier',
-        stockStatus: stockStatusFrom(stockMap, variantIds.length, !!(stockResult.body && stockResult.body.ok)),
-        deliveryEstimate: source.deliveryCycle ? `${source.deliveryCycle} days (supplier estimate; confirm destination)` : '',
-        shippingCountries: [],
-        weight: firstVariant.weight != null ? `${(Number(firstVariant.weight) / 1000).toFixed(3)} kg` : (source.weight == null ? '' : `${(Number(source.weight) / 1000).toFixed(3)} kg`),
-        dimensions: firstVariant.length || firstVariant.width || firstVariant.height
-          ? `${[firstVariant.length, firstVariant.width, firstVariant.height].map(value => value == null ? '?' : (Number(value) / 10)).join(' × ')} cm`
-          : '',
+        stockMode: 'Supplier stock',
+        stockStatus: 'In stock', // best-effort at import time — run nova_cj_check_stock with syncProductId before publishing to confirm live CJ warehouse stock
+        deliveryEstimate: '7-20 business days',
+        shippingCountries,
+        weight: d.weight != null ? `${d.weight}kg` : '',
+        dimensions: '',
         returnPolicy: '',
-        supplier: 'CJ Dropshipping',
-        supplierSku: firstVariant.sku || source.sku || '',
-        supplierCost: firstVariant.sellPrice ?? source.sellPrice ?? null,
-        supplierCurrency: 'USD',
+        supplierId: 'cj',
+        supplierSku: variants[0]?.sku || '',
+        supplierCost: unitCostNGN,
+        supplierCurrency: 'NGN',
         cj: {
-          productId,
-          variantId: firstVariant.vid || '',
-          sku: firstVariant.sku || source.sku || '',
+          productId: d.pid,
+          variantId: variants[0]?.vid || '',
+          sku: variants[0]?.sku || '',
           syncEnabled: true,
-          variants: variants.map(v => ({ id: v.vid || '', sku: v.sku || '', name: v.name || '', optionKey: v.variantKey || '', barcode: v.barcode || '', standard: v.standard || '', unit: v.unit || '', image: v.image || '', sellPrice: v.sellPrice ?? null, suggestedSellPrice: v.suggestedSellPrice ?? null, weight: v.weight ?? null, length: v.length ?? null, width: v.width ?? null, height: v.height ?? null, stock: stockMap[v.vid] || null, supplierInventories: v.inventories || [] })),
-          stockCheckError: stockResult.body && stockResult.body.ok ? null : (stockResult.body && stockResult.body.error) || 'Stock could not be verified; refresh inventory before publishing.',
-          videoIds: Array.isArray(source.videoIds) ? source.videoIds : [],
-          lastImportedAt: new Date().toISOString(),
         },
       },
-      importSource: { supplier: 'CJ Dropshipping', productId, importedAt: new Date().toISOString(), sourceCategoryId: source.categoryId || '' },
     };
-    const saved = await upsertCatalogItem(db, 'products', draft, { isNew: true });
-    return { content: [{ type: 'text', text: JSON.stringify({ product: saved, imageCount: images.length, mediaReviewRequired: images.length === 0, publishStatus: 'draft' }, null, 2) }] };
+
+    const db = getDb();
+    const existing = await listCatalogDoc(db, 'products');
+    const alreadyImported = existing.some((p) => p.id === id);
+    const saved = await upsertCatalogItem(db, 'products', product, { isNew: !alreadyImported });
+    return {
+      content: [{
+        type: 'text',
+        text: JSON.stringify({
+          imported: true,
+          refreshed: alreadyImported,
+          product: saved,
+          mediaFallbackUsed: media.usedFallback,
+          variantCount: variants.length,
+          note: media.usedFallback
+            ? 'CJ supplied no usable media for this product — the cover image was AI-generated, not a real product photo. Review it before publishing.'
+            : `${media.images.length} CJ image(s)/video re-hosted on Cloudinary.`,
+        }, null, 2),
+      }],
+    };
   });
 
   server.registerTool('nova_cj_check_stock', {

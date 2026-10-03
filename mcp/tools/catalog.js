@@ -1,51 +1,36 @@
 // mcp/tools/catalog.js — Products & Categories tabs
 const { z } = require('zod');
-const { getDb, getFirebaseBucket } = require('../../api/affiliate/shared');
-const { listCatalogDoc, upsertCatalogItem, appendCatalogProductMedia, deleteCatalogItem } = require('../lib/settings');
-const { decodeProductImage, buildImagePath, appendProductImage } = require('../lib/productImage');
-const { randomUUID } = require('node:crypto');
+const { getDb } = require('../../api/affiliate/shared');
+const { listCatalogDoc, upsertCatalogItem, deleteCatalogItem } = require('../lib/settings');
+const { uploadRemoteUrlToCloudinary, generateProductImage } = require('../lib/media');
 
+// Field names here match what index.html's admin form and storefront
+// renderer actually read/write (confirmed by reading the real product
+// object builder in index.html, not assumed) — NOT a generic guess. Earlier
+// drafts of this tool used categoryId/price/active, which index.html never
+// reads; that mismatch is why items written through those names rendered
+// as blank on the storefront. Kept tolerant via .catchall so nothing the
+// app itself uses gets rejected.
 const productShape = z.object({
   id: z.string(),
   name: z.string().optional(),
-  price: z.number().optional(),
-  salePrice: z.number().nullable().optional(),
-  discount: z.number().optional(),
-  categoryId: z.string().optional(),
-  categoryName: z.string().optional(),
-  description: z.string().optional(),
+  category: z.string().optional().describe('Category id, e.g. "gadgets" — this is the field index.html actually reads, NOT categoryId.'),
   itemCode: z.string().optional(),
-  productType: z.string().optional(),
-  seller: z.string().optional(),
+  price: z.number().optional().describe('Regular price in NGN. 0/omitted = free.'),
+  salePrice: z.number().optional(),
+  productType: z.enum(['PHYSICAL', 'DIGITAL']).optional(),
   affiliateLink: z.string().optional(),
-  affiliateEnabled: z.boolean().optional(),
-  affiliateCommissionPct: z.number().nullable().optional(),
-  format: z.string().optional(),
-  level: z.string().optional(),
-  specs: z.record(z.string(), z.any()).optional(),
-  gallery: z.array(z.object({ url: z.string(), type: z.string().optional(), alt: z.string().optional() }).catchall(z.any())).optional(),
+  status: z.enum(['Published', 'Draft']).optional(),
+  tags: z.array(z.string()).optional(),
+  allowAffiliateCommission: z.boolean().optional(),
+  affiliateCommissionPercent: z.number().optional(),
+  description: z.string().optional(),
+  images: z.array(z.string()).optional(),
+  specs: z.record(z.string()).optional().describe('Plain {label: value} object, e.g. {"Brand":"Samsung","RAM":"8GB"} — NOT an array.'),
   deliveryLink: z.string().optional(),
   fileUrl: z.string().optional(),
   externalPaymentLink: z.string().optional(),
-  status: z.string().optional(),
-  tags: z.array(z.string()).optional(),
-  images: z.array(z.string()).optional(),
-  options: z.array(z.object({
-    id: z.string(), name: z.string(), values: z.array(z.object({ id: z.string(), label: z.string() }).catchall(z.any())).optional(),
-  }).catchall(z.any())).optional(),
-  variants: z.array(z.object({
-    id: z.string(), title: z.string().optional(), optionValues: z.record(z.string(), z.string()).optional(),
-    price: z.number().nullable().optional(), salePrice: z.number().nullable().optional(), stock: z.number().nullable().optional(),
-    sku: z.string().optional(), active: z.boolean().optional(), available: z.boolean().optional(),
-    deliveryLink: z.string().optional(), fileUrl: z.string().optional(), externalPaymentLink: z.string().optional(),
-    affiliateLink: z.string().optional(), affiliateEnabled: z.boolean().nullable().optional(), affiliateCommissionPct: z.number().nullable().optional(),
-    image: z.string().optional(), cjVariantId: z.string().optional(),
-  }).catchall(z.any())).optional(),
-  stock: z.number().optional(),
-  active: z.boolean().optional(),
   physical: z.object({
-    supplierId: z.string().optional(),
-    routing: z.record(z.any()).optional(),
     stockMode: z.string().optional(),
     stockStatus: z.string().optional(),
     deliveryEstimate: z.string().optional(),
@@ -53,12 +38,18 @@ const productShape = z.object({
     weight: z.string().optional(),
     dimensions: z.string().optional(),
     returnPolicy: z.string().optional(),
-    supplier: z.string().optional(),
+    supplierId: z.string().optional(),
     supplierSku: z.string().optional(),
-    supplierCost: z.number().nullable().optional(),
+    supplierCost: z.number().optional(),
     supplierCurrency: z.string().optional(),
-    cj: z.record(z.string(), z.any()).optional(),
-  }).partial().catchall(z.any()).optional(),
+    routing: z.record(z.any()).optional(),
+    cj: z.object({
+      productId: z.string().optional(),
+      variantId: z.string().optional(),
+      sku: z.string().optional(),
+      syncEnabled: z.boolean().optional(),
+    }).partial().optional(),
+  }).partial().optional(),
 }).catchall(z.any()); // this catalog has grown organically; don't reject fields the app itself uses that aren't listed above
 
 const categoryShape = z.object({ id: z.string() }).catchall(z.any());
@@ -75,7 +66,7 @@ function register(server) {
   }, async ({ categoryId, search, limit }) => {
     const db = getDb();
     let list = await listCatalogDoc(db, 'products');
-    if (categoryId) list = list.filter((p) => p.categoryId === categoryId);
+    if (categoryId) list = list.filter((p) => p.category === categoryId || p.categoryId === categoryId);
     if (search) {
       const q = search.toLowerCase();
       list = list.filter((p) => (p.name || '').toLowerCase().includes(q) || (p.description || '').toLowerCase().includes(q));
@@ -97,7 +88,7 @@ function register(server) {
 
   server.registerTool('nova_create_product', {
     title: 'Create product',
-    description: 'Adds a complete new physical or digital Lexden Nova product to catalog/products. Populate all details known to you for the admin product form: productType, name, description, local categoryId, regular/sale price and currency/specs, format/level, seller, tags, up to 8 gallery media links, fulfillment and physical supplier/stock/shipping fields where applicable. Search the supplier and web for an exact model image; never attach a lookalike. If an exact image is unavailable or the admin requests generated artwork, generate a relevant image and attach it with nova_upload_product_image before finishing. For physical products, never generate imagery that invents product features or presents a fictional item as the exact product. Set status to draft until reviewed; never guess inventory, policies, currency conversion or model-specific specs. Add affiliateLink only when the admin has supplied it, and leave it empty otherwise. id must not already exist — use nova_update_product to edit an existing one.',
+    description: 'Adds a new product to catalog/products. id must not already exist — use nova_update_product to edit an existing one.',
     inputSchema: { product: productShape },
   }, async ({ product }) => {
     const db = getDb();
@@ -107,7 +98,7 @@ function register(server) {
 
   server.registerTool('nova_update_product', {
     title: 'Update product',
-    description: 'Shallow-merges the given fields into an existing physical or digital product (identified by id) in catalog/products. Only send the fields you want changed. When adding an affiliateLink, use the exact URL the admin provides. For a missing supplier image, search the web for the exact brand/model and attach only a verified match; do not use a lookalike or invented URL. If no exact match is available or the admin requests generated artwork, generate a relevant image and attach it with nova_upload_product_image. For physical products, generated images must not invent product features or imply they are exact supplier photography.',
+    description: 'Shallow-merges the given fields into an existing product (identified by id) in catalog/products. Only send the fields you want changed.',
     inputSchema: { product: productShape },
   }, async ({ product }) => {
     const db = getDb();
@@ -115,42 +106,60 @@ function register(server) {
     return { content: [{ type: 'text', text: JSON.stringify(saved, null, 2) }] };
   });
 
-  server.registerTool('nova_upload_product_image', {
-    title: 'Upload and attach a product image',
-    description: 'Uploads a ChatGPT-generated or otherwise admin-approved PNG, JPEG, or WebP image to Lexden Nova Firebase Storage and attaches its permanent URL to the selected existing product in catalog/products (gallery and images). Use when no exact product image can be verified, or when the admin requests generated artwork. Generate the image first, then send its base64 bytes or data:image/*;base64 URI. Provide honest alt text; for physical goods, generated artwork must be a clearly illustrative/lifestyle image and must not imply inaccurate product details. Does not publish the product. Maximum 5 MB; supports at most 8 gallery items.',
+  server.registerTool('nova_resolve_product_image', {
+    title: 'Get/generate a product image and attach it',
+    description: 'Use this ANY time a product needs an image and none of the candidate URLs you have are good enough — not just during CJ import. Pass referenceImageUrls if you found some candidates (e.g. from a web search) and want them tried first (they get re-hosted on Cloudinary so they survive even if the source disappears); if none are given, or all fail to upload, or mode is "generate_only" (use this when the human explicitly asks you to generate/create an image), this calls Gemini\'s image model to generate a clean product photo and uploads that instead. Always returns the final image URL. Pass productId to also attach it to that product in catalog/products (appended to images[], or made the cover photo if replaceCover is true); omit productId to just get a URL back without writing anything.',
     inputSchema: {
-      productId: z.string().min(1).max(120),
-      generatedImage: z.string().min(1).max(7_000_000),
-      alt: z.string().min(3).max(240),
+      name: z.string().describe('Product name — used as the image generation prompt subject if generation is needed.'),
+      description: z.string().optional(),
+      specs: z.record(z.string()).optional(),
+      referenceImageUrls: z.array(z.string()).max(8).optional().describe('Candidate image URLs to try first, e.g. from a web search for this exact product. Leave empty to skip straight to generation.'),
+      mode: z.enum(['auto', 'generate_only']).default('auto'),
+      productId: z.string().optional().describe('If given, attaches the resolved image to this product in catalog/products.'),
+      replaceCover: z.boolean().default(false).describe('If true and productId is given, the resolved image becomes images[0] instead of being appended.'),
     },
-  }, async ({ productId, generatedImage, alt }) => {
-    const db = getDb();
-    const products = await listCatalogDoc(db, 'products');
-    const product = products.find((item) => item.id === productId);
-    if (!product) throw Object.assign(new Error(`No product with id "${productId}".`), { status: 404 });
-    const { buffer, contentType, extension } = decodeProductImage(generatedImage);
-    // Fail before uploading if the product gallery is already full.
-    appendProductImage(product, 'https://pending.invalid/image', alt.trim());
-    const token = randomUUID();
-    const objectPath = buildImagePath(productId, extension);
-    const bucket = getFirebaseBucket();
-    const file = bucket.file(objectPath);
-    await file.save(buffer, {
-      resumable: false,
-      metadata: {
-        contentType,
-        cacheControl: 'public,max-age=31536000,immutable',
-        metadata: { firebaseStorageDownloadTokens: token, productId, origin: 'nova-mcp-product-image' },
-      },
-    });
-    const imageUrl = `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucket.name)}/o/${encodeURIComponent(objectPath)}?alt=media&token=${token}`;
-    try {
-      const saved = await appendCatalogProductMedia(db, productId, { url: imageUrl, type: 'image', alt: alt.trim() });
-      return { content: [{ type: 'text', text: JSON.stringify({ productId, productName: product.name || '', imageUrl, alt: alt.trim(), galleryCount: (saved.gallery || []).length, status: saved.status || 'draft', message: 'Image uploaded and attached. The product publication status was not changed.' }, null, 2) }] };
-    } catch (error) {
-      await file.delete({ ignoreNotFound: true }).catch(() => {});
-      throw error;
+  }, async ({ name, description, specs, referenceImageUrls, mode, productId, replaceCover }) => {
+    let resolvedUrl = null;
+    let source = null;
+
+    if (mode === 'auto' && referenceImageUrls && referenceImageUrls.length) {
+      for (const url of referenceImageUrls) {
+        const up = await uploadRemoteUrlToCloudinary(url);
+        if (up.ok) { resolvedUrl = up.url; source = 'reference'; break; }
+      }
     }
+
+    if (!resolvedUrl) {
+      const gen = await generateProductImage({ name, description, specs });
+      if (!gen.ok) {
+        return { content: [{ type: 'text', text: JSON.stringify({ resolved: false, error: gen.error }) }] };
+      }
+      resolvedUrl = gen.url;
+      source = 'generated';
+    }
+
+    if (!productId) {
+      return { content: [{ type: 'text', text: JSON.stringify({ resolved: true, url: resolvedUrl, source }) }] };
+    }
+
+    const db = getDb();
+    const list = await listCatalogDoc(db, 'products');
+    const existing = list.find((p) => p.id === productId);
+    if (!existing) throw Object.assign(new Error(`No product with id "${productId}".`), { status: 404 });
+    const images = Array.isArray(existing.images) ? existing.images.slice() : [];
+    if (replaceCover) images.unshift(resolvedUrl); else images.push(resolvedUrl);
+    const saved = await upsertCatalogItem(db, 'products', { id: productId, images: images.slice(0, 8) }, { isNew: false });
+
+    return {
+      content: [{
+        type: 'text',
+        text: JSON.stringify({
+          resolved: true, url: resolvedUrl, source, attachedTo: productId,
+          note: source === 'generated' ? 'This image is AI-generated, not a real product photo — flag that to the human.' : undefined,
+          product: saved,
+        }, null, 2),
+      }],
+    };
   });
 
   server.registerTool('nova_delete_product', {

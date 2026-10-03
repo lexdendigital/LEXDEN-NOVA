@@ -1,9 +1,10 @@
 # LEXDEN NOVA — MCP Setup Guide
 
-This connects Claude or ChatGPT to the existing Render backend for
-admin operations — including product/catalog tools, code diagnostics,
-and code editing. The storefront and backend also receive updates in
-this archive; this guide covers only MCP connection setup.
+This turns your existing Render backend into something Claude can connect
+to directly and manage your admin portal through — ~60 tools covering
+every admin tab, plus code troubleshooting and code editing. Nothing
+about your existing storefront, admin portal UI, or API endpoints
+changed; this is purely additive.
 
 ## 1. Set these on Render (Dashboard → your service → Environment)
 
@@ -35,11 +36,6 @@ Everything else (`FIREBASE_*`, `PAYSTACK_SECRET_KEY`, etc.) stays as it
 already is — the MCP layer reuses your existing Firebase Admin
 connection, it doesn't need its own credentials.
 
-Product image uploads also use Firebase Storage. Set `FIREBASE_STORAGE_BUCKET`
-to the exact bucket name shown in Firebase Console → Storage (for example,
-`your-project.firebasestorage.app` or `your-project.appspot.com`). The upload
-tool intentionally requires this explicit value; it does not guess the bucket.
-
 ## 2. Make sure Render is actually running Node 20+
 
 `package.json`'s `engines.node` is now `>=20` (the MCP SDK requires it).
@@ -58,7 +54,7 @@ curl https://lexden-nova.onrender.com/.well-known/oauth-authorization-server
 
 You should get back JSON, not an error.
 
-## 4. Connect Claude
+## 4. Add the connector in Claude
 
 Settings → Connectors → Add custom connector. Enter **exactly** this:
 
@@ -82,46 +78,7 @@ Registration (`/register`), so Claude registers itself automatically the
 first time you connect — there's no fixed client ID to type in. Tap
 **Add**.
 
-## 5. Connect ChatGPT
-
-ChatGPT's custom MCP app workflow is available in supported plans and
-workspaces. Full read/write MCP is currently available on ChatGPT
-Business and Enterprise/Edu; personal Pro access is currently limited
-to read/fetch actions. The setup is in ChatGPT on the web.
-
-1. Enable Developer mode / custom MCP connectors in workspace or user
-   settings (the available location depends on the plan).
-2. Open **Apps → Create** and add a custom app.
-3. Enter `https://lexden-nova.onrender.com/mcp` as the MCP server URL and
-   select OAuth authentication.
-4. Start **Scan tools**. Complete the Lexden Nova admin sign-in when
-   ChatGPT opens the OAuth page, then wait for the tool scan to finish.
-5. Create the app as a draft and test a read action such as listing
-   products. Review the displayed write actions before using them.
-
-The `nova_upload_product_image` tool lets ChatGPT attach generated artwork
-to an existing product. Ask ChatGPT to create the image first, then call
-the tool with that product's id, the generated PNG/JPEG/WebP bytes as a
-base64 data URI, and accurate alt text. It stores the image in Firebase
-Storage and adds its URL to both `gallery` and `images` on that product;
-it does not publish the product. Uploads are limited to 5 MB and the
-existing eight-item gallery limit still applies. Configure
-`FIREBASE_STORAGE_BUCKET` before using this tool.
-
-The server supports Dynamic Client Registration and stores the exact
-redirect URL registered by the client. This allows ChatGPT's
-workspace-specific OAuth callback URL while still checking it against
-that client's registration. If a ChatGPT setup flow skips registration
-and presents a fixed redirect URI instead, add that exact URI to
-`MCP_EXTRA_REDIRECT_URIS` on Render, then redeploy.
-
-ChatGPT requires a refresh-capable OAuth session for durable connections.
-The authorization-server metadata advertises `offline_access`, and the
-server issues refresh tokens. If ChatGPT reports OAuth discovery or
-refresh problems, check the deployed metadata at
-`https://lexden-nova.onrender.com/.well-known/oauth-authorization-server`.
-
-## 6. First connection
+## 5. First connection
 
 Claude will open a sign-in page hosted by your own server (not a
 Claude-branded page) titled "Connect Claude to LEXDEN NOVA". Sign in
@@ -131,11 +88,11 @@ security check — this page talks to Firebase directly, your password
 never touches this server. If sign-in succeeds but you're told "not the
 LEXDEN NOVA admin account", you signed in as the wrong account.
 
-After that, the assistant has access for up to 90 days (access tokens auto-
+After that, Claude has access for up to 90 days (access tokens auto-
 refresh every hour behind the scenes; you won't be asked to sign in
 again unless 90 days pass or you disconnect the connector).
 
-## 7. Try it
+## 6. Try it
 
 Ask Claude things like:
 - "How many pending affiliate withdrawals do I have?"
@@ -145,12 +102,30 @@ Ask Claude things like:
 - "Read server.js and tell me how CORS is configured"
 - "Change the hero title on the homepage to X" (uses `nova_update_content`)
 
-For product sourcing with CJ, search with `nova_cj_search_products`,
-then import a reviewed result with `nova_cj_import_product`. It saves a
-physical product as an unpublished draft and rejects duplicates. When
-the supplier has no usable image, verify an exact model match on the web
-before adding it through `nova_update_product`; do not substitute a
-lookalike.
+## 6b. Connecting ChatGPT too (same server, no code changes needed)
+
+This server is a standard OAuth2 + MCP implementation (Dynamic Client
+Registration, PKCE S256, RFC 8707 resource binding) — it was never
+Claude-specific, it just didn't have ChatGPT's callback URL allow-listed
+yet. To add ChatGPT:
+
+1. In ChatGPT: Settings → Connectors → Advanced/Developer mode → Add
+   custom connector (or "Create" under Apps & Connectors). Enter the
+   same MCP server URL: `https://lexden-nova.onrender.com/mcp`.
+2. ChatGPT will show you *its own* callback URL on that screen (it
+   changes occasionally — copy whatever it actually shows you rather
+   than assuming one). On Render, add it to:
+   ```
+   MCP_EXTRA_REDIRECT_URIS=<paste ChatGPT's callback URL here>
+   ```
+   (comma-separate if you ever add more than one extra redirect URI).
+3. Redeploy, then finish connecting in ChatGPT the same way as step 5
+   above — sign in with the admin email/password.
+
+Every tool (including the CJ import and AI image generation/upload
+tools) works identically from ChatGPT once connected — it's the same
+server, same tools, same Firestore. Nothing in this project is
+Claude-only.
 
 ## Revoking access
 

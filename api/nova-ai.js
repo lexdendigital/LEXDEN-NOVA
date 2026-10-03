@@ -101,10 +101,29 @@ async function buildImageParts(context) {
   return parts;
 }
 
+// BUG FIX (Oct 2026): this used to hardcode a literal "$" on every price
+// and tell Gemini "prices shown to you are in USD" — true only when the
+// store's selected currency actually was USD. Nova's default currency is
+// NGN (see admin's Branding & Currency), so Gemini was being told a ₦15,000
+// product cost "$15000" and that the real unit was dollars — a model acting
+// on that could plausibly "helpfully" FX-convert an already-correct number
+// a second time, or just quote the wrong symbol to a Naira shopper. Despite
+// the field names (priceUSD/salePriceUSD, kept as-is — they're wired
+// through buildNovaContext() in index.html and several other places, a
+// rename is a bigger change than this fix needs), the values are already in
+// whatever currency context.currency says. Format with that currency, not $.
+const CURRENCY_SYMBOLS = { NGN: '₦', USD: '$', GBP: '£', EUR: '€', GHS: 'GH₵', KES: 'KSh', ZAR: 'R' };
+function formatMoney(amount, currencyCode) {
+  const symbol = CURRENCY_SYMBOLS[currencyCode] || `${currencyCode} `;
+  const n = Number(amount) || 0;
+  return `${symbol}${n.toLocaleString('en-US')}`;
+}
+
 function buildSystemPrompt(context) {
+  const currency = context.currency || "NGN"; // matches index.html's own default — see currentCurrency()
   const products = (context.products || [])
     .map(p => {
-      const price = p.free ? "Free" : `$${p.priceUSD}${p.salePriceUSD ? ` (sale $${p.salePriceUSD})` : ""}`;
+      const price = p.free ? "Free" : `${formatMoney(p.priceUSD, currency)}${p.salePriceUSD ? ` (sale ${formatMoney(p.salePriceUSD, currency)})` : ""}`;
       const specs = Object.entries(p.specs || {}).map(([k, v]) => `${k}: ${v}`).join(", ");
       return `- ${p.name} [${p.category}] — ${price}, rating ${p.rating}/5. ${specs ? "Specs: " + specs + ". " : ""}${p.description || ""}`;
     })
@@ -116,13 +135,12 @@ function buildSystemPrompt(context) {
 
   const faqs = (context.faqs || []).map(f => `Q: ${f.q}\nA: ${f.a}`).join("\n");
   const appName = context.content?.appName || "LEXDEN NOVA";
-  const currency = context.currency || "USD";
 
   return `You are NOVA, the friendly in-app shopping assistant for ${appName}, a digital products and gadgets marketplace.
 Speak naturally and concisely — this is a mobile chat widget, not an essay. Ground every answer in the catalog, feed, and FAQ
-data below; never invent products, prices, or policies that aren't listed. Prices shown to you are in USD; the shopper's
-selected display currency is ${currency}, so mention amounts in a natural way rather than doing currency math yourself unless
-asked. Some reference photos of products/feed posts may be attached below the catalog as visual context — use them only to
+data below; never invent products, prices, or policies that aren't listed. Every price below is already shown in the
+shopper's actual selected currency (${currency}) — quote amounts exactly as given, never convert or recalculate them.
+Some reference photos of products/feed posts may be attached below the catalog as visual context — use them only to
 describe appearance more accurately (color, style, packaging, etc.) when it's relevant to what's being asked; the shopper
 themselves cannot send you photos, so never ask them to show or upload an image. If a shopper asks something the
 catalog/FAQs/photos can't answer, say so honestly and suggest contacting support instead of guessing.

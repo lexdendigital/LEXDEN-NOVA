@@ -44,7 +44,6 @@
 
 const admin = require('firebase-admin');
 const crypto = require('crypto');
-const { buildCjQuery } = require('./cj-query');
 
 const CJ_BASE = 'https://developers.cjdropshipping.com/api2.0/v1';
 
@@ -225,7 +224,9 @@ async function cjFetch(path, { method = 'GET', query, body, timeoutMs = 12000, _
 
   let url = `${CJ_BASE}${path}`;
   if (query && Object.keys(query).length) {
-    const qs = buildCjQuery(query);
+    const qs = new URLSearchParams(
+      Object.entries(query).filter(([, v]) => v !== undefined && v !== null && v !== '')
+    ).toString();
     if (qs) url += `?${qs}`;
   }
 
