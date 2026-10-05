@@ -338,6 +338,70 @@ service cloud.firestore {
     // Dynamic Client Registration records — same reasoning as above.
     match /mcpClients/{id} { allow read, write: if false; }
 
+    // ---- LEXDEN NOVA CREATOR (Stage A) ----
+    // Every write to every collection below happens ONLY through
+    // api/creator-*.js (Admin SDK, bypasses these rules entirely) after
+    // server-side auth + validation + state-machine checks — see
+    // CREATOR-STAGE-A-README.md. That is a deliberate, stricter choice
+    // than the blueprint's suggested "client can write creator-owned
+    // drafts through explicit validated paths": Stage A has no Firestore-
+    // level way to express "validate this state transition" or "validate
+    // this field against validation.js", so client writes stay fully
+    // closed everywhere here, the same pattern this file already uses for
+    // orders/{reference} and affiliates/{uid}. If a later stage adds a
+    // genuinely low-risk client-writable field (e.g. a creator's own bio
+    // text), add a narrowly-scoped allow clause for exactly that field at
+    // that time — don't open these collections broadly.
+
+    // creators/{uid} — PUBLIC seller profile. Storefront product pages and
+    // the public creator directory read this for every visitor, signed in
+    // or not, so read must stay open. Never contains legalName/DOB/phone/
+    // payout details — see creatorPrivate below for those.
+    match /creators/{uid} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // creatorApplications/{uid} — application status + the PUBLIC half of
+    // the application payload (category, displayName, profileImageUrl,
+    // etc — see api/creator-application.js's PUBLIC_FIELD_KEYS). Only the
+    // applicant themself or the admin should ever see this, even though
+    // none of it is as sensitive as creatorPrivate — an application in
+    // progress isn't public yet.
+    match /creatorApplications/{uid} {
+      allow read: if isOwner(uid) || isAdmin();
+      allow write: if false;
+    }
+
+    // creatorPrivate/{uid} — legalName, dob, email, phone,
+    // legalBusinessName, contactName, whatsapp, documentIds,
+    // acceptedTermsAt. The most sensitive collection in the whole Creator
+    // system — owner or admin read only, exactly like KYC data anywhere
+    // else should be handled.
+    match /creatorPrivate/{uid} {
+      allow read: if isOwner(uid) || isAdmin();
+      allow write: if false;
+    }
+
+    // creatorDocuments/{documentId} — METADATA only (docType, fileName,
+    // reviewStatus, storagePath). The storagePath field points into a
+    // PRIVATE Firebase Storage bucket path with no public URL ever
+    // generated (see api/creator-documents.js) — even a client that reads
+    // this document back cannot derive a working download link from it
+    // without going through an admin-only signed-URL endpoint.
+    match /creatorDocuments/{documentId} {
+      allow read: if isAdmin() || (isSignedIn() && resource.data.creatorId == request.auth.uid);
+      allow write: if false;
+    }
+
+    // creatorAuditLog/{id} — admin-only, same pattern as mcpAuditLog /
+    // cjSyncLogs elsewhere in this file. Every application decision and
+    // every suspend/restrict/revoke is logged here (blueprint §33).
+    match /creatorAuditLog/{id} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
     // Anything not explicitly matched above is denied by default —
     // Firestore's rules are deny-by-default outside matched blocks, so
     // no closing catch-all is needed, but stated here for clarity.

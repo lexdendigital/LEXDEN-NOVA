@@ -145,6 +145,20 @@ for (const [name, path] of Object.entries(AFFILIATE_ENDPOINTS)) {
   app.all(`/api/${name}`, require(path));
 }
 
+// ---- LEXDEN NOVA CREATOR (Stage A: data model + auth + state machine) ----
+// Files live under api/creator/ (shared helpers, not routes) and flat
+// api/creator-*.js route files, same convention as the affiliate program
+// above. See CREATOR-STAGE-A-README.md for what Stage A covers and what's
+// deliberately deferred to later stages.
+const CREATOR_ENDPOINTS = [
+  'creator-application',
+  'creator-documents',
+  'creator-admin-applications',
+];
+for (const name of CREATOR_ENDPOINTS) {
+  app.all(`/api/${name}`, require(`./api/${name}`));
+}
+
 // ---- Link-preview routes ----
 // Mirrors vercel.json's rewrites: /feed/:id -> /api/feed?id=:id and
 // /product/:id -> /api/product?id=:id. feed.js/product.js read the id
