@@ -23,6 +23,21 @@ const {
   APPLICATION_STATES, SELLER_STATES,
   assertApplicationTransition, assertSellerTransition,
 } = require('./creator/state-machine');
+const { queueEmailBackground } = require('./email-shared');
+
+// Both notification templates need the applicant/creator's email, which
+// only ever lives in creatorPrivate/{uid} — never on the public creators
+// doc. Best-effort: a lookup failure here must never block the actual
+// admin decision from going through.
+async function notifyApplicant(uid, templateKey, params) {
+  try {
+    const privSnap = await getDb().collection('creatorPrivate').doc(uid).get();
+    const email = privSnap.exists && privSnap.data().email;
+    if (email) queueEmailBackground({ templateKey, to: { email }, params });
+  } catch (e) {
+    console.error('creator notification email lookup failed:', e);
+  }
+}
 
 const APPLICATION_ACTIONS = {
   start_review: { from: [APPLICATION_STATES.SUBMITTED], to: APPLICATION_STATES.IN_REVIEW, reasonRequired: false },
@@ -131,6 +146,17 @@ module.exports = async function handler(req, res) {
       await batch.commit();
 
       await writeCreatorAuditLog({ actorUid: admin.uid, actorRole: 'admin', action: `application.${action}`, targetType: 'application', targetId: uid, reason: reason || null });
+      // start_review is an internal queue-management step, not something
+      // the applicant needs an email about — only the other three are
+      // actual outcomes for them.
+      if (action !== 'start_review') {
+        notifyApplicant(uid, 'creator_application_update', {
+          status: spec.to,
+          creator_type: appDoc.creatorType,
+          reason: reason || null,
+          display_name: action === 'approve' ? ((appDoc.publicFields || {}).displayName || (appDoc.publicFields || {}).businessDisplayName) : null,
+        });
+      }
       return ok(res, { status: spec.to });
     }
 
@@ -148,6 +174,7 @@ module.exports = async function handler(req, res) {
       await getDb().collection('creators').doc(uid).set(patch, { merge: true });
 
       await writeCreatorAuditLog({ actorUid: admin.uid, actorRole: 'admin', action: `creator.${action}`, targetType: 'creator', targetId: uid, reason: reason || null });
+      notifyApplicant(uid, 'creator_account_status', { status: spec.to, reason: reason || null });
       return ok(res, { status: spec.to });
     }
 

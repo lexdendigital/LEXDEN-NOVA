@@ -7,6 +7,7 @@
 // feature to be enabled for your business (usually on by default for NGN).
 
 const { setCors } = require('./shared');
+const { resolvePaystackSecretKey } = require('../_paystackMode');
 
 module.exports = async (req, res) => {
   setCors(res);
@@ -17,7 +18,7 @@ module.exports = async (req, res) => {
     return res.status(400).json({ ok: false, code: 'BAD_INPUT', error: 'account_number and bank_code are required.' });
   }
 
-  const secret = process.env.PAYSTACK_SECRET_KEY;
+  const secret = await resolvePaystackSecretKey();
   if (!secret) {
     return res.status(500).json({ ok: false, code: 'MISSING_ENV_VAR', error: 'PAYSTACK_SECRET_KEY not set on the server.' });
   }

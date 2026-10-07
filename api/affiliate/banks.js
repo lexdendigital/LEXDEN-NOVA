@@ -29,6 +29,7 @@ async function fetchAllPaystackBanks(secret) {
 }
 
 const { setCors } = require('./shared');
+const { resolvePaystackSecretKey } = require('../_paystackMode');
 
 // Built-in fallback so the dropdown is never empty or capped when Paystack
 // is rate-limited / unreachable (Paystack codes for NGN banks & fintechs).
@@ -56,7 +57,7 @@ module.exports = async (req, res) => {
     return res.status(200).json({ ok: true, banks: cachedBanks, cached: true });
   }
 
-  const secret = process.env.PAYSTACK_SECRET_KEY;
+  const secret = await resolvePaystackSecretKey();
   if (!secret) {
     return res.status(500).json({ ok: false, code: 'MISSING_ENV_VAR', error: 'PAYSTACK_SECRET_KEY not set on the server.' });
   }

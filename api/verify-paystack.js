@@ -61,6 +61,7 @@ const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const { queueEmailBackground } = require('./email-shared');
 const cjOrderHandler = require('./cj-order');
 const { resolveProductSelection } = require('./product-variants');
+const { resolvePaystackSecretKey } = require('./_paystackMode');
 
 // Mirrors PAYSTACK_CHARGEABLE_CURRENCIES in index.html. Keep these two
 // lists identical — see the comment above that array in index.html.
@@ -336,9 +337,16 @@ module.exports = async function handler(req, res) {
     }
   }
 
-  const secretKey = process.env.PAYSTACK_SECRET_KEY;
+  // Live/Test mode toggle: catalog/settings.content.paymentMode ('live' |
+  // 'test'), set from the admin portal (see api/admin-payment-mode.js).
+  // Deliberately a Firestore flag, not a second Render env-var flip — no
+  // extra redeploy per toggle, and the app itself never needs a
+  // RENDER_API_KEY. Falls back to the single legacy PAYSTACK_SECRET_KEY
+  // when no mode has been set yet, so nothing breaks for an install that
+  // hasn't adopted the live/test split.
+  const secretKey = await resolvePaystackSecretKey();
   if (!secretKey) {
-    console.error('PAYSTACK_SECRET_KEY is not set in environment variables.');
+    console.error('No Paystack secret key resolved — check PAYSTACK_SECRET_KEY_LIVE / PAYSTACK_SECRET_KEY_TEST / PAYSTACK_SECRET_KEY in Render, and catalog/settings.content.paymentMode.');
     return res.status(500).json({ ok: false, error: 'Payment verification is not configured on the server yet.' });
   }
 

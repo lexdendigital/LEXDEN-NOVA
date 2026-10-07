@@ -4165,6 +4165,8 @@ function render(){
     body = screenProducts();
   } else if(hash === '#service'){
     body = screenService();
+  } else if(hash === '#creator'){
+    body = screenCreator();
   } else if(hash === '#wishlist'){
     body = screenWishlist();
   } else if(hash === '#profile'){
@@ -6208,6 +6210,7 @@ function screenProfile(){
         <div class="list-row" style="cursor:pointer;" onclick="navigate('#orders')"><span class="left"><span class="ic">${icon('package')}</span>Order History</span><span>${icon('chevron')}</span></div>
         <div class="list-row" style="cursor:pointer;" onclick="navigate('#settings')"><span class="left"><span class="ic">${icon('settings')}</span>Settings</span><span>${icon('chevron')}</span></div>
         <div class="list-row" style="cursor:pointer;" onclick="location.href='affiliate/index.html'"><span class="left"><span class="ic">${icon('target')}</span>Nova Affiliate Program</span><span>${icon('chevron')}</span></div>
+        <div class="list-row" style="cursor:pointer;" onclick="navigate('#creator')"><span class="left"><span class="ic">${icon('target')}</span>Become a Creator</span><span>${icon('chevron')}</span></div>
       </div>
     </div>
   </div>`;
@@ -6276,6 +6279,319 @@ function screenAccount(){
 
   </div>`;
 }
+
+/* =========================================================
+   LEXDEN NOVA CREATOR — Stage B (user-facing application flow)
+   Talks to the Stage A backend: /api/creator-application,
+   /api/creator-documents. Same async-cache + re-render pattern as the
+   affiliate program (window.__affiliatesCache, fetchAffiliatesFromCloud)
+   — see window.__creatorAppCache below.
+   ========================================================= */
+window.__creatorAppCache = null;
+window.__creatorAppError = null;
+async function fetchCreatorApplication(force){
+  if(window.__creatorAppCache && !force) return window.__creatorAppCache;
+  const user = fbAuth.currentUser;
+  if(!user){ window.__creatorAppError = 'Not signed in.'; return null; }
+  try{
+    const token = await user.getIdToken();
+    const r = await withTimeout(fetch(API_BASE+'/api/creator-application', {
+      headers:{'Authorization':'Bearer '+token},
+    }), 15000, 'Loading your application timed out.');
+    const d = await r.json();
+    if(d && d.ok){ window.__creatorAppCache = d.data; window.__creatorAppError = null; return d.data; }
+    window.__creatorAppError = (d && d.error && d.error.message) || 'Could not load your application.';
+    return null;
+  }catch(e){
+    window.__creatorAppError = e.message || 'Could not reach the server.';
+    return null;
+  }
+}
+
+// Draft form state — mirrors editProfileForm's pattern above. Only
+// populated once an application exists or the shopper picks a creator
+// type; screenCreator() resets it from the server's copy whenever the uid
+// changes, same guard resetEditProfileForm uses (shopper._uid check).
+let creatorForm = null;
+function resetCreatorForm(appData){
+  creatorForm = {
+    creatorType: (appData && appData.creatorType) || null,
+    publicFields: { ...(appData && appData.publicFields) },
+    privateFields: { ...(appData && appData.privateFields) },
+    socialHandlesText: ((appData && appData.publicFields && appData.publicFields.socialHandles) || []).join('\n'),
+    acceptTerms: !!(appData && appData.privateFields && appData.privateFields.acceptedTermsAt),
+    profileImagePreview: (appData && appData.publicFields && appData.publicFields.profileImageUrl) || null,
+    profileImageUploading: false,
+    documents: [],
+    errors: [],
+    saving: false,
+  };
+}
+
+function screenCreator(){
+  const shopper = window.__fbShopper;
+  if(!window.__fbAuthResolved){
+    return `<div class="screen"><h1 class="screen-title">Become a Creator</h1><div class="text-2 small">Checking your account…</div></div>`;
+  }
+  if(!shopper){
+    return `<div class="screen"><h1 class="screen-title">Become a Creator</h1>
+      <div class="card" style="padding:18px;text-align:center;">
+        <div style="font-size:15px;margin-bottom:12px;">Sign in to apply — your application is tied to your LEXDEN NOVA account.</div>
+        <button class="btn btn-primary" onclick="navigate('#login')">Sign In</button>
+      </div></div>`;
+  }
+  if(!window.__creatorAppCache && !window.__creatorAppError){
+    fetchCreatorApplication().then(d=>{ resetCreatorForm(d && d.status!=='NOT_APPLIED' ? d : null); render(); });
+    return `<div class="screen"><h1 class="screen-title">Become a Creator</h1><div class="text-2 small" style="padding:20px;text-align:center;">Loading…</div></div>`;
+  }
+  if(window.__creatorAppError){
+    return `<div class="screen"><h1 class="screen-title">Become a Creator</h1>
+      <div class="card" style="padding:16px;">
+        <p class="text-2 small" style="color:var(--error);margin-bottom:10px;">⚠️ ${escapeHtml(window.__creatorAppError)}</p>
+        <button class="btn btn-outline" onclick="fetchCreatorApplication(true).then(d=>{resetCreatorForm(d);render();})">Retry</button>
+      </div></div>`;
+  }
+  const d = window.__creatorAppCache;
+  const status = d && d.status;
+
+  if(!status || status==='NOT_APPLIED'){
+    return screenCreatorIntro();
+  }
+  if(status==='APPLICATION_DRAFT' || status==='CHANGES_REQUESTED'){
+    if(!creatorForm) resetCreatorForm(d);
+    return screenCreatorForm(d);
+  }
+  if(status==='SUBMITTED' || status==='IN_REVIEW'){
+    return screenCreatorStatus('Your application is being reviewed.', 'We\'ll email you the moment there\'s an update — usually within a few days. No action needed from you right now.', '⏳');
+  }
+  if(status==='REJECTED'){
+    return screenCreatorStatus('Your application wasn\'t approved this time.', d.rejectionReason || 'No reason was given.', '✖️', true);
+  }
+  if(status==='APPROVED'){
+    return screenCreatorStatus('You\'re a LEXDEN NOVA Creator! 🎉', 'Your storefront is live. Product creation and your Creator dashboard are coming in the next update — this screen will become your home base.', '🚀');
+  }
+  return screenCreatorIntro();
+}
+
+function screenCreatorIntro(){
+  return `<div class="screen">
+    <h1 class="screen-title">Become a Creator</h1>
+    <div class="card" style="padding:20px;margin-bottom:16px;">
+      <div style="font-size:15px;line-height:1.6;margin-bottom:16px;">Sell apps, courses, templates, eBooks, software, services — or physical goods — directly on LEXDEN NOVA. Free and paid listings both welcome; this isn't just a paid storefront, and neither is your doorway into it.</div>
+    </div>
+    <div class="section-head"><h2>Choose how you'll apply</h2></div>
+    <div class="card" style="padding:16px;margin-bottom:10px;cursor:pointer;" onclick="pickCreatorType('personal')">
+      <div style="font-weight:700;margin-bottom:4px;">Personal Creator</div>
+      <div class="text-2 small">You, selling under your own name or a handle. Requires you to be 18+.</div>
+    </div>
+    <div class="card" style="padding:16px;cursor:pointer;" onclick="pickCreatorType('business')">
+      <div style="font-weight:700;margin-bottom:4px;">Business Creator</div>
+      <div class="text-2 small">A registered business or brand. Requires at least one business/identity document.</div>
+    </div>
+  </div>`;
+}
+function pickCreatorType(type){
+  resetCreatorForm(null);
+  creatorForm.creatorType = type;
+  render();
+}
+
+function screenCreatorStatus(title, body, emoji, allowReapply){
+  return `<div class="screen">
+    <h1 class="screen-title">Become a Creator</h1>
+    <div class="card" style="padding:24px;text-align:center;">
+      <div style="font-size:38px;margin-bottom:10px;">${emoji}</div>
+      <div style="font-weight:700;font-size:16px;margin-bottom:8px;">${escapeHtml(title)}</div>
+      <div class="text-2 small" style="margin-bottom:${allowReapply?'16px':'0'};">${escapeHtml(body)}</div>
+      ${allowReapply ? `<button class="btn btn-primary" onclick="pickCreatorType('personal')">Apply Again</button>` : ''}
+    </div>
+  </div>`;
+}
+
+function screenCreatorForm(serverData){
+  const f = creatorForm;
+  const isBusiness = f.creatorType === 'business';
+  const changeNotice = serverData && serverData.status === 'CHANGES_REQUESTED'
+    ? `<div class="card" style="padding:14px;margin-bottom:16px;border:1px solid var(--warn,#d4af37);"><strong>Changes requested:</strong> ${escapeHtml(serverData.changeRequestReason||'See below.')}</div>`
+    : '';
+  return `<div class="screen">
+    <h1 class="screen-title">Become a Creator</h1>
+    ${changeNotice}
+    <div class="card" style="padding:16px;margin-bottom:12px;">
+      <div class="text-2 small" style="margin-bottom:10px;">Applying as <strong>${isBusiness?'Business':'Personal'} Creator</strong>. <a href="#" onclick="event.preventDefault();pickCreatorType(${isBusiness?`'personal'`:`'business'`})" style="color:var(--accent);">Switch to ${isBusiness?'Personal':'Business'}</a></div>
+
+      <div class="form-field"><label>Category</label>
+        <select id="cf_category">
+          ${['apps','courses','templates','ebooks','software','services','physical','mixed'].map(c=>`<option value="${c}" ${f.publicFields.category===c?'selected':''}>${c[0].toUpperCase()+c.slice(1)}</option>`).join('')}
+        </select>
+      </div>
+
+      <div class="form-field"><label>${isBusiness?'Business display name':'Display name'} <span class="text-2 small">(shown to buyers — never your legal name)</span></label>
+        <input id="cf_displayName" value="${escapeHtml((isBusiness?f.publicFields.businessDisplayName:f.publicFields.displayName)||'')}" placeholder="${isBusiness?'e.g. Lovelace Software':'e.g. Ada Codes'}">
+      </div>
+
+      <div class="form-field"><label>Profile image</label>
+        <input type="file" accept="image/*" onchange="previewCreatorAvatar(this)">
+        ${f.profileImagePreview ? `<img src="${f.profileImagePreview}" style="width:72px;height:72px;border-radius:50%;object-fit:cover;margin-top:8px;">` : ''}
+      </div>
+
+      ${isBusiness ? `
+      <div class="form-field"><label>Legal business name</label><input id="cf_legalBusinessName" value="${escapeHtml(f.privateFields.legalBusinessName||'')}"></div>
+      <div class="form-field"><label>Contact person's name</label><input id="cf_contactName" value="${escapeHtml(f.privateFields.contactName||'')}"></div>
+      <div class="form-field"><label>Email</label><input id="cf_email" type="email" value="${escapeHtml(f.privateFields.email||'')}"></div>
+      <div class="form-field"><label>WhatsApp / customer-care number</label><input id="cf_whatsapp" value="${escapeHtml(f.privateFields.whatsapp||'')}" placeholder="+234..."></div>
+      <div class="form-field"><label>At least one social handle (one per line, full URL)</label><textarea id="cf_social" rows="2" placeholder="https://instagram.com/yourbusiness">${escapeHtml(f.socialHandlesText||'')}</textarea></div>
+      <div class="form-field"><label>Business/identity document</label>
+        <input type="file" accept="image/jpeg,image/png,application/pdf" onchange="uploadCreatorDocument(this,'business_registration')">
+        ${(f.privateFields.documentIds||[]).length ? `<div class="text-2 small" style="margin-top:6px;">✅ ${f.privateFields.documentIds.length} document(s) uploaded</div>` : ''}
+      </div>
+      ` : `
+      <div class="form-field"><label>Legal name <span class="text-2 small">(private — never shown publicly)</span></label><input id="cf_legalName" value="${escapeHtml(f.privateFields.legalName||'')}"></div>
+      <div class="form-field"><label>Date of birth</label><input id="cf_dob" type="date" value="${f.privateFields.dob ? String(f.privateFields.dob).slice(0,10) : ''}"></div>
+      <div class="form-field"><label>Email</label><input id="cf_email" type="email" value="${escapeHtml(f.privateFields.email||'')}"></div>
+      <div class="form-field"><label>Phone</label><input id="cf_phone" value="${escapeHtml(f.privateFields.phone||'')}" placeholder="+234..."></div>
+      `}
+
+      <div class="form-field"><label style="display:flex;align-items:center;gap:8px;cursor:pointer;"><input type="checkbox" id="cf_terms" ${f.acceptTerms?'checked':''} style="width:auto;"> I accept the Creator Terms and Marketplace Rules</label></div>
+
+      ${f.errors.length ? `<div class="card" style="padding:12px;margin:10px 0;border:1px solid var(--error);"><div class="text-2 small" style="font-weight:700;margin-bottom:4px;">Please fix:</div>${f.errors.map(e=>`<div class="text-2 small">• ${escapeHtml(e.message)}</div>`).join('')}</div>` : ''}
+
+      <div style="display:flex;gap:10px;margin-top:14px;">
+        <button class="btn btn-outline" ${f.saving?'disabled':''} onclick="saveCreatorDraft(false)">${f.saving?'Saving…':'Save Draft'}</button>
+        <button class="btn btn-primary" ${f.saving?'disabled':''} onclick="saveCreatorDraft(true)">${f.saving?'Submitting…':'Submit Application'}</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function readCreatorFormFromDom(){
+  const f = creatorForm;
+  const isBusiness = f.creatorType === 'business';
+  f.publicFields.category = $('#cf_category') ? $('#cf_category').value : f.publicFields.category;
+  if(isBusiness){
+    f.publicFields.businessDisplayName = $('#cf_displayName') ? $('#cf_displayName').value.trim() : '';
+    f.publicFields.socialHandles = ($('#cf_social') ? $('#cf_social').value : '').split('\n').map(s=>s.trim()).filter(Boolean);
+    f.privateFields.legalBusinessName = $('#cf_legalBusinessName') ? $('#cf_legalBusinessName').value.trim() : '';
+    f.privateFields.contactName = $('#cf_contactName') ? $('#cf_contactName').value.trim() : '';
+    f.privateFields.email = $('#cf_email') ? $('#cf_email').value.trim() : '';
+    f.privateFields.whatsapp = $('#cf_whatsapp') ? $('#cf_whatsapp').value.trim() : '';
+  } else {
+    f.publicFields.displayName = $('#cf_displayName') ? $('#cf_displayName').value.trim() : '';
+    f.privateFields.legalName = $('#cf_legalName') ? $('#cf_legalName').value.trim() : '';
+    f.privateFields.dob = $('#cf_dob') ? $('#cf_dob').value : '';
+    f.privateFields.email = $('#cf_email') ? $('#cf_email').value.trim() : '';
+    f.privateFields.phone = $('#cf_phone') ? $('#cf_phone').value.trim() : '';
+  }
+  f.acceptTerms = $('#cf_terms') ? $('#cf_terms').checked : false;
+}
+
+function previewCreatorAvatar(inputEl){
+  const file = inputEl.files && inputEl.files[0];
+  if(!file) return;
+  if(file.size > 8*1024*1024){ toast('Image too large — 8MB max', 'error'); inputEl.value=''; return; }
+  const reader = new FileReader();
+  reader.onload = async e=>{
+    creatorForm.profileImagePreview = e.target.result;
+    render();
+    // Re-use the exact same Cloudinary helper every other image upload in
+    // this app already goes through (product images, profile pictures,
+    // logos — see its own comments above) — a creator's own profile photo
+    // isn't a confidential document, so it belongs here, not in the
+    // private Firebase Storage KYC path /api/creator-documents uses.
+    try{
+      const url = await cloudinaryUploadFile(file, 8);
+      creatorForm.publicFields.profileImageUrl = url;
+      toast('Profile image uploaded', 'success');
+    }catch(err){
+      toast('Image upload failed — ' + (err.message||'try again'), 'error');
+    }
+    render();
+  };
+  reader.readAsDataURL(file);
+}
+
+async function uploadCreatorDocument(inputEl, docType){
+  const file = inputEl.files && inputEl.files[0];
+  if(!file) return;
+  if(file.size > 8*1024*1024){ toast('File too large — 8MB max', 'error'); inputEl.value=''; return; }
+  const mimeType = file.type;
+  if(!['image/jpeg','image/png','application/pdf'].includes(mimeType)){ toast('Use a JPEG, PNG, or PDF', 'error'); inputEl.value=''; return; }
+  const user = fbAuth.currentUser;
+  if(!user){ toast('Not signed in', 'error'); return; }
+  const reader = new FileReader();
+  reader.onload = async e=>{
+    const fileBase64 = String(e.target.result).split(',')[1] || '';
+    try{
+      const token = await user.getIdToken();
+      const r = await withTimeout(fetch(API_BASE+'/api/creator-documents', {
+        method:'POST', headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+        body: JSON.stringify({ docType, fileBase64, fileName: file.name, mimeType }),
+      }), 30000, 'Document upload timed out.');
+      const d = await r.json();
+      if(!d.ok){ toast((d.error&&d.error.message)||'Upload failed', 'error'); return; }
+      creatorForm.privateFields.documentIds = [...(creatorForm.privateFields.documentIds||[]), d.data.documentId];
+      toast('Document uploaded', 'success');
+      render();
+    }catch(err){
+      toast('Could not reach the server — '+(err.message||'try again'), 'error');
+    }
+  };
+  reader.readAsDataURL(file);
+}
+
+async function saveCreatorDraft(thenSubmit){
+  readCreatorFormFromDom();
+  const f = creatorForm;
+  if(!f.creatorType){ toast('Pick Personal or Business first', 'error'); return; }
+  const user = fbAuth.currentUser;
+  if(!user){ toast('Not signed in', 'error'); return; }
+  f.saving = true; f.errors = []; render();
+  try{
+    const token = await user.getIdToken();
+    const draftBody = {
+      action: 'save_draft',
+      creatorType: f.creatorType,
+      category: f.publicFields.category,
+      displayName: f.publicFields.displayName,
+      businessDisplayName: f.publicFields.businessDisplayName,
+      profileImageUrl: f.publicFields.profileImageUrl,
+      socialHandles: f.publicFields.socialHandles,
+      legalName: f.privateFields.legalName,
+      dob: f.privateFields.dob,
+      email: f.privateFields.email,
+      phone: f.privateFields.phone,
+      legalBusinessName: f.privateFields.legalBusinessName,
+      contactName: f.privateFields.contactName,
+      whatsapp: f.privateFields.whatsapp,
+      documentIds: f.privateFields.documentIds,
+      acceptTerms: f.acceptTerms,
+    };
+    const r1 = await withTimeout(fetch(API_BASE+'/api/creator-application', {
+      method:'POST', headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+      body: JSON.stringify(draftBody),
+    }), 20000, 'Saving timed out.');
+    const d1 = await r1.json();
+    if(!d1.ok){ f.saving=false; f.errors = d1.error && d1.error.errors ? d1.error.errors : [{message:(d1.error&&d1.error.message)||'Could not save.'}]; render(); return; }
+
+    if(!thenSubmit){ f.saving=false; toast('Draft saved','success'); await fetchCreatorApplication(true); render(); return; }
+
+    const r2 = await withTimeout(fetch(API_BASE+'/api/creator-application', {
+      method:'POST', headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+      body: JSON.stringify({ action:'submit' }),
+    }), 20000, 'Submitting timed out.');
+    const d2 = await r2.json();
+    f.saving = false;
+    if(!d2.ok){ f.errors = d2.error && d2.error.errors ? d2.error.errors : [{message:(d2.error&&d2.error.message)||'Could not submit.'}]; render(); return; }
+    toast('Application submitted!','success');
+    await fetchCreatorApplication(true);
+    render();
+  }catch(err){
+    f.saving = false;
+    toast('Could not reach the server — '+(err.message||'try again'), 'error');
+    render();
+  }
+}
+
 /* Always-editable profile form state for the signed-in Profile screen
    above. Kept separate from completeProfileForm (below) — that older
    one-time "finish your profile" card is no longer shown from here (this
@@ -7699,6 +8015,7 @@ const ADMIN_TABS = [
   {id:'ai', label:'NOVA AI Setup', ic:'sparkle'},
   {id:'payments', label:'Payments', ic:'card'},
   {id:'affiliate', label:'Affiliate Program', ic:'target'},
+  {id:'creators', label:'Creator Applications', ic:'target'},
   {id:'errors', label:'Error Codes', ic:'bug'},
   {id:'suppliers', label:'Suppliers', ic:'package'},
   {id:'supplierRouting', label:'Supplier Routing', ic:'target'},
@@ -7849,7 +8166,7 @@ function renderAdminTab(){
     content: adminContent, branding: adminBranding, services: adminServicesTab, feed: adminFeed,
     testimonials: adminTestimonials, social: adminSocial, ai: adminAI, payments: adminPayments,
     faqs: adminFaqs, leads: adminLeads, newsletter: adminNewsletter, users: adminUsers, errors: adminErrorCodes,
-    affiliate: adminAffiliateProgram,
+    affiliate: adminAffiliateProgram, creators: adminCreatorApplications,
     sitemap: adminSitemap, export: adminExport, logs: adminLogs,
     suppliers: adminSuppliers, supplierRouting: adminSupplierRouting,
     cj: adminCJDropshipping,
@@ -9792,17 +10109,85 @@ function clearNovaLearning(){
   renderAdminTab();
 }
 
+// Cache for GET /api/admin-payment-mode — same shape as
+// window.__affiliatesCache above (null = not loaded yet, triggers a fetch
+// + re-render of the Payments tab once it resolves).
+window.__paymentModeCache = null;
+window.__paymentModeError = null;
+async function fetchPaymentModeFromServer(force){
+  if(window.__paymentModeCache && !force) return window.__paymentModeCache;
+  const user = fbAuth.currentUser;
+  if(!user){ window.__paymentModeError = 'Not signed in.'; return null; }
+  try{
+    const token = await user.getIdToken();
+    const r = await withTimeout(fetch(API_BASE+'/api/admin-payment-mode', {
+      headers:{'Authorization':'Bearer '+token},
+    }), 15000, 'Payment mode lookup timed out.');
+    const d = await r.json();
+    if(d && d.ok){ window.__paymentModeCache = d.data; window.__paymentModeError = null; return d.data; }
+    window.__paymentModeError = (d && d.error && d.error.message) || 'Could not load payment mode.';
+    return null;
+  }catch(e){
+    window.__paymentModeError = e.message || 'Could not reach the server.';
+    return null;
+  }
+}
+async function switchPaymentMode(mode){
+  const user = fbAuth.currentUser;
+  if(!user){ toast('Not signed in.', 'error'); return; }
+  if(!confirm(mode==='live'
+    ? 'Switch checkout and affiliate payouts to LIVE Paystack? Real money will move.'
+    : 'Switch checkout and affiliate payouts to TEST Paystack? No real charges will be made while in test mode.')) return;
+  try{
+    const token = await user.getIdToken();
+    const r = await withTimeout(fetch(API_BASE+'/api/admin-payment-mode', {
+      method:'POST', headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+      body: JSON.stringify({ mode }),
+    }), 15000, 'Switching payment mode timed out.');
+    const d = await r.json();
+    if(!d.ok){ toast((d.error&&d.error.message)||'Could not switch mode.', 'error'); return; }
+    if(d.data.warning) toast(d.data.warning, 'error'); else toast(`Switched to ${mode.toUpperCase()} mode`, 'success');
+    logActivity('Admin', `Switched Paystack to ${mode.toUpperCase()} mode`);
+    await fetchPaymentModeFromServer(true);
+    // The server may have also updated content.paystackPublicKey — pull
+    // settings fresh so this tab (and checkout) reflects it immediately.
+    await pullFromCloud();
+    renderAdminTab();
+  }catch(e){
+    toast('Could not reach the server — '+(e.message||'check your connection'), 'error');
+  }
+}
 function adminPayments(){
   const c = DB.content;
+  const pm = window.__paymentModeCache;
+  if(!pm && !window.__paymentModeError){
+    fetchPaymentModeFromServer().then(()=>renderAdminTab());
+  }
+  const modeBadge = pm
+    ? `<span class="badge" style="background:${pm.mode==='live'?'#16a34a':pm.mode==='test'?'#d97706':'#6b7280'};color:#fff;">${pm.mode ? pm.mode.toUpperCase() : 'NOT SET'}</span>`
+    : `<span class="text-2 small">${window.__paymentModeError || 'Loading…'}</span>`;
   return `
     <div class="admin-topbar"><h2>Payments</h2></div>
     <div class="card" style="padding:16px;margin-bottom:16px;">
+      <h3 style="font-size:14px;margin-bottom:8px;display:flex;align-items:center;gap:10px;">Live / Test mode ${modeBadge}</h3>
+      <p class="text-2 small" style="margin-bottom:12px;">Switches checkout <em>and</em> affiliate bank-lookup/payouts together — every Paystack call on the server reads this one setting, so they can never drift apart. Switching is instant (no redeploy); the secret keys themselves still live only in Render's environment variables, never in Firestore or the browser.</p>
+      ${pm ? `
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:6px;">
+        <button class="btn ${pm.mode==='test'?'btn-primary':''}" ${!pm.hasTestSecret?'disabled title="No PAYSTACK_SECRET_KEY_TEST set in Render"':''} onclick="switchPaymentMode('test')">Use TEST ${pm.hasTestSecret?'':'(no test key configured)'}</button>
+        <button class="btn ${pm.mode==='live'?'btn-primary':''}" ${!pm.hasLiveSecret?'disabled title="No PAYSTACK_SECRET_KEY_LIVE set in Render"':''} onclick="switchPaymentMode('live')">Use LIVE ${pm.hasLiveSecret?'':'(no live key configured)'}</button>
+      </div>
+      <p class="small text-2">Server has: test secret key ${pm.hasTestSecret?'✅':'❌ missing'} · live secret key ${pm.hasLiveSecret?'✅':'❌ missing'}</p>
+      ` : ''}
+    </div>
+    <div class="card" style="padding:16px;margin-bottom:16px;">
       <h3 style="font-size:14px;margin-bottom:8px;">Gateway: Paystack (NGN)</h3>
-      <p class="text-2 small" style="margin-bottom:10px;">Checkout uses Paystack's Inline JS/Popup SDK. The client only ever holds your <strong>public</strong> key — your secret key lives only in the <code>/api/verify-paystack</code> serverless function's environment variables (<code>PAYSTACK_SECRET_KEY</code>) and is never sent to the browser.</p>
-      <div class="form-field"><label>Paystack public key</label><input id="pk_public" value="${escapeHtml(c.paystackPublicKey||'')}" placeholder="pk_live_xxxxxxxxxxxx"></div>
+      <p class="text-2 small" style="margin-bottom:10px;">Checkout uses Paystack's Inline JS/Popup SDK. The client only ever holds a <strong>public</strong> key — the matching secret key lives only in Render's environment variables (<code>PAYSTACK_SECRET_KEY_LIVE</code> / <code>PAYSTACK_SECRET_KEY_TEST</code>) and is never sent to the browser.</p>
+      <div class="form-field"><label>Paystack LIVE public key</label><input id="pk_public_live" value="${escapeHtml(c.paystackPublicKeyLive||c.paystackPublicKey||'')}" placeholder="pk_live_xxxxxxxxxxxx"></div>
+      <div class="form-field"><label>Paystack TEST public key</label><input id="pk_public_test" value="${escapeHtml(c.paystackPublicKeyTest||'')}" placeholder="pk_test_xxxxxxxxxxxx"></div>
+      <div class="form-field"><label>Currently active public key</label><input value="${escapeHtml(c.paystackPublicKey||'')}" disabled style="opacity:.65;"></div>
       <div class="form-field"><label>Verification endpoint</label><input value="${escapeHtml(API_BASE)}/api/verify-paystack" disabled style="opacity:.65;"></div>
       <button class="btn btn-primary" onclick="savePaymentsSettings()">Save payment settings</button>
-      <p class="small text-2" style="margin-top:8px;">Every "Buy Now" tap opens the Paystack popup for the product's price (converted to Naira using your currency rates). After payment, the browser sends the transaction reference to your verification endpoint, which re-checks it directly with Paystack's servers and only then writes the order to Firestore — the browser is never trusted to say "payment succeeded" on its own.</p>
+      <p class="small text-2" style="margin-top:8px;">Saving here stores both public keys. Which one is actually live on checkout is controlled by the Live/Test toggle above, not by this form — "Currently active public key" shows that result.</p>
     </div>
     <div class="card" style="padding:16px;">
       <h3 style="font-size:14px;margin-bottom:6px;">Adding another gateway later</h3>
@@ -9810,10 +10195,14 @@ function adminPayments(){
     </div>`;
 }
 function savePaymentsSettings(){
-  const pub = $('#pk_public').value.trim();
-  // FIX (mega-fix batch #2): endpoint is now the fixed API_BASE constant
-  // — only the Paystack public key is actually admin-editable here.
-  DB.content = {...DB.content, paystackPublicKey:pub, paymentVerifyEndpoint:`${API_BASE}/api/verify-paystack`};
+  const pubLive = $('#pk_public_live').value.trim();
+  const pubTest = $('#pk_public_test').value.trim();
+  const pm = window.__paymentModeCache;
+  // Keep the legacy single `paystackPublicKey` (what checkout actually
+  // reads) pointed at whichever mode is currently active, so saving this
+  // form can never silently swap checkout to the wrong pair.
+  const active = pm && pm.mode === 'live' ? pubLive : pm && pm.mode === 'test' ? pubTest : DB.content.paystackPublicKey;
+  DB.content = {...DB.content, paystackPublicKeyLive:pubLive, paystackPublicKeyTest:pubTest, paystackPublicKey:active, paymentVerifyEndpoint:`${API_BASE}/api/verify-paystack`};
   pushSettingsToCloud();
   logActivity('Admin', 'Updated payment settings');
   toast('Payment settings saved','success');
@@ -9982,6 +10371,131 @@ function adminAffiliateProgram(){
     <details><summary class="small text-2" style="cursor:pointer;">Show raw records</summary>
       <pre style="white-space:pre-wrap;font-size:10.5px;max-height:300px;overflow:auto;background:var(--bg-2,rgba(0,0,0,.03));padding:8px;border-radius:8px;margin-top:8px;">${escapeHtml(JSON.stringify(affiliates.map(a=>({id:a.id, status:a.status, email:a.email, displayName:a.displayName})), null, 2))}</pre>
     </details>
+  </div>`;
+}
+
+// ---- Creator Applications admin tab (Stage B) ----
+window.__creatorAdminCache = null;
+window.__creatorAdminError = null;
+async function fetchCreatorApplicationsAdmin(force){
+  if(window.__creatorAdminCache && !force) return window.__creatorAdminCache;
+  const user = fbAuth.currentUser;
+  if(!user){ window.__creatorAdminError = 'Not signed in.'; return []; }
+  try{
+    const token = await user.getIdToken();
+    const r = await withTimeout(fetch(API_BASE+'/api/creator-admin-applications', {
+      headers:{'Authorization':'Bearer '+token},
+    }), 20000, 'Loading applications timed out.');
+    const d = await r.json();
+    if(d && d.ok){ window.__creatorAdminCache = d.data.applications; window.__creatorAdminError = null; return d.data.applications; }
+    window.__creatorAdminError = (d && d.error && d.error.message) || 'Could not load applications.';
+    return [];
+  }catch(e){
+    window.__creatorAdminError = e.message || 'Could not reach the server.';
+    return [];
+  }
+}
+// creators/{uid} is openly readable (firestore.rules — the storefront
+// needs it), so this list goes straight to Firestore rather than through
+// an admin endpoint, same shortcut the rest of this app already takes for
+// public collections.
+window.__activeCreatorsCache = null;
+async function fetchActiveCreators(force){
+  if(window.__activeCreatorsCache && !force) return window.__activeCreatorsCache;
+  if(!window.__fb) return [];
+  const { fbDb, collection, getDocs } = window.__fb;
+  try{
+    const snap = await withTimeout(getDocs(collection(fbDb, "creators")), 15000, 'Timed out loading creators.');
+    const list = []; snap.forEach(d=>list.push({ id:d.id, ...d.data() }));
+    window.__activeCreatorsCache = list;
+    return list;
+  }catch(e){ console.warn('creators list failed', e); return []; }
+}
+async function creatorAdminAction(uid, action, needsReason){
+  let reason = null;
+  if(needsReason){
+    reason = prompt(`Reason for "${action}" (shown to the creator):`);
+    if(reason===null) return; // cancelled
+    if(!reason.trim()){ toast('A reason is required for this action', 'error'); return; }
+  }
+  const user = fbAuth.currentUser;
+  if(!user){ toast('Not signed in', 'error'); return; }
+  try{
+    const token = await user.getIdToken();
+    const r = await withTimeout(fetch(API_BASE+'/api/creator-admin-applications', {
+      method:'POST', headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+      body: JSON.stringify({ uid, action, reason }),
+    }), 20000, 'Action timed out.');
+    const d = await r.json();
+    if(!d.ok){ toast((d.error&&d.error.message)||'Action failed', 'error'); return; }
+    toast(`${action.replace(/_/g,' ')} → ${d.data.status}`, 'success');
+    logActivity('Admin', `Creator ${action}: ${uid}`);
+    await Promise.all([fetchCreatorApplicationsAdmin(true), fetchActiveCreators(true)]);
+    renderAdminTab();
+  }catch(e){
+    toast('Could not reach the server — '+(e.message||'check your connection'), 'error');
+  }
+}
+function adminCreatorApplications(){
+  fetchCreatorApplicationsAdmin().then(()=>{ if(appState.adminTab==='creators') renderAdminTab(); });
+  fetchActiveCreators().then(()=>{ if(appState.adminTab==='creators') renderAdminTab(); });
+  const apps = window.__creatorAdminCache || [];
+  const creators = window.__activeCreatorsCache || [];
+  const submitted = apps.filter(a=>a.status==='SUBMITTED');
+  const inReview = apps.filter(a=>a.status==='IN_REVIEW');
+  const other = apps.filter(a=>!['SUBMITTED','IN_REVIEW'].includes(a.status));
+
+  const appCard = (a, actions) => `
+    <div class="card" style="padding:12px;margin-bottom:8px;">
+      <div style="font-weight:700;">${escapeHtml((a.publicFields&&(a.publicFields.displayName||a.publicFields.businessDisplayName))||'—')} <span class="chip" style="font-size:10px;">${escapeHtml(a.status)}</span></div>
+      <div class="text-2 small">${escapeHtml(a.creatorType||'')} · ${escapeHtml((a.privateFields&&a.privateFields.email)||'')}</div>
+      ${a.creatorType==='personal' ? `<div class="text-2 small">Legal name: ${escapeHtml((a.privateFields&&a.privateFields.legalName)||'—')} · DOB: ${escapeHtml((a.privateFields&&a.privateFields.dob)?String(a.privateFields.dob).slice(0,10):'—')}</div>` : `<div class="text-2 small">Legal business: ${escapeHtml((a.privateFields&&a.privateFields.legalBusinessName)||'—')} · Contact: ${escapeHtml((a.privateFields&&a.privateFields.contactName)||'—')}</div>`}
+      <div class="text-2 small">Documents: ${(a.documents||[]).length ? a.documents.map(doc=>escapeHtml(doc.docType+' ('+doc.reviewStatus+')')).join(', ') : 'none'}</div>
+      <div class="text-2 small" style="opacity:.6;">uid: ${escapeHtml(a.uid)}</div>
+      <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">${actions}</div>
+    </div>`;
+
+  return `
+  <div class="admin-topbar"><h2>Creator Applications</h2><button class="btn btn-outline btn-sm" onclick="fetchCreatorApplicationsAdmin(true).then(renderAdminTab);fetchActiveCreators(true).then(renderAdminTab);">Refresh</button></div>
+  ${window.__creatorAdminError ? `<p class="text-2 small" style="color:var(--error);">⚠️ ${escapeHtml(window.__creatorAdminError)}</p>` : ''}
+
+  <div class="card" style="padding:16px;margin-bottom:16px;">
+    <h3 style="font-size:14px;margin-bottom:8px;">New — Submitted (${submitted.length})</h3>
+    ${submitted.length ? submitted.map(a=>appCard(a, `<button class="btn btn-primary btn-sm" onclick="creatorAdminAction('${a.uid}','start_review',false)">Start Review</button>`)).join('') : '<p class="text-2 small">None right now.</p>'}
+  </div>
+
+  <div class="card" style="padding:16px;margin-bottom:16px;">
+    <h3 style="font-size:14px;margin-bottom:8px;">In Review (${inReview.length})</h3>
+    ${inReview.length ? inReview.map(a=>appCard(a, `
+      <button class="btn btn-primary btn-sm" onclick="creatorAdminAction('${a.uid}','approve',false)">Approve</button>
+      <button class="btn btn-outline btn-sm" onclick="creatorAdminAction('${a.uid}','request_changes',true)">Request Changes</button>
+      <button class="btn btn-outline btn-sm" onclick="creatorAdminAction('${a.uid}','reject',true)">Reject</button>
+    `)).join('') : '<p class="text-2 small">None right now.</p>'}
+  </div>
+
+  <div class="card" style="padding:16px;margin-bottom:16px;">
+    <h3 style="font-size:14px;margin-bottom:8px;">Other (${other.length})</h3>
+    <p class="text-2 small" style="margin-bottom:8px;">Drafts, changes-requested, rejected — informational, no action needed here.</p>
+    ${other.length ? other.map(a=>appCard(a, '')).join('') : '<p class="text-2 small">None.</p>'}
+  </div>
+
+  <div class="card" style="padding:16px;">
+    <h3 style="font-size:14px;margin-bottom:8px;">Active Creators (${creators.length})</h3>
+    ${creators.length ? creators.map(c=>`
+      <div class="card" style="padding:12px;margin-bottom:8px;">
+        <div style="font-weight:700;">${escapeHtml(c.displayName||'—')} <span class="chip" style="font-size:10px;">${escapeHtml(c.status)}</span> ${c.verifiedBusiness?'<span class="chip" style="font-size:10px;background:var(--accent);">verified</span>':''}</div>
+        <div class="text-2 small">${escapeHtml(c.category||'')} · uid: ${escapeHtml(c.id)}</div>
+        <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
+          ${c.status==='ACTIVE' ? `
+            <button class="btn btn-outline btn-sm" onclick="creatorAdminAction('${c.id}','restrict',true)">Restrict</button>
+            <button class="btn btn-outline btn-sm" onclick="creatorAdminAction('${c.id}','suspend',true)">Suspend</button>
+            <button class="btn btn-outline btn-sm" onclick="creatorAdminAction('${c.id}','revoke',true)">Revoke</button>
+          ` : c.status==='REVOKED' ? `<span class="text-2 small">Revoked — terminal, no actions available.</span>` : `
+            <button class="btn btn-primary btn-sm" onclick="creatorAdminAction('${c.id}','reactivate',false)">Reactivate</button>
+            <button class="btn btn-outline btn-sm" onclick="creatorAdminAction('${c.id}','revoke',true)">Revoke</button>
+          `}
+        </div>
+      </div>`).join('') : '<p class="text-2 small">None yet.</p>'}
   </div>`;
 }
 

@@ -19,11 +19,12 @@
 //   pay-withdrawal-via-paystack{ withdrawalId }   -> automated payout via Paystack Transfers
 
 const { getDb, FieldValue, requireAdminAuth, setCors } = require('./shared');
+const { resolvePaystackSecretKey } = require('../_paystackMode');
 
 const PAYSTACK_BASE = 'https://api.paystack.co';
 
 async function paystackFetch(path, options) {
-  const secret = process.env.PAYSTACK_SECRET_KEY;
+  const secret = await resolvePaystackSecretKey();
   if (!secret) throw Object.assign(new Error('PAYSTACK_SECRET_KEY not set on the server.'), { status: 500 });
   const r = await fetch(PAYSTACK_BASE + path, {
     ...options,

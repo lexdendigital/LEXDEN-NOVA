@@ -20,6 +20,7 @@
 const { getDb, FieldValue, requireAuth, getApplicationDoc, writeCreatorAuditLog, ok, fail, setCors } = require('./creator/shared');
 const { APPLICATION_STATES, assertApplicationTransition, assertNoDuplicateApplication } = require('./creator/state-machine');
 const { validateDraft, validateForSubmit } = require('./creator/validation');
+const { queueEmailBackground } = require('./email-shared');
 
 // Fields a creator is allowed to set themselves. Anything else in the
 // request body is silently dropped — this is what makes "do not trust
@@ -145,6 +146,16 @@ module.exports = async function handler(req, res) {
     }, { merge: true });
 
     await writeCreatorAuditLog({ actorUid: uid, actorRole: 'creator', action: 'application.submitted', targetType: 'application', targetId: uid });
+    // Best-effort — queueEmailBackground fires-and-forgets and never
+    // blocks the API response; a bounced/misconfigured email must never
+    // stop the application itself from being recorded as submitted.
+    if (privateFields.email) {
+      queueEmailBackground({
+        templateKey: 'creator_application_update',
+        to: { email: privateFields.email },
+        params: { status: APPLICATION_STATES.SUBMITTED, creator_type: existing.creatorType },
+      });
+    }
     return ok(res, { status: APPLICATION_STATES.SUBMITTED });
   } catch (e) {
     return fail(res, e);

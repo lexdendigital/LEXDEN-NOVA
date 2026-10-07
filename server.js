@@ -117,6 +117,7 @@ const ENDPOINTS = [
   'process-email-queue',
   'feed',
   'product',
+  'admin-payment-mode',
 ];
 
 for (const name of ENDPOINTS) {

@@ -338,6 +338,15 @@ service cloud.firestore {
     // Dynamic Client Registration records — same reasoning as above.
     match /mcpClients/{id} { allow read, write: if false; }
 
+    // adminAuditLog/{id} — general admin-portal action log (payment-mode
+    // switches live here; creator decisions have their own
+    // creatorAuditLog below so they stay easy to find). Admin-only read,
+    // same write:false pattern as everything else on this page.
+    match /adminAuditLog/{id} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
     // ---- LEXDEN NOVA CREATOR (Stage A) ----
     // Every write to every collection below happens ONLY through
     // api/creator-*.js (Admin SDK, bypasses these rules entirely) after
