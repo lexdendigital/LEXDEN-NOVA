@@ -62,6 +62,10 @@ const { queueEmailBackground } = require('./email-shared');
 const cjOrderHandler = require('./cj-order');
 const { resolveProductSelection } = require('./product-variants');
 const { resolvePaystackSecretKey } = require('./_paystackMode');
+// Stage D: digital delivery for LEXDEN NOVA CREATOR products. See the
+// "CREATOR PRODUCTS" block below for how this plugs into the legacy
+// catalog price-check this file already does.
+const { grantEntitlement, resolveCreatorProductPrice } = require('./creator/entitlements');
 
 // Mirrors PAYSTACK_CHARGEABLE_CURRENCIES in index.html. Keep these two
 // lists identical — see the comment above that array in index.html.
@@ -128,6 +132,53 @@ async function getExpectedAmount(productId, currency, variantId) {
   if (product.free && !Array.isArray(product.variants)) return { price: 0, variant: null, variantId: null, variantName: null, product };
   const selection = resolveProductSelection(product, variantId, currency, settingsDoc);
   return selection ? { ...selection, product } : null;
+}
+
+// ---- CREATOR PRODUCTS (Stage D) ----
+//
+// LEXDEN NOVA CREATOR products (api/creator-products.js, the products/{id}
+// collection) are a separate catalog from the legacy admin-curated
+// catalog/products array getExpectedAmount() above reads from — see
+// CREATOR-STAGE-C-README.md's "Live-checked via the admin portal MCP"
+// section, which confirmed zero collision between the two at the time
+// Stage C shipped. This is checked ONLY as a fallback, after the legacy
+// lookup above has already returned null for this productId — so this
+// adds a second path for creator-product purchases without touching a
+// single line of the already-proven legacy one.
+//
+// Uses the Admin SDK (`db`, already available in the handler below) 
+// rather than the public REST API getCatalogDoc() uses, because — unlike
+// the legacy catalog — products/{id} is NOT universally public-readable
+// (firestore.rules narrows it to PUBLISHED-only, which the REST API can't
+// express as cleanly as just asking the Admin SDK, which bypasses rules
+// entirely and is the trusted source here regardless).
+async function getCreatorProductSelection(db, productId, currency, fallbackName) {
+  try {
+    const snap = await db.collection('products').doc(productId).get();
+    if (!snap.exists) return null;
+    const product = { id: snap.id, ...snap.data() };
+    const priced = resolveCreatorProductPrice(product, currency);
+    if (!priced) return null; // not PUBLISHED, no snapshot, bad price, or currency mismatch — never guess
+    const fileAssetId = product.publishedSnapshot && product.publishedSnapshot.fileAssetId;
+    return {
+      price: priced.price,
+      variant: null,
+      variantId: null,
+      variantName: null,
+      product: { name: priced.title || fallbackName || null },
+      // Carried through to the order write + entitlement grant below —
+      // absent entirely for a legacy-catalog purchase, so `selection.creator`
+      // is exactly how the rest of this file tells the two paths apart.
+      creator: {
+        productId: product.id,
+        versionId: product.currentVersionId || null,
+        assetIds: fileAssetId ? [fileAssetId] : [],
+      },
+    };
+  } catch (e) {
+    console.error('getCreatorProductSelection failed:', e.message);
+    return null;
+  }
 }
 
 // ---- AFFILIATE PROGRAM — commission attribution (added for the affiliate
@@ -366,6 +417,32 @@ module.exports = async function handler(req, res) {
   try {
     const existing = await db.collection('orders').doc(reference).get();
     if (existing.exists) {
+      // Stage D retry safety net: the entitlement grant further down is
+      // awaited but its failure is deliberately non-fatal to the payment
+      // response (same reasoning as the email/CJ/affiliate calls below —
+      // a successful payment must never be reported as failed over a
+      // second system's hiccup). Without this, a creator-product order
+      // whose grant failed on the first attempt would be stuck forever —
+      // every retry would short-circuit right here with ok:true and never
+      // reach the grant call again. This gives it exactly that chance.
+      const existingData = existing.data() || {};
+      if (existingData.creatorProductId) {
+        try {
+          await grantEntitlement(db, {
+            orderId: reference,
+            productId: existingData.creatorProductId,
+            versionId: existingData.creatorVersionId || null,
+            buyerUid: existingData.uid || null,
+            buyerEmail: existingData.email || null,
+            assetIds: existingData.creatorAssetIds || [],
+            price: existingData.amount,
+            currency: existingData.currency,
+            productTitle: existingData.productName,
+          });
+        } catch (e) {
+          console.error('Stage D retry grantEntitlement failed:', e.message);
+        }
+      }
       return res.status(200).json({ ok: true });
     }
   } catch (e) {
@@ -415,7 +492,12 @@ module.exports = async function handler(req, res) {
 
   // ---- Reject underpayment. A verified-paid reference alone isn't proof
   // the shopper paid the RIGHT amount — only that some amount was paid.
-  const selection = await getExpectedAmount(productId, paidCurrency, variantId);
+  let selection = await getExpectedAmount(productId, paidCurrency, variantId);
+  if (!selection) {
+    // Stage D fallback — see getCreatorProductSelection's own comment for
+    // why this only ever runs once the legacy lookup has already missed.
+    selection = await getCreatorProductSelection(db, productId, paidCurrency, productName);
+  }
   const expectedAmount = selection && selection.price;
   if (expectedAmount !== null && expectedAmount !== undefined) {
     const tolerance = Math.max(1, Math.ceil(expectedAmount * 0.02)); // 2%, min 1 unit
@@ -441,10 +523,15 @@ module.exports = async function handler(req, res) {
     ? `${selection.product.name || productName || 'Product'} — ${selection.variantName}`
     : selection.product.name || productName || null;
 
+  // Computed here (rather than after the order write, as before Stage D)
+  // because the entitlement grant below needs it too, not just the
+  // confirmation email further down.
+  const buyerEmail = email || paystackData.customer?.email;
+
   try {
     await db.collection('orders').doc(reference).set({
       uid: uid || null,
-      email: email || paystackData.customer?.email || null,
+      email: buyerEmail || null,
       productId,
       productName: orderProductName,
       variantId: selection.variantId || null,
@@ -458,16 +545,51 @@ module.exports = async function handler(req, res) {
       paidAt: paystackData.paid_at || null,
       delivery: deliveryDetails,
       affiliateRef: affiliateRef || null,
+      // Stage D: only present for a LEXDEN NOVA CREATOR product purchase
+      // (selection.creator is undefined for every legacy-catalog order).
+      // Read back by the idempotency-retry block above if the grant call
+      // just below this ever fails.
+      ...(selection.creator ? {
+        creatorProductId: selection.creator.productId,
+        creatorVersionId: selection.creator.versionId,
+        creatorAssetIds: selection.creator.assetIds,
+      } : {}),
     });
   } catch (e) {
     console.error('Firestore order write failed:', e.message);
     return res.status(500).json({ ok: false, error: 'Payment verified but the order could not be saved — contact support with this reference.' });
   }
 
+  // ---- Stage D: grant the buyer's entitlement the moment the order
+  // exists. Awaited (unlike the email/CJ/affiliate calls below it) because
+  // this is part of what "fulfilled" means for a creator product — a
+  // buyer with a paid order and no entitlement has paid for nothing they
+  // can reach yet. Its own failure still can't flip this response to
+  // ok:false though (the payment itself genuinely succeeded and the order
+  // genuinely exists — reporting that as a failure would be wrong, and
+  // could prompt the shopper to pay a second time); the idempotency-retry
+  // block above is what actually recovers from this failing.
+  if (selection.creator) {
+    try {
+      await grantEntitlement(db, {
+        orderId: reference,
+        productId: selection.creator.productId,
+        versionId: selection.creator.versionId,
+        buyerUid: uid || null,
+        buyerEmail: buyerEmail || null,
+        assetIds: selection.creator.assetIds,
+        price: amountMajor,
+        currency: paidCurrency,
+        productTitle: orderProductName,
+      });
+    } catch (e) {
+      console.error('grantEntitlement failed — will retry on next verify call for this reference:', e.message);
+    }
+  }
+
   // ---- Order confirmation (to shopper) + admin notification — fired in
   // the background (not awaited) so a slow/down Brevo can never delay or
   // affect this already-successful payment response.
-  const buyerEmail = email || paystackData.customer?.email;
   const orderDate = new Date().toLocaleString('en-GB', { timeZone: 'Africa/Lagos' }) + ' WAT';
   if (buyerEmail) {
     sendBrevoTemplate('BREVO_TPL_ORDER', { email: buyerEmail }, {

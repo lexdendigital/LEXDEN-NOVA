@@ -411,6 +411,63 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // ---- LEXDEN NOVA CREATOR (Stage C: product/version engine) ----
+    // Same write:false-everywhere discipline as Stage A — every write
+    // happens through api/creator-products.js / creator-admin-products.js
+    // under the Admin SDK, after the state machine + validation checks in
+    // api/creator/product-state-machine.js and product-validation.js.
+
+    // products/{productId} — the listing itself. Public read is narrowed
+    // to PUBLISHED only (a shopper should never see a draft or a
+    // suspended listing); owner/admin can read it in any status. The
+    // `publishedSnapshot` field is what a future storefront integration
+    // would actually render — see CREATOR-STAGE-C-README.md.
+    match /products/{productId} {
+      allow read: if resource.data.status == 'PUBLISHED' || isOwner(resource.data.creatorId) || isAdmin();
+      allow write: if false;
+    }
+
+    // productVersions/{versionId} — every draft/edit/review attempt,
+    // including unapproved and rejected ones. Never public — a rejected
+    // or in-review version's content isn't for shoppers, only the
+    // creator who wrote it and the admin reviewing it.
+    match /productVersions/{versionId} {
+      allow read: if isAdmin() || (isSignedIn() && resource.data.creatorId == request.auth.uid);
+      allow write: if false;
+    }
+
+    // productAssets/{assetId} — metadata only (mimeType, fileName,
+    // sizeBytes, scanStatus) for an uploaded deliverable file. storagePath
+    // points into a private Storage path with no public URL, same
+    // pattern as creatorDocuments above.
+    match /productAssets/{assetId} {
+      allow read: if isAdmin() || (isSignedIn() && resource.data.creatorId == request.auth.uid);
+      allow write: if false;
+    }
+
+    // productAuditLog/{id} — admin-only, same pattern as creatorAuditLog.
+    match /productAuditLog/{id} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // ---- LEXDEN NOVA CREATOR (Stage D: digital delivery) ----
+
+    // entitlements/{id} — proof a buyer may download a creator product's
+    // assets. Fully server-mediated, unlike products/{productId} above:
+    // there's no legitimate reason for the client to read this directly
+    // (api/creator-entitlements.js and api/creator-product-download.js
+    // both use the Admin SDK, which bypasses these rules entirely) —
+    // a guest-checkout entitlement (buyerEmail only, no buyerUid) couldn't
+    // be expressed as an owner-read rule here anyway, since
+    // request.auth.uid has nothing to match it against. Admin-only read
+    // for support/investigation purposes; every write goes through
+    // grantEntitlement() in api/creator/entitlements.js.
+    match /entitlements/{id} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
     // Anything not explicitly matched above is denied by default —
     // Firestore's rules are deny-by-default outside matched blocks, so
     // no closing catch-all is needed, but stated here for clarity.

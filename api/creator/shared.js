@@ -41,6 +41,32 @@ async function getPrivateDoc(uid) {
   return snap.exists ? { id: snap.id, ...snap.data() } : null;
 }
 
+// ---- Stage C additions (product/version engine) ----
+async function getProductDoc(productId) {
+  const snap = await getDb().collection('products').doc(productId).get();
+  return snap.exists ? { id: snap.id, ...snap.data() } : null;
+}
+async function getVersionDoc(versionId) {
+  const snap = await getDb().collection('productVersions').doc(versionId).get();
+  return snap.exists ? { id: snap.id, ...snap.data() } : null;
+}
+// Separate from writeCreatorAuditLog/application decisions on purpose —
+// product review activity is a much higher-volume log than application
+// decisions, and keeping them in different collections means neither
+// admin screen has to filter the other's noise out.
+async function writeProductAuditLog({ actorUid, actorRole, action, productId, versionId, reason, metadata }) {
+  await getDb().collection('productAuditLog').add({
+    actorUid: actorUid || null,
+    actorRole: actorRole || 'unknown',
+    action,
+    productId: productId || null,
+    versionId: versionId || null,
+    reason: reason || null,
+    metadata: metadata || null,
+    createdAt: FieldValue.serverTimestamp(),
+  });
+}
+
 // Full gate for "may this signed-in user perform a creator ACTION right
 // now" (as opposed to just reading their own status). Throws a
 // well-formed {status, code, message} error the route handlers can catch
@@ -93,4 +119,5 @@ module.exports = {
   requireAuth, requireAdminAuth, isAdminEmail,
   getCreatorDoc, getApplicationDoc, getPrivateDoc, requireActiveCreator,
   writeCreatorAuditLog, ok, fail,
+  getProductDoc, getVersionDoc, writeProductAuditLog,
 };

@@ -155,6 +155,13 @@ const CREATOR_ENDPOINTS = [
   'creator-application',
   'creator-documents',
   'creator-admin-applications',
+  // Stage C — product/version engine
+  'creator-products',
+  'creator-product-assets',
+  'creator-admin-products',
+  // Stage D — digital delivery (entitlements + signed-URL downloads)
+  'creator-entitlements',
+  'creator-product-download',
 ];
 for (const name of CREATOR_ENDPOINTS) {
   app.all(`/api/${name}`, require(`./api/${name}`));
