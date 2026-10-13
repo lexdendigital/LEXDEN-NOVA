@@ -4,107 +4,324 @@
       "collectionGroup": "emailQueue",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "status", "order": "ASCENDING" },
-        { "fieldPath": "nextAttemptAt", "order": "ASCENDING" }
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "nextAttemptAt",
+          "order": "ASCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "affiliateCommissions",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "affiliateId", "order": "ASCENDING" },
-        { "fieldPath": "createdAt", "order": "DESCENDING" }
+        {
+          "fieldPath": "affiliateId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "affiliateWithdrawals",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "affiliateId", "order": "ASCENDING" },
-        { "fieldPath": "requestedAt", "order": "DESCENDING" }
+        {
+          "fieldPath": "affiliateId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "requestedAt",
+          "order": "DESCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "productViewEvents",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "emailed", "order": "ASCENDING" },
-        { "fieldPath": "ts", "order": "ASCENDING" }
+        {
+          "fieldPath": "emailed",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "ts",
+          "order": "ASCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "orders",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "email", "order": "ASCENDING" },
-        { "fieldPath": "productId", "order": "ASCENDING" }
+        {
+          "fieldPath": "email",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "productId",
+          "order": "ASCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "creatorApplications",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "status", "order": "ASCENDING" },
-        { "fieldPath": "updatedAt", "order": "DESCENDING" }
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "updatedAt",
+          "order": "DESCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "creatorDocuments",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "creatorId", "order": "ASCENDING" },
-        { "fieldPath": "createdAt", "order": "DESCENDING" }
+        {
+          "fieldPath": "creatorId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "products",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "creatorId", "order": "ASCENDING" },
-        { "fieldPath": "updatedAt", "order": "DESCENDING" }
+        {
+          "fieldPath": "creatorId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "updatedAt",
+          "order": "DESCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "products",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "status", "order": "ASCENDING" },
-        { "fieldPath": "updatedAt", "order": "DESCENDING" }
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "updatedAt",
+          "order": "DESCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "productVersions",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "productId", "order": "ASCENDING" },
-        { "fieldPath": "versionNumber", "order": "ASCENDING" }
+        {
+          "fieldPath": "productId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "versionNumber",
+          "order": "ASCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "entitlements",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "productId", "order": "ASCENDING" },
-        { "fieldPath": "buyerUid", "order": "ASCENDING" },
-        { "fieldPath": "status", "order": "ASCENDING" }
+        {
+          "fieldPath": "productId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "buyerUid",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "entitlements",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "productId", "order": "ASCENDING" },
-        { "fieldPath": "buyerEmail", "order": "ASCENDING" },
-        { "fieldPath": "status", "order": "ASCENDING" }
+        {
+          "fieldPath": "productId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "buyerEmail",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "entitlements",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "buyerUid", "order": "ASCENDING" },
-        { "fieldPath": "status", "order": "ASCENDING" },
-        { "fieldPath": "grantedAt", "order": "DESCENDING" }
+        {
+          "fieldPath": "buyerUid",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "grantedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "fulfillments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "creatorId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "updatedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "fulfillments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "creatorId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "updatedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "fulfillments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "updatedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "fulfillments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "buyerUid",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "updatedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "creatorWithdrawals",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "creatorId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "requestedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "creatorWithdrawals",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "requestedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "creatorSales",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "creatorId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "supplierOrders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "creatorId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "updatedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "supplierOrders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "updatedAt",
+          "order": "DESCENDING"
+        }
       ]
     }
   ],
