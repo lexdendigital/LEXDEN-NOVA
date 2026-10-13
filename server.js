@@ -81,6 +81,8 @@ app.use((req, res, next) => {
 // "unsupported_grant_type" and Claude kept showing "Connect".
 app.use('/token', express.urlencoded({ extended: false }));
 app.use('/register', express.urlencoded({ extended: false }));
+app.use('/creator/token', express.urlencoded({ extended: false }));
+app.use('/creator/register', express.urlencoded({ extended: false }));
 
 // ---- Health check ----
 app.get('/health', (req, res) => {
@@ -162,6 +164,21 @@ const CREATOR_ENDPOINTS = [
   // Stage D — digital delivery (entitlements + signed-URL downloads)
   'creator-entitlements',
   'creator-product-download',
+  // Stage E — physical fulfillment, proof of delivery
+  'creator-fulfillments',
+  'creator-admin-fulfillments',
+  'creator-order-fulfillment',
+  // Stage F — money/ledger, withdrawals, finance export
+  'creator-payout-account',
+  'creator-withdraw',
+  'creator-admin-finance',
+  // Stage G — per-creator CJ dropshipping (creator's own CJ account)
+  'creator-supplier-connection',
+  'creator-supplier-products',
+  'creator-supplier-orders',
+  'creator-admin-suppliers', 'creator-admin-sla',
+  // Stage I — automation: scheduler door, creator notifications, admin controls
+  'creator-cron', 'creator-notifications', 'creator-admin-automation',
 ];
 for (const name of CREATOR_ENDPOINTS) {
   app.all(`/api/${name}`, require(`./api/${name}`));
@@ -221,3 +238,17 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`LEXDEN NOVA API listening on port ${PORT}`);
 });
+
+// Stage I — optional built-in scheduler. Off unless CREATOR_CRON_IN_PROCESS=true.
+// Render's free web service sleeps when idle, so for dependable schedules ALSO
+// call /api/creator-cron from an external pinger (see CREATOR-STAGE-I-README.md).
+// Jobs are lock-protected and interval-limited, so running both is harmless.
+if (process.env.CREATOR_CRON_IN_PROCESS === 'true') {
+  const { runJobs } = require('./api/automation/runner');
+  const { getDb } = require('./api/creator/shared');
+  const TICK_MS = 10 * 60 * 1000;
+  setInterval(() => {
+    runJobs(getDb(), [], { trigger: 'in-process' }).catch((e) => console.error('in-process scheduler failed:', e.message));
+  }, TICK_MS).unref();
+  console.log('Creator scheduler: in-process timer enabled (every 10 min).');
+}

@@ -1072,7 +1072,10 @@ img{max-width:100%;display:block;}
 .review-card{display:flex;gap:10px;padding:12px 0;border-bottom:1px solid var(--border);}
 .avatar{width:38px;height:38px;border-radius:50%;background:var(--grad-aurora);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;color:#050214;flex-shrink:0;}
 .sticky-buy{position:fixed;left:0;right:0;bottom:calc(var(--nav-h) + var(--safe-bottom));z-index:45;padding:10px 16px;background:color-mix(in srgb, var(--bg) 90%, transparent);backdrop-filter:blur(12px);border-top:1px solid var(--border);box-shadow:0 -8px 24px rgba(0,0,0,0.22);display:flex;gap:10px;align-items:center;}
-@media (min-width:768px){.sticky-buy{position:static;background:none;border:none;backdrop-filter:none;padding:16px 0 0;}}
+/* Desktop: keep the Pay Now / Get Now / Get Started bar pinned to the bottom of the
+   window while the product page scrolls (it settles into place at the end), so buyers
+   never have to scroll to the bottom to find it. */
+@media (min-width:768px){.sticky-buy{position:sticky;left:auto;right:auto;bottom:0;z-index:45;background:color-mix(in srgb, var(--bg) 94%, transparent);backdrop-filter:blur(12px);border:none;border-top:1px solid var(--border);box-shadow:0 -8px 24px rgba(0,0,0,0.18);padding:14px 16px;margin-top:8px;}}
 
 /* Service screen */
 .service-card{display:flex;gap:14px;padding:16px;margin-bottom:12px;align-items:flex-start;}
@@ -1559,6 +1562,11 @@ fcmIsSupported().then(supported=>{
 });
 
 // Make these reachable from the existing plain-JS code below:
+// The classic <script> further down uses the bare name `fbAuth` (payment mode,
+// creator application, affiliates). A module-scoped const is invisible there,
+// which made those calls throw ReferenceError — the admin Payments toggle sat
+// on "Loading…" forever. A window property IS visible as a bare identifier.
+window.fbAuth = fbAuth;
 window.__fb = {
   fbDb, fbAuth, doc, getDoc, setDoc, collection, getDocs, deleteDoc, query, where, orderBy, updateDoc, increment, limit,
   signInWithEmailAndPassword, signOut,
@@ -1901,6 +1909,8 @@ function isAdminUser(user){
 // the race impossible: anonymous sign-in can now never run before or
 // during a real sign-in.
 onAuthStateChanged(fbAuth, user => {
+  // Never carry one account's creator status / payment-mode cache to the next.
+  if(!window.__lastAuthUid || window.__lastAuthUid !== (user && user.uid)){ window.__creatorAppCache = null; window.__creatorAppError = null; window.__creatorAppFetching = false; window.__paymentModeCache = null; window.__paymentModeError = null; window.__lastAuthUid = user ? user.uid : null; }
   // DIAGNOSTIC (temporary — helps pin down the "sign-in disappears after a
   // few hours" report): logs every time Firebase re-evaluates auth state,
   // and what it landed on. If a shopper's session vanishes, checking these
@@ -6210,7 +6220,7 @@ function screenProfile(){
         <div class="list-row" style="cursor:pointer;" onclick="navigate('#orders')"><span class="left"><span class="ic">${icon('package')}</span>Order History</span><span>${icon('chevron')}</span></div>
         <div class="list-row" style="cursor:pointer;" onclick="navigate('#settings')"><span class="left"><span class="ic">${icon('settings')}</span>Settings</span><span>${icon('chevron')}</span></div>
         <div class="list-row" style="cursor:pointer;" onclick="location.href='affiliate/index.html'"><span class="left"><span class="ic">${icon('target')}</span>Nova Affiliate Program</span><span>${icon('chevron')}</span></div>
-        <div class="list-row" style="cursor:pointer;" onclick="navigate('#creator')"><span class="left"><span class="ic">${icon('target')}</span>Become a Creator</span><span>${icon('chevron')}</span></div>
+        <div class="list-row" style="cursor:pointer;" onclick="navigate('#creator')"><span class="left"><span class="ic">${icon('target')}</span>${escapeHtml(creatorRowLabel())}</span><span>${icon('chevron')}</span></div>
       </div>
     </div>
   </div>`;
@@ -6396,9 +6406,29 @@ function pickCreatorType(type){
   render();
 }
 
+// Profile-row wording follows the shopper's creator status, so an approved
+// creator never sees "Become a Creator". The status is fetched once, quietly,
+// the first time a signed-in shopper opens Profile.
+function creatorRowLabel(){
+  if(window.__fbShopper && !window.__creatorAppCache && !window.__creatorAppError && !window.__creatorAppFetching){
+    window.__creatorAppFetching = true;
+    fetchCreatorApplication().then(()=>{ window.__creatorAppFetching = false; render(); }).catch(()=>{ window.__creatorAppFetching = false; });
+  }
+  const st = window.__creatorAppCache && window.__creatorAppCache.status;
+  if(st==='APPROVED') return 'My Creator Account';
+  if(st==='SUBMITTED' || st==='IN_REVIEW') return 'Creator Application (In Review)';
+  if(st==='APPLICATION_DRAFT' || st==='CHANGES_REQUESTED') return 'Continue Creator Application';
+  return 'Become a Creator';
+}
+function creatorScreenTitle(){
+  const st = window.__creatorAppCache && window.__creatorAppCache.status;
+  if(st==='APPROVED') return 'My Creator Account';
+  if(st==='SUBMITTED' || st==='IN_REVIEW') return 'Creator Application';
+  return 'Become a Creator';
+}
 function screenCreatorStatus(title, body, emoji, allowReapply){
   return `<div class="screen">
-    <h1 class="screen-title">Become a Creator</h1>
+    <h1 class="screen-title">${escapeHtml(creatorScreenTitle())}</h1>
     <div class="card" style="padding:24px;text-align:center;">
       <div style="font-size:38px;margin-bottom:10px;">${emoji}</div>
       <div style="font-weight:700;font-size:16px;margin-bottom:8px;">${escapeHtml(title)}</div>
