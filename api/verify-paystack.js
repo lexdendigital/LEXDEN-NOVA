@@ -62,10 +62,15 @@ const { queueEmailBackground } = require('./email-shared');
 const cjOrderHandler = require('./cj-order');
 const { resolveProductSelection } = require('./product-variants');
 const { resolvePaystackSecretKey } = require('./_paystackMode');
-// Stage D: digital delivery for LEXDEN NOVA CREATOR products. See the
-// "CREATOR PRODUCTS" block below for how this plugs into the legacy
-// catalog price-check this file already does.
+// LEXDEN NOVA CREATOR (Stages D/E/F): creator-product purchases are a
+// second catalog (products/{id}), checked ONLY after the legacy lookup
+// misses, so the proven legacy checkout path is untouched.
 const { grantEntitlement, resolveCreatorProductPrice } = require('./creator/entitlements');
+const { createFulfillment } = require('./creator/fulfillment');
+const { attributeCreatorEarning } = require('./creator/ledger');
+// Stage G: per-creator CJ dropshipping. A paid CJ_DROPSHIP order is placed in
+// the CREATOR'S own CJ account (never NOVA's), idempotently, in the background.
+const { createCjOrderForFulfillment } = require('./supplier/orders');
 
 // Mirrors PAYSTACK_CHARGEABLE_CURRENCIES in index.html. Keep these two
 // lists identical — see the comment above that array in index.html.
@@ -134,45 +139,38 @@ async function getExpectedAmount(productId, currency, variantId) {
   return selection ? { ...selection, product } : null;
 }
 
-// ---- CREATOR PRODUCTS (Stage D) ----
-//
-// LEXDEN NOVA CREATOR products (api/creator-products.js, the products/{id}
-// collection) are a separate catalog from the legacy admin-curated
-// catalog/products array getExpectedAmount() above reads from — see
-// CREATOR-STAGE-C-README.md's "Live-checked via the admin portal MCP"
-// section, which confirmed zero collision between the two at the time
-// Stage C shipped. This is checked ONLY as a fallback, after the legacy
-// lookup above has already returned null for this productId — so this
-// adds a second path for creator-product purchases without touching a
-// single line of the already-proven legacy one.
-//
-// Uses the Admin SDK (`db`, already available in the handler below) 
-// rather than the public REST API getCatalogDoc() uses, because — unlike
-// the legacy catalog — products/{id} is NOT universally public-readable
-// (firestore.rules narrows it to PUBLISHED-only, which the REST API can't
-// express as cleanly as just asking the Admin SDK, which bypasses rules
-// entirely and is the trusted source here regardless).
+// ---- CREATOR PRODUCTS (Stages D/E/F) ----
+// Uses the Admin SDK (not the public REST API) because products/{id} is
+// readable publicly only when PUBLISHED, and the Admin SDK is the trusted
+// source regardless. Returns null (never guesses) for anything that can't
+// be confidently priced: not PUBLISHED, no snapshot, bad price, currency
+// mismatch, or an unusable id.
 async function getCreatorProductSelection(db, productId, currency, fallbackName) {
   try {
+    if (typeof productId !== 'string' || !productId || productId.includes('/')) return null;
     const snap = await db.collection('products').doc(productId).get();
     if (!snap.exists) return null;
     const product = { id: snap.id, ...snap.data() };
     const priced = resolveCreatorProductPrice(product, currency);
-    if (!priced) return null; // not PUBLISHED, no snapshot, bad price, or currency mismatch — never guess
-    const fileAssetId = product.publishedSnapshot && product.publishedSnapshot.fileAssetId;
+    if (!priced) return null;
+    const snapshot = product.publishedSnapshot || {};
     return {
       price: priced.price,
       variant: null,
       variantId: null,
       variantName: null,
       product: { name: priced.title || fallbackName || null },
-      // Carried through to the order write + entitlement grant below —
-      // absent entirely for a legacy-catalog purchase, so `selection.creator`
-      // is exactly how the rest of this file tells the two paths apart.
+      // `selection.creator` is how the rest of this file tells a creator
+      // purchase from a legacy one; offeringType picks Stage D (digital
+      // entitlement) vs Stage E (physical fulfillment).
       creator: {
         productId: product.id,
         versionId: product.currentVersionId || null,
-        assetIds: fileAssetId ? [fileAssetId] : [],
+        creatorId: product.creatorId || null,
+        offeringType: snapshot.offeringType || null,
+        fulfillmentMode: snapshot.fulfillmentMode || 'SELLER_STOCK',
+        processingDays: Number.isInteger(snapshot.processingDays) ? snapshot.processingDays : null,
+        assetIds: snapshot.fileAssetId ? [snapshot.fileAssetId] : [],
       },
     };
   } catch (e) {
@@ -417,30 +415,41 @@ module.exports = async function handler(req, res) {
   try {
     const existing = await db.collection('orders').doc(reference).get();
     if (existing.exists) {
-      // Stage D retry safety net: the entitlement grant further down is
-      // awaited but its failure is deliberately non-fatal to the payment
-      // response (same reasoning as the email/CJ/affiliate calls below —
-      // a successful payment must never be reported as failed over a
-      // second system's hiccup). Without this, a creator-product order
-      // whose grant failed on the first attempt would be stuck forever —
-      // every retry would short-circuit right here with ok:true and never
-      // reach the grant call again. This gives it exactly that chance.
-      const existingData = existing.data() || {};
-      if (existingData.creatorProductId) {
+      // Creator-product safety net: the entitlement grant / fulfillment
+      // creation below are awaited but deliberately non-fatal to the
+      // payment response. Without this, an order whose grant failed once
+      // would short-circuit here forever. Both calls are idempotent.
+      const o = existing.data() || {};
+      if (o.creatorProductId) {
         try {
-          await grantEntitlement(db, {
-            orderId: reference,
-            productId: existingData.creatorProductId,
-            versionId: existingData.creatorVersionId || null,
-            buyerUid: existingData.uid || null,
-            buyerEmail: existingData.email || null,
-            assetIds: existingData.creatorAssetIds || [],
-            price: existingData.amount,
-            currency: existingData.currency,
-            productTitle: existingData.productName,
-          });
+          if (o.creatorOfferingType === 'PHYSICAL_PRODUCT') {
+            await createFulfillment(db, {
+              orderId: reference, productId: o.creatorProductId, versionId: o.creatorVersionId || null,
+              creatorId: o.creatorSellerId || null, buyerUid: o.uid || null, buyerEmail: o.email || null,
+              delivery: o.delivery || null, productTitle: o.productName,
+              fulfillmentMode: o.creatorFulfillmentMode || 'SELLER_STOCK', processingDays: o.creatorProcessingDays || null,
+            });
+            // Stage G: idempotent — a retried verify never places a 2nd CJ order.
+            if (o.creatorFulfillmentMode === 'CJ_DROPSHIP') {
+              createCjOrderForFulfillment(db, reference).catch(e => console.error('creator CJ order retry failed:', e.message));
+            }
+          } else {
+            await grantEntitlement(db, {
+              orderId: reference, productId: o.creatorProductId, versionId: o.creatorVersionId || null,
+              buyerUid: o.uid || null, buyerEmail: o.email || null, assetIds: o.creatorAssetIds || [],
+              price: o.amount, currency: o.currency, productTitle: o.productName,
+            });
+          }
         } catch (e) {
-          console.error('Stage D retry grantEntitlement failed:', e.message);
+          console.error('creator fulfilment retry failed:', e.message);
+        }
+        // Earning credit is transactional + idempotent, so retrying is safe.
+        if (o.creatorSellerId) {
+          attributeCreatorEarning(db, {
+            reference, creatorId: o.creatorSellerId, productId: o.creatorProductId,
+            productTitle: o.productName, offeringType: o.creatorOfferingType,
+            amountMajor: o.amount, currency: o.currency,
+          }).catch(e => console.error('creator earning retry failed:', e.message));
         }
       }
       return res.status(200).json({ ok: true });
@@ -494,8 +503,6 @@ module.exports = async function handler(req, res) {
   // the shopper paid the RIGHT amount — only that some amount was paid.
   let selection = await getExpectedAmount(productId, paidCurrency, variantId);
   if (!selection) {
-    // Stage D fallback — see getCreatorProductSelection's own comment for
-    // why this only ever runs once the legacy lookup has already missed.
     selection = await getCreatorProductSelection(db, productId, paidCurrency, productName);
   }
   const expectedAmount = selection && selection.price;
@@ -523,9 +530,6 @@ module.exports = async function handler(req, res) {
     ? `${selection.product.name || productName || 'Product'} — ${selection.variantName}`
     : selection.product.name || productName || null;
 
-  // Computed here (rather than after the order write, as before Stage D)
-  // because the entitlement grant below needs it too, not just the
-  // confirmation email further down.
   const buyerEmail = email || paystackData.customer?.email;
 
   try {
@@ -545,14 +549,16 @@ module.exports = async function handler(req, res) {
       paidAt: paystackData.paid_at || null,
       delivery: deliveryDetails,
       affiliateRef: affiliateRef || null,
-      // Stage D: only present for a LEXDEN NOVA CREATOR product purchase
-      // (selection.creator is undefined for every legacy-catalog order).
-      // Read back by the idempotency-retry block above if the grant call
-      // just below this ever fails.
+      // Only present for a creator-product purchase; read back by the
+      // idempotency-retry block above.
       ...(selection.creator ? {
         creatorProductId: selection.creator.productId,
         creatorVersionId: selection.creator.versionId,
         creatorAssetIds: selection.creator.assetIds,
+        creatorSellerId: selection.creator.creatorId,
+        creatorOfferingType: selection.creator.offeringType,
+        creatorFulfillmentMode: selection.creator.fulfillmentMode,
+        creatorProcessingDays: selection.creator.processingDays || null,
       } : {}),
     });
   } catch (e) {
@@ -560,30 +566,35 @@ module.exports = async function handler(req, res) {
     return res.status(500).json({ ok: false, error: 'Payment verified but the order could not be saved — contact support with this reference.' });
   }
 
-  // ---- Stage D: grant the buyer's entitlement the moment the order
-  // exists. Awaited (unlike the email/CJ/affiliate calls below it) because
-  // this is part of what "fulfilled" means for a creator product — a
-  // buyer with a paid order and no entitlement has paid for nothing they
-  // can reach yet. Its own failure still can't flip this response to
-  // ok:false though (the payment itself genuinely succeeded and the order
-  // genuinely exists — reporting that as a failure would be wrong, and
-  // could prompt the shopper to pay a second time); the idempotency-retry
-  // block above is what actually recovers from this failing.
+  // ---- Creator products: fulfil the buyer's side the moment the order
+  // exists. Awaited (it is part of what "fulfilled" means) but its failure
+  // can never flip this response to ok:false — the payment succeeded, and
+  // reporting failure could make the shopper pay twice. The idempotency
+  // block above recovers from a failure here on the next verify call.
   if (selection.creator) {
     try {
-      await grantEntitlement(db, {
-        orderId: reference,
-        productId: selection.creator.productId,
-        versionId: selection.creator.versionId,
-        buyerUid: uid || null,
-        buyerEmail: buyerEmail || null,
-        assetIds: selection.creator.assetIds,
-        price: amountMajor,
-        currency: paidCurrency,
-        productTitle: orderProductName,
-      });
+      if (selection.creator.offeringType === 'PHYSICAL_PRODUCT') {
+        await createFulfillment(db, {
+          orderId: reference, productId: selection.creator.productId, versionId: selection.creator.versionId,
+          creatorId: selection.creator.creatorId, buyerUid: uid || null, buyerEmail: buyerEmail || null,
+          delivery: deliveryDetails, productTitle: orderProductName,
+          fulfillmentMode: selection.creator.fulfillmentMode, processingDays: selection.creator.processingDays,
+        });
+        // Stage G: fire-and-forget like the CJ/email calls below — a supplier
+        // problem is recorded for the creator/admin and never affects the
+        // already-successful payment response.
+        if (selection.creator.fulfillmentMode === 'CJ_DROPSHIP') {
+          createCjOrderForFulfillment(db, reference).catch(e => console.error('creator CJ order failed:', e.message));
+        }
+      } else {
+        await grantEntitlement(db, {
+          orderId: reference, productId: selection.creator.productId, versionId: selection.creator.versionId,
+          buyerUid: uid || null, buyerEmail: buyerEmail || null, assetIds: selection.creator.assetIds,
+          price: amountMajor, currency: paidCurrency, productTitle: orderProductName,
+        });
+      }
     } catch (e) {
-      console.error('grantEntitlement failed — will retry on next verify call for this reference:', e.message);
+      console.error('creator fulfilment failed — will retry on next verify call for this reference:', e.message);
     }
   }
 
@@ -616,7 +627,11 @@ module.exports = async function handler(req, res) {
   // cj-order.js is idempotent on `reference`, so it is always safe to
   // call here even if the shopper's own browser also calls it directly
   // right after this response comes back.
-  if (deliveryDetails) {
+  // Gated off for creator products: cj-order.js resolves suppliers from the
+  // legacy admin-curated catalog only. A creator's PHYSICAL_PRODUCT already
+  // got its own fulfillment record above; a CJ_DROPSHIP one is placed in the
+  // creator's OWN CJ account by api/supplier/orders.js (Stage G).
+  if (deliveryDetails && !selection.creator) {
     createCjOrderInBackground(reference).catch(e => console.error('cj-order background trigger failed:', e.message));
   }
 
@@ -627,6 +642,17 @@ module.exports = async function handler(req, res) {
     reference, buyerUid: uid, productId, variantId: selection.variantId, productName: orderProductName, amountMajor,
     currency: paidCurrency, affiliateRef, affiliateRefSource,
   }).catch(e => console.error('affiliate commission attribution failed:', e.message));
+
+  // Stage F: credit the creator's ledger. Fire-and-forget like the
+  // affiliate call above (nothing the buyer sees depends on it); the credit
+  // itself is transactional and idempotent on `reference`.
+  if (selection.creator) {
+    attributeCreatorEarning(db, {
+      reference, creatorId: selection.creator.creatorId, productId: selection.creator.productId,
+      productTitle: orderProductName, offeringType: selection.creator.offeringType,
+      amountMajor, currency: paidCurrency,
+    }).catch(e => console.error('creator earning attribution failed:', e.message));
+  }
 
   return res.status(200).json({ ok: true });
 };

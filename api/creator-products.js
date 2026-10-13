@@ -23,6 +23,9 @@ const {
   isVersionEditable, assertNoConcurrentVersion, assertProductNotBlocked,
 } = require('./creator/product-state-machine');
 const { validateProductDraft, validateProductForSubmit } = require('./creator/product-validation');
+const supplier = require('./supplier/service');
+const supplierStore = require('./supplier/store');
+const { FULFILLMENT_MODES, normalizeFulfillmentMode } = require('./supplier/mapping');
 
 // Fields a creator may set on a version. Deliberately explicit allowlist
 // (same reasoning as PUBLIC_FIELD_KEYS in creator-application.js) — a
@@ -31,7 +34,7 @@ const { validateProductDraft, validateProductForSubmit } = require('./creator/pr
 const VERSION_FIELD_KEYS = [
   'title', 'description', 'category', 'images', 'price', 'currency', 'isFree', 'refundPolicy',
   // type-specific
-  'stock', 'weightGrams', 'shippingOrigin',
+  'stock', 'weightGrams', 'shippingOrigin', 'fulfillmentMode', 'supplierName', 'processingDays',
   'fileAssetId', 'externalUrl', 'systemRequirements', 'pageCount', 'compatibility',
   'modules', 'level',
   'turnaround', 'deliverables',
@@ -149,6 +152,12 @@ module.exports = async function handler(req, res) {
       const { ok: valid, errors } = validateProductForSubmit(version.fields);
       if (!valid) return fail(res, { status: 422, code: 'VALIDATION_FAILED', message: 'This listing is missing required information.', errors });
 
+      // Stage G: a CJ dropship listing cannot enter review without a valid,
+      // tested supplier mapping on an active CJ connection (blueprint §87).
+      if (version.fields.offeringType === 'PHYSICAL_PRODUCT' && normalizeFulfillmentMode(version.fields.fulfillmentMode) === FULFILLMENT_MODES.CJ_DROPSHIP) {
+        await supplier.assertReadyToSubmit(getDb(), { uid, creator, versionId: version.id });
+      }
+
       assertVersionTransition(version.status, VERSION_STATES.PENDING_REVIEW);
       assertProductTransition(product.status, PRODUCT_STATES.SUBMITTED);
 
@@ -184,6 +193,9 @@ module.exports = async function handler(req, res) {
         updatedAt: FieldValue.serverTimestamp(),
       });
       await getDb().collection('products').doc(productId).set({ latestVersionId: versionRef.id, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+      // Stage G: carry the CJ mapping forward as UNTESTED so the new version
+      // must be re-tested (and re-approved) rather than inheriting trust.
+      if (latest) await supplierStore.cloneMappingForNewVersion(getDb(), latest.id, versionRef.id).catch((e) => console.warn('mapping clone failed:', e.message));
 
       await writeProductAuditLog({ actorUid: uid, actorRole: 'creator', action: 'product.new_version_started', productId, versionId: versionRef.id });
       return ok(res, { versionId: versionRef.id, status: VERSION_STATES.DRAFT }, 201);
@@ -195,7 +207,26 @@ module.exports = async function handler(req, res) {
       if (!product || product.creatorId !== uid) return fail(res, { status: 404, code: 'NOT_FOUND', message: 'No product found.' });
       const to = action === 'pause' ? PRODUCT_STATES.PAUSED : action === 'resume' ? PRODUCT_STATES.PUBLISHED : PRODUCT_STATES.ARCHIVED;
       assertProductTransition(product.status, to);
-      await getDb().collection('products').doc(productId).set({ status: to, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+      // Stage G: a dropship listing can't be put back on sale while its
+      // supplier side is still broken — re-check with CJ first.
+      if (action === 'resume' && product.publishedSnapshot && product.publishedSnapshot.fulfillmentMode === FULFILLMENT_MODES.CJ_DROPSHIP) {
+        const verdict = await supplier.checkMappingHealth(getDb(), { productId, minGapMs: 0 });
+        if (verdict.health === 'DEGRADED') {
+          return fail(res, { status: 409, code: 'SUPPLIER_NOT_READY', message: `Cannot resume yet: ${(verdict.reasons && verdict.reasons[0]) || 'the supplier check failed'}` });
+        }
+      }
+      // Stage I: a pause the PLATFORM applied is not the creator's to undo.
+      if (action === 'resume' && product.pausedBySla) {
+        return fail(res, { status: 409, code: 'PAUSED_BY_PLATFORM', message: 'These listings were paused because of missed order deadlines. Ship or cancel your late orders; support will re-open them.' });
+      }
+      if (action === 'resume' && product.pausedByLink) {
+        const { checkExternalLink } = require('./automation/ssrf');
+        const r = await checkExternalLink(product.publishedSnapshot && product.publishedSnapshot.externalUrl);
+        if (r.state !== 'OK') return fail(res, { status: 409, code: 'LINK_NOT_READY', message: `Cannot resume yet: the delivery link still fails (${r.code}). Fix the link first.` });
+      }
+      const patch = { status: to, updatedAt: FieldValue.serverTimestamp() };
+      if (action === 'resume') Object.assign(patch, { pausedBySupplier: false, pausedByLink: false, pauseReason: null });
+      await getDb().collection('products').doc(productId).set(patch, { merge: true });
       await writeProductAuditLog({ actorUid: uid, actorRole: 'creator', action: `product.${action}`, productId });
       return ok(res, { status: to });
     }

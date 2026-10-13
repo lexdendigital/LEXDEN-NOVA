@@ -19,6 +19,8 @@ const {
   PRODUCT_STATES, VERSION_STATES,
   assertProductTransition, assertVersionTransition,
 } = require('./creator/product-state-machine');
+const supplier = require('./supplier/service');
+const { FULFILLMENT_MODES, normalizeFulfillmentMode } = require('./supplier/mapping');
 
 const VERSION_ACTIONS = {
   start_review: { from: [VERSION_STATES.PENDING_REVIEW], productTo: PRODUCT_STATES.IN_REVIEW, reasonRequired: false },
@@ -81,6 +83,14 @@ module.exports = async function handler(req, res) {
       assertProductTransition(product.status, spec.productTo);
       if (spec.versionTo) assertVersionTransition(version.status, spec.versionTo);
 
+      // Stage G (blueprint §87): never publish a CJ dropship version against
+      // an untested, stale or broken supplier mapping. A stale test is re-run
+      // against the creator's own CJ account first.
+      if (action === 'approve' && version.fields && version.fields.offeringType === 'PHYSICAL_PRODUCT'
+          && normalizeFulfillmentMode(version.fields.fulfillmentMode) === FULFILLMENT_MODES.CJ_DROPSHIP) {
+        await supplier.assertReadyToApprove(getDb(), { creatorId: product.creatorId, versionId: version.id });
+      }
+
       const batch = getDb().batch();
       const versionPatch = { updatedAt: FieldValue.serverTimestamp() };
       if (spec.versionTo) versionPatch.status = spec.versionTo;
@@ -131,7 +141,15 @@ module.exports = async function handler(req, res) {
       const product = await getProductDoc(productId);
       if (!product) return fail(res, { status: 404, code: 'NOT_FOUND', message: 'No product found.' });
       assertProductTransition(product.status, spec.to);
+      // Stage G: reinstating a dropship listing needs a healthy supplier side.
+      if (action === 'reinstate' && product.publishedSnapshot && product.publishedSnapshot.fulfillmentMode === FULFILLMENT_MODES.CJ_DROPSHIP) {
+        const verdict = await supplier.checkMappingHealth(getDb(), { productId, minGapMs: 0 });
+        if (verdict.health === 'DEGRADED') {
+          return fail(res, { status: 409, code: 'SUPPLIER_NOT_READY', message: `Cannot reinstate: ${(verdict.reasons && verdict.reasons[0]) || 'the supplier check failed'}` });
+        }
+      }
       const patch = { status: spec.to, updatedAt: FieldValue.serverTimestamp() };
+      if (action === 'reinstate') Object.assign(patch, { pausedBySupplier: false, pausedByLink: false, pausedBySla: false, pauseReason: null });
       if (spec.reasonField && reason) patch[spec.reasonField] = reason.trim();
       await getDb().collection('products').doc(productId).set(patch, { merge: true });
       await writeProductAuditLog({ actorUid: admin.uid, actorRole: 'admin', action: `product.${action}`, productId, reason: reason || null });

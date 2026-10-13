@@ -71,8 +71,23 @@ async function writeProductAuditLog({ actorUid, actorRole, action, productId, ve
 // now" (as opposed to just reading their own status). Throws a
 // well-formed {status, code, message} error the route handlers can catch
 // and translate straight into the API's standard error envelope.
+//
+// Stage J (Creator MCP): an in-process caller that has ALREADY verified the
+// creator's identity through the MCP OAuth flow (mcp/lib/authMiddleware.js)
+// can hand a handler a request carrying TRUSTED_CREATOR instead of a
+// Firebase ID token. That lets the MCP tools reuse the real handlers —
+// every validation rule and state machine — rather than a second copy of
+// them. It is a Symbol key on purpose: JSON bodies, query strings and
+// headers can only ever produce string keys, so no HTTP client can forge
+// it. Everything after identity (creator exists, not suspended/revoked)
+// still runs exactly as for a normal request.
+const TRUSTED_CREATOR = Symbol('lexden.trustedCreator');
+
 async function requireActiveCreator(req) {
-  const decoded = await requireAuth(req);
+  const trusted = req && req[TRUSTED_CREATOR];
+  const decoded = trusted && typeof trusted.uid === 'string' && trusted.uid
+    ? { uid: trusted.uid, email: trusted.email || null }
+    : await requireAuth(req);
   const creator = await getCreatorDoc(decoded.uid);
   if (!creator) {
     const e = new Error('You are not an approved creator yet.');
@@ -117,7 +132,7 @@ function fail(res, err) {
 module.exports = {
   getDb, getAuthAdmin, getFirebaseBucket, FieldValue, setCors,
   requireAuth, requireAdminAuth, isAdminEmail,
-  getCreatorDoc, getApplicationDoc, getPrivateDoc, requireActiveCreator,
+  getCreatorDoc, getApplicationDoc, getPrivateDoc, requireActiveCreator, TRUSTED_CREATOR,
   writeCreatorAuditLog, ok, fail,
   getProductDoc, getVersionDoc, writeProductAuditLog,
 };

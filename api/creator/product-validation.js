@@ -14,6 +14,8 @@
 // not yet differentiated from each other. Splitting those further is a
 // small, isolated follow-up whenever the platform actually needs to tell
 // them apart.
+const { SUPPORTED_FULFILLMENT_MODES, FULFILLMENT_MODES, normalizeFulfillmentMode } = require('../supplier/mapping');
+
 const OFFERING_TYPES = Object.freeze([
   'PHYSICAL_PRODUCT', 'DIGITAL_DOWNLOAD', 'EBOOK', 'TEMPLATE', 'SOFTWARE',
   'COURSE', 'EXTERNAL_ACCESS', 'SERVICE', 'LIVE_PROGRAM', 'SUBSCRIPTION', 'BUNDLE',
@@ -61,10 +63,32 @@ function validateProductForSubmit(fields) {
   if (!isNonEmptyString(f.refundPolicy)) errors.push({ field: 'refundPolicy', message: 'A refund/return policy statement is required.' });
 
   // ---- Type-specific ----
+  // Stage G: only a physical product has a fulfillment mode. A listing saved
+  // before Stage G has none and is SELLER_STOCK, exactly as it always was.
+  const mode = normalizeFulfillmentMode(f.fulfillmentMode);
+  if (type !== 'PHYSICAL_PRODUCT' && mode !== FULFILLMENT_MODES.SELLER_STOCK) {
+    errors.push({ field: 'fulfillmentMode', message: 'fulfillmentMode only applies to physical products.' });
+  }
+
   if (type === 'PHYSICAL_PRODUCT') {
-    if (!isPositiveNumber(f.stock)) errors.push({ field: 'stock', message: 'Stock quantity is required.' });
-    if (!isPositiveNumber(f.weightGrams)) errors.push({ field: 'weightGrams', message: 'Package weight (grams) is required for shipping calculation.' });
-    if (!isNonEmptyString(f.shippingOrigin)) errors.push({ field: 'shippingOrigin', message: 'A shipping origin is required.' });
+    if (!SUPPORTED_FULFILLMENT_MODES.includes(mode)) {
+      errors.push({ field: 'fulfillmentMode', message: `fulfillmentMode must be one of: ${SUPPORTED_FULFILLMENT_MODES.join(', ')}.` });
+    } else if (mode === FULFILLMENT_MODES.SELLER_STOCK) {
+      if (!isPositiveNumber(f.stock)) errors.push({ field: 'stock', message: 'Stock quantity is required.' });
+      if (!isPositiveNumber(f.weightGrams)) errors.push({ field: 'weightGrams', message: 'Package weight (grams) is required for shipping calculation.' });
+      if (!isNonEmptyString(f.shippingOrigin)) errors.push({ field: 'shippingOrigin', message: 'A shipping origin is required.' });
+    } else if (mode === FULFILLMENT_MODES.MANUAL_SUPPLIER) {
+      // Stage H (blueprint §20): the creator buys from their own supplier and
+      // ships by hand. NOVA cannot verify that supplier, so it asks the creator
+      // to declare it and a realistic processing time (which also sets the SLA).
+      if (!isNonEmptyString(f.supplierName, 100) || String(f.supplierName).trim().length < 2) errors.push({ field: 'supplierName', message: 'Name the supplier you order this product from (2–100 characters).' });
+      if (!Number.isInteger(f.processingDays) || f.processingDays < 1 || f.processingDays > 30) errors.push({ field: 'processingDays', message: 'Processing time must be a whole number of days from 1 to 30.' });
+    }
+    // CJ_DROPSHIP: stock, weight and origin come from the supplier and are
+    // verified by the mapping test instead (see api/supplier/service.js).
+    if (f.processingDays !== undefined && f.processingDays !== null && mode !== FULFILLMENT_MODES.MANUAL_SUPPLIER) {
+      if (!Number.isInteger(f.processingDays) || f.processingDays < 1 || f.processingDays > 30) errors.push({ field: 'processingDays', message: 'Processing time must be a whole number of days from 1 to 30.' });
+    }
   }
 
   if (type === 'DIGITAL_DOWNLOAD' || type === 'SOFTWARE' || type === 'EBOOK' || type === 'TEMPLATE') {

@@ -3,21 +3,16 @@
 // LEXDEN NOVA CREATOR — Stage D.
 //
 // GET /api/creator-product-download?productId=X
-// Auth required (any signed-in buyer — does NOT require requireActiveCreator;
-// a buyer need not be a creator themselves). Checks the caller has an
-// active entitlement for productId, then mints short-lived signed URLs
-// for every asset that entitlement covers. This is the "get it back OUT
-// to a paying buyer" half that creator-product-assets.js's own
-// file-level comment explicitly deferred to Stage D.
+// Any signed-in buyer (NOT requireActiveCreator — a buyer need not be a
+// creator). Checks for an active entitlement, then mints short-lived
+// signed URLs for every asset that entitlement covers.
 //
-// Response: { ok:true, data: { links: [{ assetId, fileName, mimeType,
-//            url, expiresAt }] } }
+// Response: { ok:true, data: { links: [{ assetId, fileName, mimeType, url, expiresAt }] } }
 const { requireAuth, getDb, getFirebaseBucket, writeProductAuditLog, ok, fail, setCors } = require('./creator/shared');
 const { findActiveEntitlement, canDownloadAsset } = require('./creator/entitlements');
 
-// Long enough for a real download of an 8MB file (Stage C's own MAX_BYTES
-// cap) even on a slow connection; short enough that a link pasted
-// somewhere public stops working well within the same day.
+// Long enough for an 8MB download on a slow connection (Stage C's
+// MAX_BYTES), short enough that a pasted link dies the same day.
 const SIGNED_URL_TTL_MS = 10 * 60 * 1000;
 
 module.exports = async function handler(req, res) {
@@ -44,11 +39,9 @@ module.exports = async function handler(req, res) {
     const entitlement = await findActiveEntitlement(db, { uid: decoded.uid, email: decoded.email, productId });
     const decision = canDownloadAsset(entitlement);
     if (!decision.allowed) {
-      // NO_ENTITLEMENT and REVOKED are both "you may not have this" —
-      // deliberately the same 403 either way so this endpoint can never
-      // be used to probe whether a given productId was ever purchased by
-      // anyone, revoked or not.
-      return fail(res, { status: 403, code: decision.reason || 'NOT_ENTITLED', message: 'You do not have access to download this product. If you believe this is wrong, contact support with your order reference.' });
+      // Same generic 403 for NO_ENTITLEMENT and REVOKED so this can't be
+      // used to probe whether a product was ever purchased.
+      return fail(res, { status: 403, code: 'NOT_ENTITLED', message: 'You do not have access to download this product. If you believe this is wrong, contact support with your order reference.' });
     }
 
     const assetIds = Array.isArray(entitlement.assetIds) ? entitlement.assetIds : [];
@@ -61,16 +54,10 @@ module.exports = async function handler(req, res) {
     const links = [];
     for (const assetId of assetIds) {
       const assetSnap = await db.collection('productAssets').doc(assetId).get();
-      if (!assetSnap.exists) continue; // asset metadata missing/removed — skip, don't fail the whole request over one bad id
+      if (!assetSnap.exists) continue;
       const asset = assetSnap.data();
       const [url] = await bucket.file(asset.storagePath).getSignedUrl({ action: 'read', expires: expiresAtMs });
-      links.push({
-        assetId,
-        fileName: asset.fileName || null,
-        mimeType: asset.mimeType || null,
-        url,
-        expiresAt: new Date(expiresAtMs).toISOString(),
-      });
+      links.push({ assetId, fileName: asset.fileName || null, mimeType: asset.mimeType || null, url, expiresAt: new Date(expiresAtMs).toISOString() });
     }
 
     if (!links.length) {

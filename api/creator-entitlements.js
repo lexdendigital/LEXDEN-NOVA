@@ -3,16 +3,12 @@
 // LEXDEN NOVA CREATOR — Stage D.
 //
 // GET /api/creator-entitlements -> the signed-in buyer's own active
-// entitlements (purchased or free creator products), for a future "My
-// Library" screen. productTitle/price/currency are denormalized onto the
-// entitlement at grant time (see creator/entitlements.js) specifically so
-// this listing never needs a second read per item, and still shows
-// something sensible even if the underlying product is later archived.
+// entitlements, for a "My Library" screen. productTitle/price/currency
+// are denormalized at grant time so listing needs no second read.
 //
-// Only covers entitlements keyed by buyerUid — a guest-checkout
-// entitlement (buyerEmail only, no uid) isn't listable here until that
-// person signs in; it's still fully downloadable in the meantime via
-// creator-product-download.js, which checks both uid and email.
+// Only lists entitlements keyed by buyerUid; a guest-checkout entitlement
+// (email only) is still downloadable via creator-product-download.js,
+// which checks both uid and email.
 const { requireAuth, getDb, ok, fail, setCors } = require('./creator/shared');
 
 module.exports = async function handler(req, res) {
@@ -37,14 +33,7 @@ module.exports = async function handler(req, res) {
       .get();
     const items = snap.docs.map(d => {
       const v = d.data();
-      return {
-        id: d.id,
-        productId: v.productId,
-        productTitle: v.productTitle || null,
-        grantedAt: v.grantedAt,
-        price: v.price,
-        currency: v.currency,
-      };
+      return { id: d.id, productId: v.productId, productTitle: v.productTitle || null, grantedAt: v.grantedAt, price: v.price, currency: v.currency };
     });
     return ok(res, { entitlements: items });
   } catch (e) {

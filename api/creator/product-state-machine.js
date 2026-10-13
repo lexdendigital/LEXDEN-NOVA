@@ -147,6 +147,10 @@ function classifyEditRisk(prevFields, nextFields) {
   if ((prev.fileAssetId || null) !== (next.fileAssetId || null)) return 'high'; // paid file swapped
   if ((prev.externalUrl || null) !== (next.externalUrl || null) && (prev.externalUrl || next.externalUrl)) return 'high';
   if ((prev.supplierId || null) !== (next.supplierId || null) && (prev.supplierId || next.supplierId)) return 'high';
+  // Stage G: switching between seller stock and a supplier is a supplier change.
+  if ((prev.fulfillmentMode || 'SELLER_STOCK') !== (next.fulfillmentMode || 'SELLER_STOCK')) return 'high';
+  // Stage H: naming a different manual supplier is a supplier change too.
+  if ((prev.supplierName || null) !== (next.supplierName || null) && (prev.supplierName || next.supplierName)) return 'high';
   if ((prev.refundPolicy || null) !== (next.refundPolicy || null)) return 'high';
   if (typeof prev.price === 'number' && typeof next.price === 'number' && prev.price > 0) {
     const change = Math.abs(next.price - prev.price) / prev.price;
@@ -157,6 +161,7 @@ function classifyEditRisk(prevFields, nextFields) {
   if ((prev.description || '') !== (next.description || '')) medium = true;
   if ((prev.images && prev.images[0]) !== (next.images && next.images[0])) medium = true; // primary image
   if ((prev.category || null) !== (next.category || null)) medium = true;
+  if ((prev.processingDays || null) !== (next.processingDays || null)) medium = true; // changes the delivery promise
   if (medium) return 'medium';
 
   return 'low';
