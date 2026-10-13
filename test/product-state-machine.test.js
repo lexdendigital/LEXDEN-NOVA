@@ -116,3 +116,14 @@ test('description, primary image, or category change is medium risk', () => {
 test('a tags-only or no-op change is low risk', () => {
   assert.equal(classifyEditRisk({ title: 'Same', price: 100 }, { title: 'Same', price: 100 }), 'low');
 });
+
+test('Stage G: changing fulfillmentMode is a HIGH-risk edit', () => {
+  assert.equal(classifyEditRisk({ fulfillmentMode: 'SELLER_STOCK' }, { fulfillmentMode: 'CJ_DROPSHIP' }), 'high');
+  assert.equal(classifyEditRisk({ fulfillmentMode: 'CJ_DROPSHIP', price: 1 }, { fulfillmentMode: 'CJ_DROPSHIP', price: 1 }), 'low');
+});
+
+test('Stage H: changing the manual supplier is high risk; changing processing time is medium', () => {
+  assert.equal(classifyEditRisk({ supplierName: 'A Ltd' }, { supplierName: 'B Ltd' }), 'high');
+  assert.equal(classifyEditRisk({ processingDays: 2 }, { processingDays: 6 }), 'medium');
+  assert.equal(classifyEditRisk({ supplierName: 'A Ltd', processingDays: 2 }, { supplierName: 'A Ltd', processingDays: 2 }), 'low');
+});

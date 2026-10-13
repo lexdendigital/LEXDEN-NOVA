@@ -1,16 +1,19 @@
 // mcp/lib/callHandler.js
 //
-// The api/cj-*.js files are plain (req, res) handlers, written for direct
-// mounting as Express routes. Rather than re-deriving their normalization
-// logic (variant shapes, stock summaries, friendly status labels, the
-// idempotency check in cj-order.js) a second time for MCP tools — which
-// would be exactly the kind of business-logic duplication the MCP README
-// warned against — this calls the SAME handler function in-process with a
-// minimal fake req/res, and captures whatever it would have sent back.
+// The api/*.js files are plain (req, res) handlers, written for direct
+// mounting as Express routes. Rather than re-deriving their validation and
+// state-machine logic a second time for MCP tools — exactly the kind of
+// business-logic duplication that lets two code paths drift apart — this
+// calls the SAME handler function in-process with a minimal fake req/res,
+// and captures whatever it would have sent back.
+//
+// `extras` is merged onto the fake request (own enumerable keys AND
+// symbols). The Creator MCP uses it to pass the TRUSTED_CREATOR identity
+// (see api/creator/shared.js).
 
-function callHandler(handler, { method = 'GET', query = {}, body = {} } = {}) {
+function callHandler(handler, { method = 'GET', query = {}, body = {}, extras = {} } = {}) {
   return new Promise((resolve, reject) => {
-    const req = { method, query, body, headers: {} };
+    const req = { method, query, body, headers: {}, ...extras };
     const res = {
       _status: 200,
       status(code) { this._status = code; return this; },

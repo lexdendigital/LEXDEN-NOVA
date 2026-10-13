@@ -339,6 +339,7 @@ function registerRoutes(app) {
           code: body.code, clientId: body.client_id, redirectUri: body.redirect_uri,
           codeVerifier: body.code_verifier, resource: body.resource || null,
         });
+        assertAdminGrant(scope);
         const access = await tokens.issueAccessToken({ email, uid, scope, clientId, resource });
         const refresh_token = await tokens.issueRefreshToken({ email, uid, scope, clientId, resource });
         logStep(rid, 'token success', { client: clientId });
@@ -347,6 +348,7 @@ function registerRoutes(app) {
       if (body.grant_type === 'refresh_token') {
         logStep(rid, 'token grant=refresh_token', { client: body.client_id || '(unspecified)' });
         const { email, uid, scope, clientId, resource } = await tokens.consumeRefreshToken(body.refresh_token);
+        assertAdminGrant(scope);
         const access = await tokens.issueAccessToken({ email, uid, scope, clientId, resource });
         const refresh_token = await tokens.issueRefreshToken({ email, uid, scope, clientId, resource });
         logStep(rid, 'token success (refresh)', { client: clientId });
@@ -368,6 +370,15 @@ function registerRoutes(app) {
   });
 }
 
+// Stage J: the admin /token endpoint only redeems grants minted for the
+// ADMIN realm. (The admin MCP gate also refuses non-admin scopes and
+// non-admin emails, so this is defence in depth, not the only barrier.)
+function assertAdminGrant(scope) {
+  if (!String(scope || '').split(/\s+/).includes('admin')) {
+    throw Object.assign(new Error('invalid_grant'), { oauth: true, detail: 'This grant was not issued for the admin connector.' });
+  }
+}
+
 function normalizeScope(value) {
   const requested = String(value || 'admin offline_access').split(/\s+/).filter(Boolean);
   const supported = requested.filter(scope => scope === 'admin' || scope === 'offline_access');
@@ -376,4 +387,9 @@ function normalizeScope(value) {
   return [...new Set(supported)].join(' ');
 }
 
-module.exports = { registerRoutes, baseUrl, allowedRedirectUris };
+module.exports = {
+  registerRoutes, baseUrl, allowedRedirectUris,
+  // shared with mcp/creatorOauth.js (the creator realm reuses the same
+  // client-registration store and logging, but issues its own scope)
+  getRegisteredClient, persistClientRegistration, reqId, logStep, assertAdminGrant,
+};

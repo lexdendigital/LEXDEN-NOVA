@@ -121,3 +121,29 @@ test('validateProductDraft only checks offeringType, nothing else', () => {
   assert.equal(validateProductDraft({ offeringType: 'NOT_REAL' }).ok, false);
   assert.equal(validateProductDraft({}).ok, false);
 });
+
+test('Stage G: CJ_DROPSHIP physical product needs no stock/weight/origin; bad modes are rejected', () => {
+  const dropship = validateProductForSubmit({ ...baseCommon(), offeringType: 'PHYSICAL_PRODUCT', fulfillmentMode: 'CJ_DROPSHIP' });
+  assert.equal(dropship.ok, true, JSON.stringify(dropship.errors));
+  const seller = validateProductForSubmit({ ...baseCommon(), offeringType: 'PHYSICAL_PRODUCT', fulfillmentMode: 'SELLER_STOCK' });
+  assert.ok(seller.errors.some((e) => e.field === 'stock'));
+  const unsupported = validateProductForSubmit({ ...baseCommon(), offeringType: 'PHYSICAL_PRODUCT', fulfillmentMode: 'PREORDER' });
+  assert.equal(unsupported.ok, false);
+  const digital = validateProductForSubmit({ ...baseCommon(), offeringType: 'DIGITAL_DOWNLOAD', fileAssetId: 'a', fulfillmentMode: 'CJ_DROPSHIP' });
+  assert.equal(digital.ok, false);
+});
+
+test('Stage H: MANUAL_SUPPLIER needs supplier name and processing days, not stock/weight/origin', () => {
+  const base = { ...baseCommon(), offeringType: 'PHYSICAL_PRODUCT', fulfillmentMode: 'MANUAL_SUPPLIER' };
+  const bare = validateProductForSubmit(base);
+  assert.equal(bare.ok, false);
+  assert.deepEqual(bare.errors.map((e) => e.field).sort(), ['processingDays', 'supplierName']);
+  assert.equal(validateProductForSubmit({ ...base, supplierName: 'Alaba Wholesale', processingDays: 3 }).ok, true);
+  assert.equal(validateProductForSubmit({ ...base, supplierName: 'Alaba Wholesale', processingDays: 0 }).ok, false);
+  assert.equal(validateProductForSubmit({ ...base, supplierName: 'Alaba Wholesale', processingDays: 31 }).ok, false);
+  assert.equal(validateProductForSubmit({ ...base, supplierName: 'A', processingDays: 3 }).ok, false);
+  // optional processing time on seller stock must still be sane
+  const stock = { ...baseCommon(), offeringType: 'PHYSICAL_PRODUCT', stock: 5, weightGrams: 100, shippingOrigin: 'Lagos' };
+  assert.equal(validateProductForSubmit({ ...stock, processingDays: 2 }).ok, true);
+  assert.equal(validateProductForSubmit({ ...stock, processingDays: 99 }).ok, false);
+});

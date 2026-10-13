@@ -1,11 +1,15 @@
 // mcp/lib/audit.js
 //
-// Every MCP tool call gets one row in `mcpAuditLog` — who (admin email,
-// since there's only ever one caller), what tool, what arguments (with
-// obvious secrets stripped), whether it succeeded, and how long it took.
-// This is the thing that lets you (or Claude, via nova_get_audit_log)
-// answer "wait, did the MCP connection actually change anything?" after
-// the fact — nothing in the original app logged admin actions this way.
+// Every MCP tool call gets one row in `mcpAuditLog` — who, what tool, what
+// arguments (with obvious secrets stripped), whether it succeeded, and how
+// long it took. This is what lets the admin (or Claude, via
+// nova_get_audit_log) answer "did the MCP connection actually change
+// anything?" after the fact.
+//
+// Stage J: the log is now shared by two realms. Admin rows carry
+// `realm: 'admin'` and the admin email; Creator MCP rows carry
+// `realm: 'creator'` and the creator's uid, so the admin can see exactly
+// what any creator's AI assistant did on their behalf.
 
 const { getDb, FieldValue } = require('../../api/affiliate/shared');
 
@@ -24,11 +28,13 @@ function redact(value, depth = 0) {
   return value;
 }
 
-async function writeAuditEntry({ email, tool, args, ok, error, tookMs }) {
+async function writeAuditEntry({ email, tool, args, ok, error, tookMs, realm, uid }) {
   try {
     const db = getDb();
     await db.collection('mcpAuditLog').add({
+      realm: realm || 'admin',
       email: email || null,
+      uid: uid || null,
       tool,
       args: redact(args || {}),
       ok: !!ok,
@@ -49,4 +55,4 @@ async function listAuditEntries({ limit = 50 } = {}) {
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 }
 
-module.exports = { writeAuditEntry, listAuditEntries };
+module.exports = { writeAuditEntry, listAuditEntries, redact };
