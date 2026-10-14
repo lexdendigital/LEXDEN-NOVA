@@ -1761,10 +1761,10 @@ async function sendNovaEmail(templateKey, to, params){
   const base = novaApiBase();
   if(!base) { console.warn('sendNovaEmail skipped — no payment verify endpoint configured yet (Admin → Payments)'); return false; }
   try{
-    const r = await fetch(base+'/api/send-email', {
+    const r = await fetchWithTimeout(base+'/api/send-email', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ templateKey, to, params })
-    });
+    }, 20000);
     return r.ok;
   }catch(e){ console.warn('sendNovaEmail failed', templateKey, e); return false; }
 }
@@ -2804,7 +2804,20 @@ function startCheckout(productId, variantId){
   toast('Checkout is temporarily unavailable. Please try again shortly.', 'error');
 }
 
+// Wake the (free-plan) backend before it is needed: a sleeping Render service
+// takes ~30-50s on its first request, which is exactly when a payment is being
+// confirmed or the first NOVA question is asked. A tiny GET /api/health at
+// checkout start / chat open / app start means it is already awake. Throttled.
+let __lastWarmAt = 0;
+function warmBackend(){
+  try{
+    if(Date.now() - __lastWarmAt < 4*60*1000) return;
+    __lastWarmAt = Date.now();
+    fetch(API_BASE + '/api/health', { method:'GET', cache:'no-store', keepalive:true }).catch(()=>{});
+  }catch(e){}
+}
 function startPaystackCheckout(productId, variantId, deliveryDetails, confirmed){
+  warmBackend();
   const p = findProduct(productId);
   if(!p){ toast('Product not found', 'error'); return; }
   const selectedVariant=(p.variants||[]).find(v=>String(v.id)===String(variantId||appState.selectedVariants[productId]||''));
@@ -2826,7 +2839,11 @@ function startPaystackCheckout(productId, variantId, deliveryDetails, confirmed)
     return;
   }
   const c = DB.content;
-  if(!c.paystackPublicKey){
+  // The key is derived from the payment MODE every time, so a stale or blank
+  // legacy `paystackPublicKey` can never block checkout or pair the wrong
+  // public key with the server's secret key.
+  const activePaystackKey = (c.paymentMode==='live' ? c.paystackPublicKeyLive : c.paymentMode==='test' ? c.paystackPublicKeyTest : '') || c.paystackPublicKey || c.paystackPublicKeyLive || '';
+  if(!activePaystackKey){
     // Shopper-facing message stays generic — no mention of "admin" or
     // "Paystack key" — the real reason still goes to the console/log for
     // whoever manages the store.
@@ -2862,7 +2879,7 @@ function startPaystackCheckout(productId, variantId, deliveryDetails, confirmed)
       toast(`Checkout isn't set up in ${selectedCode} yet — charging in ${chargeCode} instead.`, 'info');
     }
     const handler = PaystackPop.setup({
-      key: c.paystackPublicKey,
+      key: activePaystackKey,
       email,
       amount: amountSubunit,
       currency: chargeCode,
@@ -3241,7 +3258,8 @@ async function submitNewsletterSignup(){
   // by (or fail because of) a slow cloud write. Fire-and-forget: a failed
   // send here shouldn't block or fail the subscribe action itself.
   sendNovaEmail('newsletter', { email }, { email }).catch(()=>{});
-  const ok = await pushNewsletterSubToCloud(email);
+  // Never leave the button on "Subscribing…": give the cloud write 10s, then move on.
+  const ok = await Promise.race([pushNewsletterSubToCloud(email), new Promise(r=>setTimeout(()=>r(false), 10000))]);
   localStorage.setItem('ln_newsletter_seen', String(Date.now()));
   closeNewsletterModal();
   toast(ok ? 'You\'re subscribed! 🎉' : 'Saved on this device — will sync once you\'re back online.', ok ? 'success' : 'error');
@@ -3371,30 +3389,38 @@ async function verifyPaystackPayment(reference, product, email, showResult, deli
     // "full brain" issue) could leave this hanging far longer than a
     // shopper would wait, with no feedback. 15s hard cap; the existing
     // retry queue (bumpPendingAttempt) already covers picking it back up.
-    const res = await withTimeout(
-      fetch(verifyEndpoint, {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({
-          reference, uid: window.__fbUid || null, email,
-          productId: product.id, productName: product.name,
-          ...(variantId?{variantId}:{}),
-          // PHYSICAL-COMMERCE ADDITION: omitted entirely (undefined) for
-          // every digital purchase — only ever set for a PHYSICAL product
-          // that went through openDeliveryDetailsModal first. See
-          // verify-paystack.js's matching `delivery` handling.
-          ...(delivery ? { delivery } : {}),
-          // NOVA AFFILIATE PROGRAM: resolved from localStorage, set by
-          // captureAffiliateAttribution() when this shopper first landed
-          // via a /go/ affiliate link. verify-paystack.js does the real
-          // (authoritative, server-side) validation and payout — this is
-          // just telling it which affiliate, if any, to check.
-          ...resolveAffiliateAttribution(product.id),
-        }),
-      }),
-      15000,
-      'Payment verification timed out'
-    );
-    const data = await res.json();
+    // SPEED + RELIABILITY: confirm in-line with up to 3 quick attempts
+    // (1.2s apart) before falling back to the saved-and-retrying state. Most
+    // "failures" right after paying are momentary: Paystack not yet marking
+    // the charge successful, or a sleeping server waking up. The server is
+    // idempotent, so repeating the call can never double-charge or
+    // double-deliver.
+    const verifyBody = JSON.stringify({
+      reference, uid: window.__fbUid || null, email,
+      productId: product.id, productName: product.name,
+      ...(variantId?{variantId}:{}),
+      ...(delivery ? { delivery } : {}),
+      ...resolveAffiliateAttribution(product.id),
+    });
+    const RETRYABLE = /not yet successful|could not reach|retry automatically|trouble|could not find/i;
+    let res = null, data = null, lastErr = null;
+    for(let attempt = 1; attempt <= 3; attempt++){
+      try{
+        res = await withTimeout(
+          fetch(verifyEndpoint, { method:'POST', headers:{'Content-Type':'application/json'}, body: verifyBody, keepalive: true }),
+          attempt === 1 ? 25000 : 15000,
+          'Payment verification timed out'
+        );
+        data = await res.json();
+        lastErr = null;
+        if(res.ok && data.ok) break;
+        if(!(data && RETRYABLE.test(String(data.error||'')))) break; // a definitive answer (e.g. underpayment) — don't hammer
+      }catch(err){
+        lastErr = err; res = null; data = null;
+      }
+      if(attempt < 3) await new Promise(r=>setTimeout(r, 1200));
+    }
+    if(lastErr && !data) throw lastErr;
     if(res.ok && data.ok){
       logActivity('User', `Completed payment for ${product.name} (ref ${reference})`);
       removePendingPayment(reference);
@@ -6299,15 +6325,38 @@ function screenAccount(){
    ========================================================= */
 window.__creatorAppCache = null;
 window.__creatorAppError = null;
+// Authenticated call to our backend with automatic recovery: the Render
+// server may be waking up (cold start) and Firebase tokens can be stale.
+// On 401/502/503/504 or a network failure we warm the server, force a fresh
+// ID token and retry once, so shoppers never see a bogus "session expired".
+async function authedApi(path, init, timeoutMs, timeoutMsg){
+  const user = fbAuth.currentUser;
+  if(!user) throw Object.assign(new Error('Please sign in first.'), {code:'NO_USER'});
+  let lastErr = null;
+  for(let attempt=0; attempt<2; attempt++){
+    try{
+      const token = await user.getIdToken(attempt>0);
+      const headers = Object.assign({}, (init&&init.headers)||{}, {'Authorization':'Bearer '+token});
+      const r = await withTimeout(fetch(API_BASE+path, Object.assign({}, init, {headers})), attempt? Math.max(timeoutMs,30000) : timeoutMs, timeoutMsg||'The server took too long to respond.');
+      if(attempt===0 && [401,502,503,504].includes(r.status)){
+        try{ if(typeof warmBackend==='function') warmBackend(); }catch(_){}
+        lastErr = new Error('retry'); continue;
+      }
+      return r;
+    }catch(e){
+      lastErr = e;
+      if(attempt===0){ try{ if(typeof warmBackend==='function') warmBackend(); }catch(_){} continue; }
+    }
+  }
+  throw lastErr || new Error('Could not reach the server.');
+}
+
 async function fetchCreatorApplication(force){
   if(window.__creatorAppCache && !force) return window.__creatorAppCache;
   const user = fbAuth.currentUser;
   if(!user){ window.__creatorAppError = 'Not signed in.'; return null; }
   try{
-    const token = await user.getIdToken();
-    const r = await withTimeout(fetch(API_BASE+'/api/creator-application', {
-      headers:{'Authorization':'Bearer '+token},
-    }), 15000, 'Loading your application timed out.');
+    const r = await authedApi('/api/creator-application', {}, 20000, 'Loading your application timed out.');
     const d = await r.json();
     if(d && d.ok){ window.__creatorAppCache = d.data; window.__creatorAppError = null; return d.data; }
     window.__creatorAppError = (d && d.error && d.error.message) || 'Could not load your application.';
@@ -6378,7 +6427,7 @@ function screenCreator(){
     return screenCreatorStatus('Your application wasn\'t approved this time.', d.rejectionReason || 'No reason was given.', '✖️', true);
   }
   if(status==='APPROVED'){
-    return screenCreatorStatus('You\'re a LEXDEN NOVA Creator! 🎉', 'Your storefront is live. Product creation and your Creator dashboard are coming in the next update — this screen will become your home base.', '🚀');
+    return screenCreatorHome();
   }
   return screenCreatorIntro();
 }
@@ -6426,6 +6475,130 @@ function creatorScreenTitle(){
   if(st==='SUBMITTED' || st==='IN_REVIEW') return 'Creator Application';
   return 'Become a Creator';
 }
+/* =========================================================
+   LEXDEN NOVA CREATOR — Stage J: Creator Home (AI co-pilot)
+   Talks to /api/creator-ai. All numbers come from the server; the AI only
+   phrases advice and can never change anything (suggest-only, blueprint §48).
+   Every dynamic string goes through escapeHtml; AI text is plain text.
+   ========================================================= */
+let creatorHome = { data:null, summary:'', loading:false, error:null, aiText:'', aiNote:'', aiBusy:false, aiError:'', question:'', checklist:null, uid:null };
+async function loadCreatorHome(force){
+  const u = fbAuth.currentUser;
+  if(!u) return;
+  if(creatorHome.uid !== u.uid){ creatorHome = { data:null, summary:'', loading:false, error:null, aiText:'', aiNote:'', aiBusy:false, aiError:'', question:'', checklist:null, uid:u.uid }; }
+  if(creatorHome.loading || (creatorHome.data && !force)) return;
+  creatorHome.loading = true; creatorHome.error = null;
+  try{
+    const r = await authedApi('/api/creator-ai', {}, 25000, 'Loading your dashboard timed out.');
+    const d = await r.json();
+    if(d && d.ok){ creatorHome.data = d.data.home; creatorHome.summary = d.data.summary || ''; }
+    else creatorHome.error = (d && d.error && d.error.message) || 'Could not load your dashboard.';
+  }catch(e){ creatorHome.error = e.message || 'Could not reach the server.'; }
+  creatorHome.loading = false;
+  if(appState.route === '#creator') render();
+}
+async function creatorAiCall(body){
+  if(creatorHome.aiBusy) return;
+  creatorHome.aiBusy = true; creatorHome.aiError = ''; creatorHome.checklist = null; render();
+  try{
+    const r = await authedApi('/api/creator-ai', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) }, 40000, 'The assistant took too long. Please try again.');
+    const d = await r.json();
+    if(d && d.ok){
+      if(d.data.checklist){ creatorHome.checklist = d.data.checklist; creatorHome.aiText = ''; creatorHome.aiNote = ''; }
+      else { creatorHome.aiText = d.data.text || ''; creatorHome.aiNote = d.data.ai ? (d.data.note || '') : 'Showing your numbers summary (the AI is busy right now).'; }
+    } else creatorHome.aiError = (d && d.error && d.error.message) || 'Something went wrong. Please try again.';
+  }catch(e){ creatorHome.aiError = e.message || 'Could not reach the server.'; }
+  creatorHome.aiBusy = false; render();
+}
+function creatorAskSubmit(){
+  const el = document.getElementById('creatorAsk');
+  const q = el ? el.value.trim() : '';
+  if(!q){ toast('Type a question first', 'error'); return; }
+  creatorHome.question = q;
+  creatorAiCall({ action:'ask', message:q });
+}
+function copyCreatorMcpUrl(){
+  const url = API_BASE + '/mcp/creator';
+  try{ navigator.clipboard.writeText(url).then(()=>toast('Link copied','success'), ()=>toast(url)); }catch(e){ toast(url); }
+}
+function screenCreatorHome(){
+  if(!creatorHome.data && !creatorHome.error){
+    loadCreatorHome();
+    return `<div class="screen"><h1 class="screen-title">My Creator Account</h1><div class="text-2 small" style="padding:20px;text-align:center;">Loading your dashboard…</div></div>`;
+  }
+  if(creatorHome.error && !creatorHome.data){
+    return `<div class="screen"><h1 class="screen-title">My Creator Account</h1>
+      <div class="card" style="padding:16px;"><p class="text-2 small" style="color:var(--error);margin-bottom:10px;">⚠️ ${escapeHtml(creatorHome.error)}</p>
+      <button class="btn btn-outline" onclick="creatorHome.error=null;loadCreatorHome(true);render();">Retry</button></div></div>`;
+  }
+  const h = creatorHome.data, r = h.report, m = h.money;
+  const n = v => Number(v||0).toLocaleString(undefined,{maximumFractionDigits:2});
+  const change = r.earnedChangePct==null ? 'new' : (r.earnedChangePct>0?'▲ ':r.earnedChangePct<0?'▼ ':'')+Math.abs(r.earnedChangePct)+'%';
+  const changeColor = r.earnedChangePct==null||r.earnedChangePct===0 ? 'var(--text-2)' : r.earnedChangePct>0 ? 'var(--success,#2ecc71)' : 'var(--error)';
+  const stat = (label, value, sub, color) => `<div class="card" style="padding:12px;flex:1;min-width:130px;"><div class="text-2 small">${escapeHtml(label)}</div><div style="font-weight:700;font-size:19px;margin-top:2px;">${value}</div>${sub?`<div class="small" style="color:${color||'var(--text-2)'};margin-top:2px;">${sub}</div>`:''}</div>`;
+  const orders = h.ordersNeedingAction.length
+    ? h.ordersNeedingAction.map(o=>`<div class="list-row"><span class="left"><span style="font-size:18px;margin-right:8px;">${o.sla==='BREACHED'?'🔴':'🟠'}</span>${escapeHtml(o.product||o.orderId)}</span><span class="text-2 small">${o.sla==='BREACHED'?'Overdue':'Due soon'} · ${escapeHtml(String(o.status).toLowerCase())}</span></div>`).join('')
+    : '<div class="text-2 small" style="padding:12px 0;">Nothing is overdue. 🎉</div>';
+  const improve = h.listingsToImprove.length
+    ? h.listingsToImprove.map(l=>`<div style="padding:10px 0;border-bottom:1px solid var(--border);">
+        <div style="display:flex;justify-content:space-between;gap:8px;"><strong>${escapeHtml(l.title||l.productId)}</strong><span class="text-2 small">${Number(l.score)||0}%</span></div>
+        <div class="text-2 small" style="margin:4px 0 8px;">${l.todo.map(t=>'• '+escapeHtml(t)).join('<br>')}</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+          <button class="chip" ${creatorHome.aiBusy?'disabled':''} onclick="creatorAiCall({action:'suggest_title',productId:'${escapeHtml(l.productId)}'})">✨ Better titles</button>
+          <button class="chip" ${creatorHome.aiBusy?'disabled':''} onclick="creatorAiCall({action:'suggest_description',productId:'${escapeHtml(l.productId)}'})">✨ Rewrite description</button>
+          <button class="chip" ${creatorHome.aiBusy?'disabled':''} onclick="creatorAiCall({action:'suggest_caption',productId:'${escapeHtml(l.productId)}'})">📣 Captions</button>
+        </div></div>`).join('')
+    : '<div class="text-2 small" style="padding:12px 0;">Your published listings look complete. Nice work.</div>';
+  const out = creatorHome.checklist
+    ? `<div class="card" style="padding:14px;margin-top:10px;"><strong>Listing checklist: ${creatorHome.checklist.score}%</strong><div class="text-2 small" style="margin-top:6px;">${creatorHome.checklist.items.map(i=>(i.ok?'✅ ':'⬜ ')+escapeHtml(i.tip)).join('<br>')}</div></div>`
+    : creatorHome.aiText
+      ? `<div class="card" style="padding:14px;margin-top:10px;white-space:pre-wrap;word-break:break-word;font-size:14px;line-height:1.5;">${escapeHtml(creatorHome.aiText)}${creatorHome.aiNote?`<div class="text-2 small" style="margin-top:10px;white-space:normal;">${escapeHtml(creatorHome.aiNote)}</div>`:''}</div>`
+      : '';
+  return `<div class="screen">
+    <h1 class="screen-title">My Creator Account</h1>
+    <div class="text-2 small" style="margin:-6px 0 12px;">Hi ${escapeHtml(h.creator.displayName||'Creator')} 👋 — here is your shop today.</div>
+
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+      ${stat('Available balance','₦'+n(m.balanceAvailable), m.hasPayoutAccount?'':'Add a payout account to withdraw','var(--warn,#d4af37)')}
+      ${stat('Earned this week','₦'+n(r.earned), 'vs last week '+change, changeColor)}
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      ${stat('Sales this week', String(r.sales), 'last week '+r.previousSales)}
+      ${stat('Listings', String(h.products.total), h.products.needAttention?h.products.needAttention+' need attention':'all good', h.products.needAttention?'var(--warn,#d4af37)':'')}
+    </div>
+
+    <div class="section"><div class="section-head"><h2>Orders needing action</h2>${h.unreadNotifications?`<span class="text-2 small">🔔 ${h.unreadNotifications} new</span>`:''}</div>
+      <div class="card" style="padding:4px 16px;">${orders}</div></div>
+
+    <div class="section"><div class="section-head"><h2>NOVA Assistant</h2></div>
+      <div class="card" style="padding:14px;">
+        <div class="text-2 small" style="margin-bottom:10px;">Ask about your shop. The assistant only reads your own numbers and gives suggestions — it never changes anything or touches your money.</div>
+        <div style="display:flex;gap:8px;margin-bottom:8px;">
+          <input id="creatorAsk" type="text" maxlength="400" placeholder="e.g. What should I fix first?" value="${escapeHtml(creatorHome.question)}" style="flex:1;" onkeydown="if(event.key==='Enter')creatorAskSubmit()">
+          <button class="btn btn-primary" ${creatorHome.aiBusy?'disabled':''} onclick="creatorAskSubmit()">${creatorHome.aiBusy?'…':'Ask'}</button>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+          <button class="chip" ${creatorHome.aiBusy?'disabled':''} onclick="creatorAiCall({action:'weekly_summary'})">📊 Weekly summary</button>
+          <button class="chip" onclick="creatorHome.data=null;creatorHome.aiText='';loadCreatorHome(true);render();">↻ Refresh numbers</button>
+        </div>
+        ${creatorHome.aiBusy?'<div class="text-2 small" style="margin-top:10px;">Thinking…</div>':''}
+        ${creatorHome.aiError?`<div class="small" style="margin-top:10px;color:var(--error);">⚠️ ${escapeHtml(creatorHome.aiError)}</div>`:''}
+        ${out}
+        ${!creatorHome.aiText && !creatorHome.checklist && !creatorHome.aiBusy ? `<div class="card" style="padding:12px;margin-top:10px;white-space:pre-wrap;font-size:14px;line-height:1.5;">${escapeHtml(creatorHome.summary)}</div>`:''}
+      </div></div>
+
+    <div class="section"><div class="section-head"><h2>Listings to improve</h2></div>
+      <div class="card" style="padding:4px 16px;">${improve}</div></div>
+
+    <div class="section"><div class="section-head"><h2>Manage with Claude</h2></div>
+      <div class="card" style="padding:14px;">
+        <div class="text-2 small" style="margin-bottom:10px;">Create listings, ship orders and request payouts by chatting with Claude. In Claude, add a custom connector with this link and sign in with your LEXDEN NOVA account:</div>
+        <div style="word-break:break-all;font-size:13px;margin-bottom:10px;">${escapeHtml(API_BASE+'/mcp/creator')}</div>
+        <button class="btn btn-outline" onclick="copyCreatorMcpUrl()">Copy connector link</button>
+      </div></div>
+  </div>`;
+}
+
 function screenCreatorStatus(title, body, emoji, allowReapply){
   return `<div class="screen">
     <h1 class="screen-title">${escapeHtml(creatorScreenTitle())}</h1>
@@ -6552,11 +6725,10 @@ async function uploadCreatorDocument(inputEl, docType){
   reader.onload = async e=>{
     const fileBase64 = String(e.target.result).split(',')[1] || '';
     try{
-      const token = await user.getIdToken();
-      const r = await withTimeout(fetch(API_BASE+'/api/creator-documents', {
-        method:'POST', headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+      const r = await authedApi('/api/creator-documents', {
+        method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ docType, fileBase64, fileName: file.name, mimeType }),
-      }), 30000, 'Document upload timed out.');
+      }, 30000, 'Document upload timed out.');
       const d = await r.json();
       if(!d.ok){ toast((d.error&&d.error.message)||'Upload failed', 'error'); return; }
       creatorForm.privateFields.documentIds = [...(creatorForm.privateFields.documentIds||[]), d.data.documentId];
@@ -6577,7 +6749,6 @@ async function saveCreatorDraft(thenSubmit){
   if(!user){ toast('Not signed in', 'error'); return; }
   f.saving = true; f.errors = []; render();
   try{
-    const token = await user.getIdToken();
     const draftBody = {
       action: 'save_draft',
       creatorType: f.creatorType,
@@ -6596,19 +6767,19 @@ async function saveCreatorDraft(thenSubmit){
       documentIds: f.privateFields.documentIds,
       acceptTerms: f.acceptTerms,
     };
-    const r1 = await withTimeout(fetch(API_BASE+'/api/creator-application', {
-      method:'POST', headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+    const r1 = await authedApi('/api/creator-application', {
+      method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify(draftBody),
-    }), 20000, 'Saving timed out.');
+    }, 25000, 'Saving timed out.');
     const d1 = await r1.json();
     if(!d1.ok){ f.saving=false; f.errors = d1.error && d1.error.errors ? d1.error.errors : [{message:(d1.error&&d1.error.message)||'Could not save.'}]; render(); return; }
 
     if(!thenSubmit){ f.saving=false; toast('Draft saved','success'); await fetchCreatorApplication(true); render(); return; }
 
-    const r2 = await withTimeout(fetch(API_BASE+'/api/creator-application', {
-      method:'POST', headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+    const r2 = await authedApi('/api/creator-application', {
+      method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ action:'submit' }),
-    }), 20000, 'Submitting timed out.');
+    }, 25000, 'Submitting timed out.');
     const d2 = await r2.json();
     f.saving = false;
     if(!d2.ok){ f.errors = d2.error && d2.error.errors ? d2.error.errors : [{message:(d2.error&&d2.error.message)||'Could not submit.'}]; render(); return; }
@@ -10713,6 +10884,7 @@ function ensureNovaWidget(){
 }
 function syncNovaBadge(){}
 function toggleNova(open){
+  if(open) warmBackend();
   appState.novaOpen = open;
   const panel = $('#novaPanel');
   if(!panel) return;
@@ -10852,7 +11024,7 @@ async function callRealNovaAPI(userText){
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ message:userText, context })
     }),
-    15000,
+    20000,
     'NOVA API request timed out'
   );
   if(!res.ok){
@@ -10860,7 +11032,7 @@ async function callRealNovaAPI(userText){
     throw new Error(`NOVA API HTTP ${res.status}`);
   }
   const data = await res.json();
-  if(data.fallback || !data.html) throw new Error('NOVA backend unavailable — using local NOVA');
+  if(data.fallback || !data.html){ console.warn('NOVA backend fallback', data.reason||''); throw new Error('NOVA backend unavailable — using local NOVA'); }
   return data.html;
 }
 function buildNovaContext(){
@@ -11817,6 +11989,7 @@ function init(){
   // doesn't strictly need it, but window.__fbUid does for accurate order
   // attribution.
   setTimeout(()=>{ retryPendingPayments(true); }, 1500);
+  setTimeout(warmBackend, 800);
   setTimeout(maybeShowNewsletterPopup, 5000);
   document.addEventListener('keydown', e=>{ if(e.key==='Escape' && appState.novaOpen) toggleNova(false); });
   // Close the custom price-range popover on any outside click/tap, same

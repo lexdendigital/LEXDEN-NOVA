@@ -108,6 +108,7 @@ function defaultDeps() {
       supplierProducts: require('../api/creator-supplier-products'),
       supplierOrders: require('../api/creator-supplier-orders'),
       notifications: require('../api/creator-notifications'),
+      ai: require('../api/creator-ai'),
     },
   };
 }
@@ -337,6 +338,30 @@ function register(server, { uid, email = null, deps } = {}) {
   // API key must never pass through an AI transcript, and a prompt-injected
   // assistant must not be able to swap or redirect a supplier account. The
   // creator does that in the web app; the assistant can only read status.
+  // -------------------------------------------------- AI home (Stage J)
+  // Both tools are read-only/deterministic: numbers are computed on the server
+  // from the creator's own records. No free-form AI call is exposed here (the
+  // assistant calling this tool IS the AI).
+  server.registerTool('creator_get_weekly_report', {
+    title: 'My weekly report',
+    description: 'Your shop at a glance, computed from your own records: earnings this week vs last week, top products, orders needing action (shipping deadlines at risk or overdue), listings that need improving, unread notifications.',
+    inputSchema: {},
+    annotations: READ,
+  }, async () => {
+    const r = await call(d.handlers.ai, { method: 'GET' });
+    return r.isError ? r : asText(plain(JSON.parse(r.content[0].text)));
+  });
+
+  server.registerTool('creator_get_product_checklist', {
+    title: 'Listing quality checklist',
+    description: 'A deterministic checklist for one of your listings (title length, description, images, price, category, refund policy, processing time) with a score and the things to fix. Read-only: edit the listing with the update tools.',
+    inputSchema: { productId: z.string().min(1).max(128) },
+    annotations: READ,
+  }, async ({ productId }) => {
+    const r = await call(d.handlers.ai, { method: 'POST', body: { action: 'checklist', productId } });
+    return r.isError ? r : asText(plain(JSON.parse(r.content[0].text)));
+  });
+
   server.registerTool('creator_get_supplier_status', {
     title: 'Show my CJ Dropshipping connection',
     description: 'Whether your own CJ Dropshipping account is connected (masked email, health, auto-pay on/off). Connecting or disconnecting can only be done in the LEXDEN NOVA web app, never through the assistant.',
@@ -404,6 +429,7 @@ const TOOL_NAMES = [
   'creator_acknowledge_order', 'creator_mark_order_packed', 'creator_mark_order_shipped', 'creator_cancel_order', 'creator_request_withdrawal',
   'creator_get_supplier_status', 'creator_list_dropship_mappings', 'creator_test_dropship_mapping',
   'creator_check_supplier_health', 'creator_list_supplier_orders', 'creator_sync_dropship_order',
+  'creator_get_weekly_report', 'creator_get_product_checklist',
 ];
 
 module.exports = { register, TOOL_NAMES, OFFERING_TYPES, maskAccount, fromEnvelope, plain, VERSION_KEYS };

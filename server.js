@@ -72,7 +72,7 @@ app.use(cors({
 // Vercel's automatic body parsing, capped at 10mb per the migration
 // README's recommended server.js).
 app.use((req, res, next) => {
-  if (req.path === '/api/cj-webhook') return next();
+  if (req.path === '/api/cj-webhook' || req.path === '/api/paystack-webhook') return next();
   express.json({ limit: '10mb' })(req, res, next);
 });
 // FIX (MCP): OAuth clients (Claude included) POST /token as
@@ -92,6 +92,19 @@ app.get('/health', (req, res) => {
 app.get('/api/health', (req, res) => {
   res.json({ ok: true, service: 'LEXDEN NOVA API' });
 });
+
+// An async handler that throws would otherwise leave the browser waiting
+// forever (Express 4 does not catch rejected promises). Wrap so the caller
+// always gets an answer and the error lands in the error log.
+function safeHandler(fn) {
+  return function wrapped(req, res, next) {
+    Promise.resolve(fn(req, res, next)).catch((err) => {
+      console.error(`Handler error on ${req.method} ${req.path}:`, err && err.message);
+      try { recordServerError({ type: 'handlerRejection', message: String(err && err.message), stack: err && err.stack, path: req.path }); } catch (_) {}
+      if (!res.headersSent) res.status(500).json({ ok: false, error: 'Something went wrong on the server. Please try again.' });
+    });
+  };
+}
 
 // ---- API routes ----
 // Same list as the migration README's §10 "endpoints to preserve" and
@@ -115,6 +128,7 @@ const ENDPOINTS = [
   'cj-shipping',
   'cj-tracking',
   'cj-webhook',
+  'paystack-webhook',
   'get-product-fulfilment',
   'process-email-queue',
   'feed',
@@ -123,7 +137,7 @@ const ENDPOINTS = [
 ];
 
 for (const name of ENDPOINTS) {
-  app.all(`/api/${name}`, require(`./api/${name}`));
+  app.all(`/api/${name}`, safeHandler(require(`./api/${name}`)));
 }
 
 // ---- Affiliate program (added for the affiliate mega-update) — files
@@ -179,6 +193,10 @@ const CREATOR_ENDPOINTS = [
   'creator-admin-suppliers', 'creator-admin-sla',
   // Stage I — automation: scheduler door, creator notifications, admin controls
   'creator-cron', 'creator-notifications', 'creator-admin-automation',
+  // Stage J — Creator AI Home (suggest-only co-pilot)
+  'creator-ai',
+  // Storefront bridge — public, read-only, sanitised listings
+  'creator-listings',
 ];
 for (const name of CREATOR_ENDPOINTS) {
   app.all(`/api/${name}`, require(`./api/${name}`));

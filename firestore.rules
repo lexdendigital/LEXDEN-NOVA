@@ -386,7 +386,10 @@ service cloud.firestore {
     // legalBusinessName, contactName, whatsapp, documentIds,
     // acceptedTermsAt. The most sensitive collection in the whole Creator
     // system — owner or admin read only, exactly like KYC data anywhere
-    // else should be handled.
+    // else should be handled. As of Stage F it also holds `payoutAccount`
+    // (bank details) and the earnings ledger (`balanceAvailable`,
+    // `totalEarned`, `totalWithdrawn`, `lastWithdrawalAt`) — deliberately
+    // NOT on the public `creators/{uid}` doc. See api/creator/ledger.js.
     match /creatorPrivate/{uid} {
       allow read: if isOwner(uid) || isAdmin();
       allow write: if false;
@@ -422,8 +425,11 @@ service cloud.firestore {
     // suspended listing); owner/admin can read it in any status. The
     // `publishedSnapshot` field is what a future storefront integration
     // would actually render — see CREATOR-STAGE-C-README.md.
+    // NOT publicly readable: publishedSnapshot also holds the private delivery
+    // details (file id / external access URL) that only a paying buyer may get.
+    // The storefront reads sanitised data from /api/creator-listings instead.
     match /products/{productId} {
-      allow read: if resource.data.status == 'PUBLISHED' || isOwner(resource.data.creatorId) || isAdmin();
+      allow read: if isOwner(resource.data.creatorId) || isAdmin();
       allow write: if false;
     }
 
@@ -452,21 +458,79 @@ service cloud.firestore {
     }
 
     // ---- LEXDEN NOVA CREATOR (Stage D: digital delivery) ----
-
-    // entitlements/{id} — proof a buyer may download a creator product's
-    // assets. Fully server-mediated, unlike products/{productId} above:
-    // there's no legitimate reason for the client to read this directly
-    // (api/creator-entitlements.js and api/creator-product-download.js
-    // both use the Admin SDK, which bypasses these rules entirely) —
-    // a guest-checkout entitlement (buyerEmail only, no buyerUid) couldn't
-    // be expressed as an owner-read rule here anyway, since
-    // request.auth.uid has nothing to match it against. Admin-only read
-    // for support/investigation purposes; every write goes through
-    // grantEntitlement() in api/creator/entitlements.js.
+    // entitlements/{id} — proof a buyer may download a creator product.
+    // Fully server-mediated (the Admin SDK bypasses rules); a guest-checkout
+    // entitlement (email only) can't be expressed as an owner rule anyway.
     match /entitlements/{id} {
       allow read: if isAdmin();
       allow write: if false;
     }
+
+    // ---- LEXDEN NOVA CREATOR (Stage E: physical fulfillment) ----
+    // fulfillments/{orderId} — creator reads their own queue, buyer their
+    // own tracking. Written only by the API (Admin SDK).
+    match /fulfillments/{orderId} {
+      allow read: if isAdmin()
+        || (isSignedIn() && resource.data.creatorId == request.auth.uid)
+        || (isSignedIn() && resource.data.buyerUid == request.auth.uid);
+      allow write: if false;
+    }
+
+    // ---- LEXDEN NOVA CREATOR (Stage F: money/ledger) ----
+    // creatorSales/{reference} — one ledger row per credited sale.
+    match /creatorSales/{saleId} {
+      allow read: if isAdmin() || (isSignedIn() && resource.data.creatorId == request.auth.uid);
+      allow write: if false;
+    }
+    // creatorWithdrawals/{id} — payout requests (mirrors affiliateWithdrawals).
+    match /creatorWithdrawals/{withdrawalId} {
+      allow read: if isAdmin() || (isSignedIn() && resource.data.creatorId == request.auth.uid);
+      allow write: if false;
+    }
+
+    // ---- LEXDEN NOVA CREATOR (Stage G: per-creator CJ dropshipping) ----
+    // supplierConnections/{uid}_cj — ENCRYPTED CJ credentials + tokens.
+    // Closed to every client, including the owner: the API returns a masked
+    // status view instead. Only the Admin SDK touches it.
+    match /supplierConnections/{id} {
+      allow read, write: if false;
+    }
+    // supplierProducts/{versionId} — a listing version's CJ mapping (the
+    // creator's own variant id / declared cost / test result).
+    match /supplierProducts/{versionId} {
+      allow read: if isAdmin() || (isSignedIn() && resource.data.creatorId == request.auth.uid);
+      allow write: if false;
+    }
+    // supplierOrders/{orderId} — the CJ side of a paid order (CJ ids, errors,
+    // pay mode). Separate from fulfillments/{orderId} because the BUYER can
+    // read their own fulfillment and must not see supplier internals.
+    match /supplierOrders/{orderId} {
+      allow read: if isAdmin() || (isSignedIn() && resource.data.creatorId == request.auth.uid);
+      allow write: if false;
+    }
+    // supplierSyncLogs/{id} — operational log, admin only.
+    match /supplierSyncLogs/{id} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // ---- Stage I: automation ------------------------------------------------
+    // adminAlerts / automationRuns — admin read only; the server writes.
+    match /adminAlerts/{id} { allow read: if isAdmin(); allow write: if false; }
+    match /automationRuns/{id} { allow read: if isAdmin(); allow write: if false; }
+    // creatorNotifications — a creator reads their own; only the server writes
+    // (marking read goes through /api/creator-notifications).
+    match /creatorNotifications/{id} {
+      allow read: if request.auth != null && resource.data.creatorId == request.auth.uid;
+      allow write: if false;
+    }
+    // Stage J: creatorAiLog (usage log, no content) admin read; creatorAiUsage
+    // (rate-limit counters) server only.
+    match /creatorAiLog/{id} { allow read: if isAdmin(); allow write: if false; }
+    match /creatorAiUsage/{id} { allow read, write: if false; }
+    // automationLocks / automationSettings — server only.
+    match /automationLocks/{id} { allow read, write: if false; }
+    match /automationSettings/{id} { allow read, write: if false; }
 
     // Anything not explicitly matched above is denied by default —
     // Firestore's rules are deny-by-default outside matched blocks, so
