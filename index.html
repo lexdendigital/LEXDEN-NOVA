@@ -1910,7 +1910,7 @@ function isAdminUser(user){
 // during a real sign-in.
 onAuthStateChanged(fbAuth, user => {
   // Never carry one account's creator status / payment-mode cache to the next.
-  if(!window.__lastAuthUid || window.__lastAuthUid !== (user && user.uid)){ window.__creatorAppCache = null; window.__creatorAppError = null; window.__creatorAppFetching = false; window.__paymentModeCache = null; window.__paymentModeError = null; window.__lastAuthUid = user ? user.uid : null; }
+  if(!window.__lastAuthUid || window.__lastAuthUid !== (user && user.uid)){ window.__creatorAppCache = null; window.__creatorAppError = null; window.__creatorAppFetching = false; window.__paymentModeCache = null; window.__paymentModeError = null; window.__lastAuthUid = user ? user.uid : null; try{ window.__resetCreatorWorkspace && window.__resetCreatorWorkspace(); }catch(e){} }
   // DIAGNOSTIC (temporary — helps pin down the "sign-in disappears after a
   // few hours" report): logs every time Firebase re-evaluates auth state,
   // and what it landed on. If a shopper's session vanishes, checking these
@@ -2421,8 +2421,18 @@ function seedIfNeeded(){
 }
 
 const DB = {
+  // Catalog products ONLY (what the admin edits, saves and pushes to the cloud).
+  get legacyProducts(){
+    const list = lsGet(LS_KEYS.products, DEFAULT_PRODUCTS).filter(p=>!(p && p._creator));
+    return list.map(p=>{
+      const stats = liveRatingStats(p);
+      return { ...p, rating: stats.rating, reviewCount: stats.count };
+    });
+  },
+  // Storefront view = catalog + published creator listings (in memory only —
+  // never written to localStorage or to catalog/products).
   get products(){
-    const list = lsGet(LS_KEYS.products, DEFAULT_PRODUCTS);
+    const list = lsGet(LS_KEYS.products, DEFAULT_PRODUCTS).filter(p=>!(p && p._creator)).concat(window.__creatorProducts||[]);
     // Every consumer of DB.products (sorting, NOVA AI replies, product
     // cards, schema, etc.) sees a real, live-computed rating/reviewCount
     // here — never the old fabricated seed numbers. See liveRatingStats().
@@ -2431,7 +2441,7 @@ const DB = {
       return { ...p, rating: stats.rating, reviewCount: stats.count };
     });
   },
-  set products(v){ lsSet(LS_KEYS.products, v); },
+  set products(v){ lsSet(LS_KEYS.products, (v||[]).filter(p=>!(p && p._creator))); },
   get categories(){ return lsGet(LS_KEYS.categories, DEFAULT_CATEGORIES); },
   set categories(v){ lsSet(LS_KEYS.categories, v); },
   get testimonials(){ return lsGet(LS_KEYS.testimonials, DEFAULT_TESTIMONIALS); },
@@ -2526,7 +2536,7 @@ async function pushProductsToCloud(){
     // may have already been assumed. Bounding every push/pull to a fixed
     // window means a failure is reported honestly and promptly instead of
     // leaving the admin thinking something saved when it didn't.
-    await withTimeout(setDoc(doc(fbDb, "catalog", "products"), { list: DB.products }), 20000, 'Saving products timed out — check your connection and try again.');
+    await withTimeout(setDoc(doc(fbDb, "catalog", "products"), { list: DB.legacyProducts }), 20000, 'Saving products timed out — check your connection and try again.');
     await withTimeout(setDoc(doc(fbDb, "catalog", "categories"), { list: DB.categories }), 20000, 'Saving categories timed out — check your connection and try again.');
     setCloudStatus(true);
     return true;
@@ -2605,6 +2615,69 @@ async function deleteReviewFromCloud(id){
   }
 }
 
+/* ---------------- CREATOR LISTINGS (marketplace) ----------------
+   Published listings from approved creators come from the public, sanitised
+   /api/creator-listings endpoint (never straight from Firestore — a listing's
+   private delivery details must reach a buyer only after payment). They are
+   mapped into the normal product shape and held IN MEMORY ONLY (see DB.products
+   getter) so they can never be saved into the admin's catalog.
+   Prices: a creator prices in ONE currency (usually NGN). Legacy products are
+   stored in USD and converted; to make both display identically the creator
+   price is stored as price/rate[currency], and checkout (startPaystackCheckout)
+   charges the creator's own price in the creator's own currency, exactly. */
+const CREATOR_CATEGORY_FALLBACK = { EBOOK:'ebooks', COURSE:'courses', TEMPLATE:'templates', SOFTWARE:'software', BUNDLE:'bundles', PHYSICAL_PRODUCT:'accessories' };
+function mapCreatorListing(l){
+  try{
+    if(!l || !l.id || !l.title) return null;
+    const rates = (DB.content && DB.content.exchangeRates) || {};
+    const cur = l.currency || 'NGN';
+    const rate = rates[cur];
+    if(!l.isFree && !(rate>0 && typeof l.price==='number' && l.price>0)) return null;
+    const cats = DB.categories || [];
+    const want = String(l.category||'').trim().toLowerCase();
+    const hit = cats.find(c=>String(c.id).toLowerCase()===want || String(c.name).toLowerCase()===want);
+    const fb = CREATOR_CATEGORY_FALLBACK[l.offeringType];
+    const category = hit ? hit.id : ((cats.find(c=>c.id===fb)||{}).id || fb || 'all');
+    const specs = {};
+    if(l.systemRequirements) specs['Requirements'] = l.systemRequirements;
+    if(l.pageCount) specs['Pages'] = String(l.pageCount);
+    if(l.compatibility) specs['Compatibility'] = l.compatibility;
+    if(l.level) specs['Level'] = l.level;
+    if(l.modules && l.modules.length) specs['Modules'] = String(l.modules.length);
+    if(l.turnaround) specs['Turnaround'] = l.turnaround;
+    if(l.deliverables) specs['You get'] = l.deliverables;
+    if(l.billingInterval) specs['Billing'] = l.billingInterval;
+    if(l.refundPolicy) specs['Refund policy'] = l.refundPolicy;
+    const images = l.images && l.images.length ? l.images : [];
+    const prod = {
+      id: l.id, name: l.title, category,
+      price: l.isFree ? 0 : l.price / rate, salePrice: null, free: !!l.isFree,
+      rating: 0, reviewCount: 0, itemCode: 'CR-'+String(l.id).slice(0,6).toUpperCase(),
+      image: images[0] || '', gallery: images, description: l.description || '', specs,
+      tags: [], seller: l.sellerName || 'Creator', status: 'published',
+      affiliateLink: '#', productType: l.physical ? 'PHYSICAL' : 'DIGITAL',
+      _creator: { price: l.isFree ? 0 : l.price, currency: cur, sellerId: l.sellerId, verified: !!l.sellerVerified, offeringType: l.offeringType, inStock: l.inStock !== false },
+    };
+    if(l.physical){
+      prod.physical = {
+        shippingCountries: ['Nigeria'],
+        deliveryEstimate: l.processingDays ? `Ships within ${l.processingDays} day${l.processingDays===1?'':'s'}` : '',
+        stockStatus: l.inStock === false ? 'out_of_stock' : 'in_stock',
+      };
+    }
+    return prod;
+  }catch(e){ console.warn('mapCreatorListing failed', e); return null; }
+}
+async function loadCreatorListings(){
+  try{
+    const r = await withTimeout(fetch(API_BASE+'/api/creator-listings', {cache:'no-store'}), 12000, 'Loading creator listings timed out.');
+    const d = await r.json();
+    if(d && d.ok && d.data && Array.isArray(d.data.listings)){
+      window.__creatorProducts = d.data.listings.map(mapCreatorListing).filter(Boolean);
+    }
+  }catch(e){ console.warn('creator listings unavailable', e && e.message); }
+}
+
 async function pullFromCloud(){
   if(!window.__fb) return;
   const { fbDb, doc, getDoc } = window.__fb;
@@ -2627,6 +2700,7 @@ async function pullFromCloud(){
       if(s.suppliers) DB.suppliers = s.suppliers;
     }
 
+    await loadCreatorListings();
     await pullReviewsFromCloud();
     await pullFeedLikesFromCloud();
     await pullProductInterestFromCloud();
@@ -2863,19 +2937,24 @@ function startPaystackCheckout(productId, variantId, deliveryDetails, confirmed)
   // Anything else falls back to NGN rather than opening a popup Paystack
   // will reject, so checkout never silently fails.
   const selectedCode = currentCurrency();
-  const chargeCode = PAYSTACK_CHARGEABLE_CURRENCIES.includes(selectedCode)
+  // Creator listings are charged in the listing's OWN currency at exactly the
+  // creator's price (the server re-checks both); everything else is unchanged.
+  const creatorInfo = p._creator || null;
+  if(creatorInfo && creatorInfo.inStock === false){ toast('This item is out of stock right now.', 'error'); return; }
+  if(creatorInfo && !PAYSTACK_CHARGEABLE_CURRENCIES.includes(creatorInfo.currency)){ toast('This listing cannot be paid for right now.', 'error'); return; }
+  const chargeCode = creatorInfo ? creatorInfo.currency : (PAYSTACK_CHARGEABLE_CURRENCIES.includes(selectedCode)
     ? selectedCode
-    : PAYSTACK_FALLBACK_CURRENCY;
+    : PAYSTACK_FALLBACK_CURRENCY);
   const proceedWithEmail = (email) => {
     const rate = (c.exchangeRates && c.exchangeRates[chargeCode]) || 1;
     // Paystack expects every currency's amount in its smallest subunit
     // (kobo for NGN, cents for USD, etc.) — always base amount * 100,
     // per Paystack's own "Supported currency" docs.
     const variantPrice=effectiveVariantPrice(p,selectedVariant);
-    const amountMajor = Math.round((variantPrice==null?(p.salePrice || p.price):variantPrice) * rate);
+    const amountMajor = creatorInfo ? creatorInfo.price : Math.round((variantPrice==null?(p.salePrice || p.price):variantPrice) * rate);
     const amountSubunit = amountMajor * 100;
     const reference = 'LN-' + Date.now() + '-' + Math.random().toString(36).slice(2,8);
-    if(chargeCode !== selectedCode){
+    if(chargeCode !== selectedCode && !creatorInfo){
       toast(`Checkout isn't set up in ${selectedCode} yet — charging in ${chargeCode} instead.`, 'info');
     }
     const handler = PaystackPop.setup({
@@ -3430,7 +3509,11 @@ async function verifyPaystackPayment(reference, product, email, showResult, deli
       // more deliberate choice for that specific product.
       const selectedVariant=(product.variants||[]).find(v=>String(v.id)===String(variantId||''));
       const openOnDelivery = selectedVariant&&(selectedVariant.deliveryLink||selectedVariant.fileUrl) || product.deliveryLink || product.fileUrl;
-      if(product.productType === 'PHYSICAL'){
+      if(product._creator && product.productType !== 'PHYSICAL'){
+        // Creator digital product: files / access link come from the server,
+        // only after it confirms this buyer's entitlement.
+        await deliverCreatorPurchase(product, reference);
+      } else if(product.productType === 'PHYSICAL'){
         // Physical orders have nothing to download — a shipping-specific
         // confirmation instead of the digital "here's your file" modal.
         showPaymentResultModal({ status:'success', reference, message:'Payment confirmed! Your order will be shipped to the address you provided. You can track its status any time in Order History.' });
@@ -3464,6 +3547,101 @@ async function verifyPaystackPayment(reference, product, email, showResult, deli
     bumpPendingAttempt(reference);
     if(showResult) showPaymentResultModal({ status:'pending', reference, productName: product && product.name, email, message:'Could not reach the verification server — your payment is saved and this will retry automatically once you\'re back online.' });
   }
+}
+
+
+/* ---------------- CREATOR PURCHASES: delivery + My Library ---------------- */
+async function fetchCreatorDownload(productId){
+  const r = await authedApi('/api/creator-product-download?productId='+encodeURIComponent(productId), {}, 25000, 'Getting your download timed out.');
+  const d = await r.json();
+  if(d && d.ok) return d.data;
+  throw new Error((d && d.error && d.error.message) || 'Could not get your download.');
+}
+async function deliverCreatorPurchase(product, reference){
+  try{
+    // The entitlement is granted a moment after the order is saved; retry briefly.
+    let data = null, lastErr = null;
+    for(let i=0;i<4 && !data;i++){
+      try{ data = await fetchCreatorDownload(product.id); }
+      catch(e){ lastErr = e; if(!/not entitled|do not have access/i.test(String(e.message))) break; await new Promise(r=>setTimeout(r,1500)); }
+    }
+    if(!data) throw lastErr || new Error('not ready');
+    const first = (data.links||[])[0];
+    if(first){
+      const ok = await forceDownloadFile(first.url, first.fileName || downloadFilenameFor(product));
+      showPaymentResultModal({ status:'success', reference, downloadLink:first.url, filename:first.fileName||downloadFilenameFor(product),
+        message: (ok ? 'Your file has been downloaded — check your Downloads folder.' : 'Your file is ready. If it didn\'t download automatically, use the button below.') + ' You can get it again any time from My Library in your Profile.' });
+    } else if(data.externalUrl){
+      showPaymentResultModal({ status:'success', reference, downloadLink:data.externalUrl, filename:'',
+        message:'Payment confirmed! Your access link is ready — use the button below. You can find it again in My Library.' });
+    } else {
+      showPaymentResultModal({ status:'success', reference, message:'Payment confirmed! Find your purchase in My Library.' });
+    }
+  }catch(e){
+    console.warn('creator delivery pending', e && e.message);
+    showPaymentResultModal({ status:'success', reference, message:'Payment confirmed! Your purchase is being prepared — open My Library in your Profile in a minute to get it.' });
+  }
+}
+window.__libraryCache = null; window.__libraryError = null; window.__myShipments = null;
+async function fetchMyShipments(force){
+  if(window.__myShipments && !force) return;
+  try{
+    const r = await authedApi('/api/creator-order-fulfillment', {}, 20000, 'Loading your orders timed out.');
+    const d = await r.json();
+    window.__myShipments = (d && d.ok) ? (d.data.fulfillments||[]) : [];
+  }catch(e){ window.__myShipments = []; }
+  if(location.hash === '#library') render();
+}
+async function confirmShipmentDelivery(orderId, btn){
+  if(!confirm('Confirm that you received this order?')) return;
+  if(btn){ btn.disabled = true; }
+  try{
+    const r = await authedApi('/api/creator-order-fulfillment', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ orderId, action:'confirm_delivery' }) }, 25000, 'Confirming timed out.');
+    const d = await r.json();
+    if(!d.ok) toast((d.error&&d.error.message)||'Could not confirm', 'error'); else toast('Thanks — delivery confirmed', 'success');
+  }catch(e){ toast(e.message||'Could not reach the server', 'error'); }
+  fetchMyShipments(true);
+}
+async function fetchLibrary(force){
+  if(window.__libraryCache && !force) return;
+  try{
+    const r = await authedApi('/api/creator-entitlements', {}, 20000, 'Loading your library timed out.');
+    const d = await r.json();
+    if(d && d.ok){ window.__libraryCache = d.data.entitlements||[]; window.__libraryError = null; }
+    else window.__libraryError = (d && d.error && d.error.message) || 'Could not load your library.';
+  }catch(e){ window.__libraryError = e.message || 'Could not reach the server.'; }
+  if(location.hash === '#library') render();
+}
+async function openLibraryItem(productId, btn){
+  if(btn){ btn.disabled = true; btn.textContent = 'Getting it…'; }
+  try{
+    const data = await fetchCreatorDownload(productId);
+    const first = (data.links||[])[0];
+    if(first){ const ok = await forceDownloadFile(first.url, first.fileName||'download'); if(!ok) window.open(first.url,'_blank','noopener'); }
+    else if(data.externalUrl){ window.open(data.externalUrl,'_blank','noopener'); }
+    else toast('Nothing to download for this item yet.', 'info');
+  }catch(e){ toast(e.message||'Could not get your file', 'error'); }
+  if(btn){ btn.disabled = false; btn.textContent = 'Download / Open'; }
+}
+function screenLibrary(){
+  if(!window.__fbAuthResolved) return `<div class="screen"><h1 class="screen-title">My Library</h1><div class="text-2 small">Checking your account…</div></div>`;
+  if(!window.__fbShopper) return `<div class="screen"><h1 class="screen-title">My Library</h1><div class="card" style="padding:18px;text-align:center;"><div style="margin-bottom:12px;">Sign in to see what you've bought from creators.</div><button class="btn btn-primary" onclick="navigate('#login')">Sign In</button></div></div>`;
+  if(!window.__libraryCache && !window.__libraryError){ fetchLibrary(); return `<div class="screen"><h1 class="screen-title">My Library</h1><div class="text-2 small" style="padding:20px;text-align:center;">Loading…</div></div>`; }
+  if(window.__libraryError) return `<div class="screen"><h1 class="screen-title">My Library</h1><div class="card" style="padding:16px;"><p class="text-2 small" style="color:var(--error);margin-bottom:10px;">⚠️ ${escapeHtml(window.__libraryError)}</p><button class="btn btn-outline" onclick="window.__libraryError=null;fetchLibrary(true);render();">Retry</button></div></div>`;
+  const items = window.__libraryCache;
+  if(!window.__myShipments) fetchMyShipments();
+  const ships = window.__myShipments || [];
+  const shipHtml = ships.length ? `<h2 style="font-size:16px;margin:18px 0 8px;">My physical orders</h2>` + ships.map(f=>`<div class="card" style="padding:14px;margin-bottom:10px;">
+      <div style="display:flex;justify-content:space-between;gap:8px;"><strong>${escapeHtml(f.productTitle||'Order')}</strong><span class="chip" style="font-size:10px;">${escapeHtml(f.status||'')}</span></div>
+      ${f.carrier||f.trackingNumber?`<div class="text-2 small" style="margin-top:6px;">${escapeHtml(f.carrier||'')} ${escapeHtml(f.trackingNumber||'')}${f.trackingUrl&&/^https?:\/\//i.test(f.trackingUrl)?` · <a href="${escapeHtml(f.trackingUrl)}" target="_blank" rel="noopener" style="color:var(--accent);">Track</a>`:''}</div>`:'<div class="text-2 small" style="margin-top:6px;">The seller is preparing your order.</div>'}
+      ${f.status==='SHIPPED'?`<button class="btn btn-primary btn-sm" style="margin-top:8px;" onclick="confirmShipmentDelivery('${escapeHtml(f.id)}', this)">I received it</button>`:''}
+    </div>`).join('') : '';
+  return `<div class="screen"><h1 class="screen-title">My Library</h1>
+    ${items.length ? items.map(i=>`<div class="card" style="padding:14px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;gap:10px;">
+      <div><div style="font-weight:700;">${escapeHtml(i.productTitle||'Purchase')}</div><div class="text-2 small">Digital purchase</div></div>
+      <button class="btn btn-primary btn-sm" onclick="openLibraryItem('${escapeHtml(i.productId)}', this)">Download / Open</button></div>`).join('') : '<div class="card" style="padding:18px;text-align:center;" ><div class="text-2 small">Nothing here yet. Digital products you buy from creators will appear here.</div></div>'}
+    ${shipHtml}
+  </div>`;
 }
 
 const LEADS_MAX_STORED = 20;
@@ -4203,6 +4381,8 @@ function render(){
     body = screenService();
   } else if(hash === '#creator'){
     body = screenCreator();
+  } else if(hash === '#library'){
+    body = screenLibrary();
   } else if(hash === '#wishlist'){
     body = screenWishlist();
   } else if(hash === '#profile'){
@@ -6246,6 +6426,7 @@ function screenProfile(){
         <div class="list-row" style="cursor:pointer;" onclick="navigate('#orders')"><span class="left"><span class="ic">${icon('package')}</span>Order History</span><span>${icon('chevron')}</span></div>
         <div class="list-row" style="cursor:pointer;" onclick="navigate('#settings')"><span class="left"><span class="ic">${icon('settings')}</span>Settings</span><span>${icon('chevron')}</span></div>
         <div class="list-row" style="cursor:pointer;" onclick="location.href='affiliate/index.html'"><span class="left"><span class="ic">${icon('target')}</span>Nova Affiliate Program</span><span>${icon('chevron')}</span></div>
+        <div class="list-row" style="cursor:pointer;" onclick="navigate('#library')"><span class="left"><span class="ic">${icon('download')}</span>My Library</span><span>${icon('chevron')}</span></div>
         <div class="list-row" style="cursor:pointer;" onclick="navigate('#creator')"><span class="left"><span class="ic">${icon('target')}</span>${escapeHtml(creatorRowLabel())}</span><span>${icon('chevron')}</span></div>
       </div>
     </div>
@@ -6476,6 +6657,339 @@ function creatorScreenTitle(){
   return 'Become a Creator';
 }
 /* =========================================================
+   CREATOR WORKSPACE — Products / Orders / Money tabs
+   Every call goes through capi() -> authedApi() (retry + fresh token).
+   All dynamic text is escaped with escapeHtml.
+   ========================================================= */
+let creatorTab = 'home';
+function setCreatorTab(t){ creatorTab = t; render(); try{ window.scrollTo(0,0); }catch(e){} }
+async function capi(path, body, timeoutMs){
+  const init = body ? { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) } : {};
+  const r = await authedApi(path, init, timeoutMs||25000, 'The server took too long. Please try again.');
+  let d = null; try{ d = await r.json(); }catch(e){}
+  if(d && d.ok) return d.data;
+  const err = new Error((d && d.error && (d.error.message || d.error)) || 'Something went wrong.');
+  err.errors = (d && d.error && d.error.errors) || []; err.code = d && d.error && d.error.code;
+  throw err;
+}
+function creatorErrText(e){
+  const list = (e && e.errors || []).map(x=>x.message).filter(Boolean);
+  return list.length ? list.join(' · ') : (e && e.message) || 'Something went wrong.';
+}
+const cwNaira = v => '₦' + Number(v||0).toLocaleString(undefined,{maximumFractionDigits:2});
+const cwStatusColor = s => ({PUBLISHED:'#2ee6a6',APPROVED:'#2ee6a6',SUBMITTED:'var(--warn,#d4af37)',IN_REVIEW:'var(--warn,#d4af37)',CHANGES_REQUESTED:'var(--warn,#d4af37)',PAUSED:'#999',DRAFT:'#999',REJECTED:'var(--error)',SUSPENDED:'var(--error)',ARCHIVED:'#999'}[s]||'#999');
+
+window.__resetCreatorWorkspace = function(){ cp = { list:null, loading:false, error:'', form:null, busy:false, formError:'', info:'' }; co = { list:null, loading:false, error:'', shipFor:null, busy:false }; cm = { payout:undefined, wds:null, banks:null, loading:false, error:'', busy:false, cj:undefined, resolved:null }; creatorHome = { data:null, summary:'', loading:false, error:null, aiText:'', aiNote:'', aiBusy:false, aiError:'', question:'', checklist:null, uid:null }; window.__libraryCache = null; window.__myShipments = null; creatorTab = 'home'; };
+function creatorTabBar(){
+  const t = (id,label)=>`<button class="chip ${creatorTab===id?'active':''}" style="flex:1;justify-content:center;" onclick="setCreatorTab('${id}')">${label}</button>`;
+  return `<div style="display:flex;gap:6px;margin-bottom:14px;">${t('home','🏠 Home')}${t('products','📦 Products')}${t('orders','🚚 Orders')}${t('money','💰 Money')}</div>`;
+}
+
+/* ---------------- PRODUCTS ---------------- */
+const CW_TYPES = [
+  ['EBOOK','eBook'],['DIGITAL_DOWNLOAD','Digital download'],['TEMPLATE','Template'],['SOFTWARE','Software'],['COURSE','Course'],
+  ['SERVICE','Service'],['PHYSICAL_PRODUCT','Physical product'],['EXTERNAL_ACCESS','External access (link)'],
+  ['LIVE_PROGRAM','Live program'],['SUBSCRIPTION','Subscription'],['BUNDLE','Bundle'],
+];
+let cp = { list:null, loading:false, error:'', form:null, busy:false, formError:'', info:'' };
+async function cpLoad(force){
+  if(cp.loading || (cp.list && !force)) return;
+  cp.loading = true; cp.error = '';
+  try{ cp.list = (await capi('/api/creator-products')).products || []; }
+  catch(e){ cp.error = creatorErrText(e); }
+  cp.loading = false; render();
+}
+function cpNew(){
+  cp.form = { productId:null, status:'DRAFT', f:{ offeringType:'EBOOK', currency:'NGN', images:[], fulfillmentMode:'SELLER_STOCK', modulesText:'' } };
+  cp.formError = ''; cp.info = ''; render();
+}
+async function cpEdit(id){
+  cp.busy = true; cp.formError = ''; render();
+  try{
+    let data = await capi('/api/creator-products?productId='+encodeURIComponent(id));
+    let latest = (data.versions||[]).find(v=>v.id===data.product.latestVersionId) || (data.versions||[]).slice(-1)[0];
+    if(!latest || latest.status !== 'DRAFT'){
+      if(!confirm('This listing is not editable right now. Start a new edited version? (It goes through review again before buyers see the change.)')){ cp.busy=false; render(); return; }
+      await capi('/api/creator-products', { action:'create_new_version', productId:id });
+      data = await capi('/api/creator-products?productId='+encodeURIComponent(id));
+      latest = (data.versions||[]).find(v=>v.id===data.product.latestVersionId) || (data.versions||[]).slice(-1)[0];
+    }
+    const f = { ...(latest.fields||{}) };
+    f.images = Array.isArray(f.images) ? f.images.slice() : [];
+    f.modulesText = Array.isArray(f.modules) ? f.modules.map(m=>m.title).join('\n') : '';
+    cp.form = { productId:id, status:data.product.status, f, hasFile: !!f.fileAssetId };
+  }catch(e){ cp.formError = creatorErrText(e); toast(cp.formError,'error'); }
+  cp.busy = false; render();
+}
+function cpSet(k,v){ if(cp.form) cp.form.f[k] = v; }
+function cpSetNum(k,v){ if(cp.form){ const n = v===''?undefined:Number(v); cp.form.f[k] = Number.isFinite(n)?n:undefined; } }
+function cpRerender(k,v){ cpSet(k,v); render(); }
+function cpPayload(){
+  const f = { ...cp.form.f }; const out = {};
+  const keys = ['title','description','category','images','price','currency','isFree','refundPolicy','stock','weightGrams','shippingOrigin','fulfillmentMode','supplierName','processingDays','fileAssetId','externalUrl','systemRequirements','pageCount','compatibility','level','turnaround','deliverables','billingInterval'];
+  for(const k of keys){ if(f[k] !== undefined && f[k] !== '' ) out[k] = f[k]; }
+  if(f.isFree) { out.isFree = true; delete out.price; }
+  if(f.offeringType === 'COURSE'){ out.modules = String(f.modulesText||'').split('\n').map(s=>s.trim()).filter(Boolean).map(title=>({title})); }
+  if(f.offeringType !== 'PHYSICAL_PRODUCT'){ delete out.fulfillmentMode; }
+  return out;
+}
+async function cpSave(thenSubmit){
+  if(!cp.form || cp.busy) return false;
+  cp.busy = true; cp.formError = ''; cp.info = ''; render();
+  try{
+    const body = cpPayload();
+    if(!cp.form.productId){
+      const r = await capi('/api/creator-products', { action:'create_draft', offeringType: cp.form.f.offeringType, ...body });
+      cp.form.productId = r.productId;
+    } else {
+      await capi('/api/creator-products', { action:'update_draft', productId: cp.form.productId, ...body });
+    }
+    if(thenSubmit){
+      await capi('/api/creator-products', { action:'submit', productId: cp.form.productId });
+      toast('Submitted for review','success'); cp.form = null; cp.list = null; cpLoad(true);
+    } else { cp.info = 'Draft saved.'; toast('Draft saved','success'); cp.list = null; cpLoad(true); }
+    cp.busy = false; render(); return true;
+  }catch(e){ cp.formError = creatorErrText(e); cp.busy = false; render(); return false; }
+}
+async function cpProductAction(id, action){
+  const labels = { pause:'Pause this listing? Buyers will no longer see it.', resume:'Put this listing back on sale?', archive:'Archive this listing? This cannot be undone.' };
+  if(labels[action] && !confirm(labels[action])) return;
+  try{ await capi('/api/creator-products', { action, productId:id }); toast('Done','success'); cp.list = null; cpLoad(true); }
+  catch(e){ toast(creatorErrText(e),'error'); }
+}
+async function cpAddImage(input){
+  const file = input.files && input.files[0]; if(!file) return;
+  if(!/^image\//.test(file.type)){ toast('Choose an image','error'); return; }
+  if((cp.form.f.images||[]).length >= 8){ toast('8 images max','error'); return; }
+  toast('Uploading image…','info');
+  try{ const url = await cloudinaryUploadFile(file, 8); cp.form.f.images = [...(cp.form.f.images||[]), url]; render(); }
+  catch(e){ toast('Image upload failed — '+(e.message||'try again'),'error'); }
+  input.value = '';
+}
+function cpAddImageUrl(){
+  const el = document.getElementById('cpImgUrl'); const u = el ? el.value.trim() : '';
+  if(!/^https:\/\/\S+$/i.test(u)){ toast('Paste a full https:// image link','error'); return; }
+  cp.form.f.images = [...(cp.form.f.images||[]), u].slice(0,8); render();
+}
+function cpRemoveImage(i){ cp.form.f.images.splice(i,1); render(); }
+async function cpUploadFile(input){
+  const file = input.files && input.files[0]; if(!file) return;
+  if(file.size > 8*1024*1024){ toast('File too large — 8MB max for now','error'); input.value=''; return; }
+  if(!cp.form.productId){ const ok = await cpSave(false); if(!ok) return; }
+  toast('Uploading file…','info');
+  const reader = new FileReader();
+  reader.onload = async e=>{
+    try{
+      const base64 = String(e.target.result).split(',')[1] || '';
+      const r = await capi('/api/creator-product-assets', { productId: cp.form.productId, fileBase64: base64, fileName: file.name, mimeType: file.type }, 60000);
+      cp.form.f.fileAssetId = r.assetId; cp.form.fileName = file.name;
+      await capi('/api/creator-products', { action:'update_draft', productId: cp.form.productId, fileAssetId: r.assetId });
+      toast('File uploaded','success');
+    }catch(err){ toast(creatorErrText(err),'error'); }
+    render();
+  };
+  reader.readAsDataURL(file);
+}
+function cpField(label, html, hint){ return `<div class="form-field"><label>${label}</label>${html}${hint?`<div class="text-2 small" style="margin-top:3px;">${hint}</div>`:''}</div>`; }
+function cpText(k, ph, type){ const v = cp.form.f[k]; return `<input type="${type||'text'}" value="${escapeHtml(v===undefined?'':v)}" placeholder="${escapeHtml(ph||'')}" oninput="${type==='number'?`cpSetNum('${k}',this.value)`:`cpSet('${k}',this.value)`}">`; }
+function cpArea(k, ph, rows){ return `<textarea rows="${rows||4}" placeholder="${escapeHtml(ph||'')}" oninput="cpSet('${k}',this.value)" style="width:100%;">${escapeHtml(cp.form.f[k]||'')}</textarea>`; }
+function creatorProductForm(){
+  const F = cp.form, f = F.f, t = f.offeringType;
+  const cats = (DB.categories||[]).filter(c=>c.id!=='all');
+  const isDigitalFile = ['DIGITAL_DOWNLOAD','SOFTWARE','EBOOK','TEMPLATE','BUNDLE'].includes(t);
+  const needsAccess = ['EXTERNAL_ACCESS','LIVE_PROGRAM','SUBSCRIPTION','BUNDLE','DIGITAL_DOWNLOAD','SOFTWARE','EBOOK','TEMPLATE'].includes(t);
+  return `<div class="card" style="padding:16px;margin-bottom:14px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;"><h3 style="font-size:16px;">${F.productId?'Edit listing':'New listing'}</h3><button class="btn btn-outline btn-sm" onclick="cp.form=null;render();">Close</button></div>
+    ${cpField('What are you selling?', F.productId ? `<div class="text-2 small">${escapeHtml((CW_TYPES.find(x=>x[0]===t)||[0,t])[1])} (cannot be changed)</div>` : `<select onchange="cpRerender('offeringType',this.value)">${CW_TYPES.map(([v,l])=>`<option value="${v}" ${v===t?'selected':''}>${l}</option>`).join('')}</select>`)}
+    ${cpField('Title', cpText('title','Clear name of what the buyer gets'))}
+    ${cpField('Description', cpArea('description','What it is, who it is for, what is included. Use short lines.',6))}
+    ${cpField('Category', `<select onchange="cpSet('category',this.value)"><option value="">Choose…</option>${cats.map(c=>`<option value="${escapeHtml(c.name)}" ${String(f.category||'').toLowerCase()===String(c.name).toLowerCase()?'selected':''}>${escapeHtml(c.name)}</option>`).join('')}</select>`)}
+    ${cpField('Images (first one is the cover)', `
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;">${(f.images||[]).map((u,i)=>`<div style="position:relative;"><img src="${escapeHtml(u)}" style="width:64px;height:64px;object-fit:cover;border-radius:8px;"><button onclick="cpRemoveImage(${i})" style="position:absolute;top:-6px;right:-6px;border:0;border-radius:50%;width:20px;height:20px;background:var(--error);color:#fff;">×</button></div>`).join('')}</div>
+      <input type="file" accept="image/*" onchange="cpAddImage(this)">
+      <div style="display:flex;gap:6px;margin-top:6px;"><input id="cpImgUrl" type="url" placeholder="or paste an https:// image link" style="flex:1;"><button class="btn btn-outline btn-sm" onclick="cpAddImageUrl()">Add</button></div>`)}
+    <div style="display:flex;gap:10px;align-items:flex-end;">
+      <div style="flex:2;">${cpField('Price (₦ Naira)', f.isFree?'<div class="text-2 small">Free listing</div>':cpText('price','e.g. 5000','number'))}</div>
+      <label style="flex:1;font-size:13px;display:flex;gap:6px;align-items:center;padding-bottom:14px;"><input type="checkbox" ${f.isFree?'checked':''} onchange="cpRerender('isFree',this.checked)"> Free</label>
+    </div>
+    ${cpField('Refund / return policy', cpArea('refundPolicy','e.g. Refunds within 7 days if the file is corrupted.',2))}
+    ${t==='PHYSICAL_PRODUCT' ? `
+      ${cpField('How will you fulfil orders?', `<select onchange="cpRerender('fulfillmentMode',this.value)"><option value="SELLER_STOCK" ${f.fulfillmentMode!=='MANUAL_SUPPLIER'?'selected':''}>I ship from my own stock</option><option value="MANUAL_SUPPLIER" ${f.fulfillmentMode==='MANUAL_SUPPLIER'?'selected':''}>I order from my supplier and ship it myself</option></select>`, 'CJ Dropshipping listings are set up through the Claude connector (see Home).')}
+      ${f.fulfillmentMode==='MANUAL_SUPPLIER' ? cpField('Supplier name', cpText('supplierName','Who you order from')) : `${cpField('Stock quantity', cpText('stock','e.g. 20','number'))}${cpField('Package weight (grams)', cpText('weightGrams','e.g. 500','number'))}${cpField('Shipping from (city/country)', cpText('shippingOrigin','e.g. Lagos, Nigeria'))}`}
+      ${cpField('Days you need to dispatch', cpText('processingDays','1–30','number'), 'Your shipping deadline is 48h, or longer if you set more days here.')}` : ''}
+    ${t==='SOFTWARE' ? cpField('System requirements', cpText('systemRequirements','e.g. Windows 10+, 4GB RAM')) : ''}
+    ${t==='EBOOK' ? cpField('Page count', cpText('pageCount','e.g. 120','number')) : ''}
+    ${t==='TEMPLATE' ? cpField('Compatible with', cpText('compatibility','e.g. Figma, Notion, Word')) : ''}
+    ${t==='COURSE' ? `${cpField('Skill level', `<select onchange="cpSet('level',this.value)"><option value="">Choose…</option>${['Beginner','Intermediate','Advanced','All levels'].map(l=>`<option ${f.level===l?'selected':''}>${l}</option>`).join('')}</select>`)}${cpField('Modules (one per line)', cpArea('modulesText','Module 1 title\nModule 2 title',5))}` : ''}
+    ${t==='SERVICE' ? `${cpField('Turnaround time', cpText('turnaround','e.g. 3 days'))}${cpField('What do you deliver?', cpArea('deliverables','e.g. 3 logo concepts + source files',3))}` : ''}
+    ${t==='SUBSCRIPTION' ? cpField('Billing interval', cpText('billingInterval','e.g. monthly')) : ''}
+    ${t!=='PHYSICAL_PRODUCT' && t!=='SERVICE' && t!=='COURSE' || t==='COURSE' ? `
+      <div style="border-top:1px solid var(--border);margin:10px 0;padding-top:10px;"><strong>What the buyer receives after paying</strong></div>
+      ${isDigitalFile ? cpField('Upload a file (PDF, ZIP, EPUB, DOC — 8MB max)', `<input type="file" onchange="cpUploadFile(this)">${f.fileAssetId?`<div class="small" style="color:#2ee6a6;margin-top:4px;">✓ File attached${F.fileName?': '+escapeHtml(F.fileName):''}</div>`:''}`, 'Stored privately; only buyers can download it.') : ''}
+      ${needsAccess || t==='COURSE' ? cpField(isDigitalFile?'…or an access / delivery link':'Access link (course site, community, meeting…)', cpText('externalUrl','https://…','url'), 'Only shown to people who bought it. We re-check that it still works.') : ''}` : ''}
+    ${cp.formError ? `<div class="small" style="color:var(--error);margin:10px 0;">⚠️ ${escapeHtml(cp.formError)}</div>` : ''}
+    ${cp.info ? `<div class="small" style="color:#2ee6a6;margin:10px 0;">${escapeHtml(cp.info)}</div>` : ''}
+    <div style="display:flex;gap:8px;margin-top:12px;">
+      <button class="btn btn-outline" style="flex:1;" ${cp.busy?'disabled':''} onclick="cpSave(false)">${cp.busy?'Working…':'Save draft'}</button>
+      <button class="btn btn-primary" style="flex:1;" ${cp.busy?'disabled':''} onclick="if(confirm('Submit for review? You can\\'t edit it while it is being reviewed.'))cpSave(true)">Submit for review</button>
+    </div>
+  </div>`;
+}
+function creatorProductsTab(){
+  if(!cp.list && !cp.error){ cpLoad(); return '<div class="text-2 small" style="padding:20px;text-align:center;">Loading your listings…</div>'; }
+  if(cp.error && !cp.list) return `<div class="card" style="padding:16px;"><p class="text-2 small" style="color:var(--error);">⚠️ ${escapeHtml(cp.error)}</p><button class="btn btn-outline" onclick="cp.error='';cpLoad(true);render();">Retry</button></div>`;
+  if(cp.form) return creatorProductForm();
+  const rows = cp.list.map(p=>{
+    const snap = p.publishedSnapshot || {};
+    const title = snap.title || '(untitled draft)';
+    const reason = p.changeRequestReason || p.rejectionReason || p.pauseReason;
+    return `<div class="card" style="padding:12px;margin-bottom:8px;">
+      <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start;"><strong>${escapeHtml(title)}</strong><span class="chip" style="font-size:10px;background:${cwStatusColor(p.status)};color:#111;">${escapeHtml(p.status)}</span></div>
+      <div class="text-2 small">${escapeHtml((CW_TYPES.find(x=>x[0]===p.offeringType)||[0,p.offeringType||''])[1])}${snap.price?` · ${cwNaira(snap.price)}`:''}</div>
+      ${reason?`<div class="small" style="margin-top:6px;color:var(--warn,#d4af37);">${escapeHtml(reason)}</div>`:''}
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">
+        ${['DRAFT','CHANGES_REQUESTED','REJECTED','PUBLISHED','PAUSED'].includes(p.status)?`<button class="btn btn-outline btn-sm" onclick="cpEdit('${escapeHtml(p.id)}')">Edit</button>`:''}
+        ${p.status==='PUBLISHED'?`<button class="btn btn-outline btn-sm" onclick="cpProductAction('${escapeHtml(p.id)}','pause')">Pause</button>`:''}
+        ${p.status==='PAUSED'?`<button class="btn btn-primary btn-sm" onclick="cpProductAction('${escapeHtml(p.id)}','resume')">Resume</button>`:''}
+        ${['PUBLISHED','PAUSED'].includes(p.status)?`<button class="btn btn-outline btn-sm" onclick="cpProductAction('${escapeHtml(p.id)}','archive')">Archive</button>`:''}
+      </div></div>`;
+  }).join('');
+  return `<button class="btn btn-primary btn-block" style="margin-bottom:12px;" onclick="cpNew()">+ Add a listing</button>
+    ${rows || '<div class="card" style="padding:18px;text-align:center;"><div class="text-2 small">No listings yet. Add your first one — every listing is reviewed before buyers see it.</div></div>'}
+    <div class="text-2 small" style="margin-top:8px;">Listings are reviewed by LEXDEN NOVA before they go live.</div>`;
+}
+
+/* ---------------- ORDERS ---------------- */
+let co = { list:null, loading:false, error:'', shipFor:null, busy:false };
+async function coLoad(force){
+  if(co.loading || (co.list && !force)) return;
+  co.loading = true; co.error = '';
+  try{ co.list = (await capi('/api/creator-fulfillments')).fulfillments || []; }
+  catch(e){ co.error = creatorErrText(e); }
+  co.loading = false; render();
+}
+async function coAction(orderId, action, extra){
+  if(co.busy) return; co.busy = true; render();
+  try{ await capi('/api/creator-fulfillments', { orderId, action, ...(extra||{}) }); toast('Updated','success'); co.shipFor = null; co.list = null; coLoad(true); }
+  catch(e){ toast(creatorErrText(e),'error'); }
+  co.busy = false; render();
+}
+function coShip(orderId){
+  const carrier = (document.getElementById('coCarrier')||{}).value || '';
+  const trackingNumber = (document.getElementById('coTrack')||{}).value || '';
+  const trackingUrl = (document.getElementById('coUrl')||{}).value || '';
+  coAction(orderId, 'mark_shipped', { carrier: carrier.trim(), trackingNumber: trackingNumber.trim(), ...(trackingUrl.trim()?{trackingUrl:trackingUrl.trim()}:{}) });
+}
+function coCancel(orderId){
+  const reason = prompt('Why are you cancelling this order? (the buyer is told)'); if(reason===null) return;
+  if(!reason.trim()){ toast('A reason is required','error'); return; }
+  coAction(orderId, 'cancel', { reason: reason.trim() });
+}
+function creatorOrdersTab(){
+  if(!co.list && !co.error){ coLoad(); return '<div class="text-2 small" style="padding:20px;text-align:center;">Loading your orders…</div>'; }
+  if(co.error && !co.list) return `<div class="card" style="padding:16px;"><p class="text-2 small" style="color:var(--error);">⚠️ ${escapeHtml(co.error)}</p><button class="btn btn-outline" onclick="co.error='';coLoad(true);render();">Retry</button></div>`;
+  if(!co.list.length) return '<div class="card" style="padding:18px;text-align:center;"><div class="text-2 small">No physical orders yet. When someone buys a physical listing, it appears here and you ship it.</div></div>';
+  const slaChip = s => !s ? '' : `<span class="chip" style="font-size:10px;background:${s.overall==='BREACHED'?'var(--error)':s.overall==='AT_RISK'?'var(--warn,#d4af37)':'#2ee6a6'};color:#111;">${escapeHtml(s.overall==='BREACHED'?'Overdue':s.overall==='AT_RISK'?'Due soon':'On track')}</span>`;
+  return co.list.map(f=>{
+    const d = f.delivery || {};
+    const open = ['PENDING','PACKED'].includes(f.status);
+    return `<div class="card" style="padding:12px;margin-bottom:8px;">
+      <div style="display:flex;justify-content:space-between;gap:8px;"><strong>${escapeHtml(f.productTitle||'Order')}</strong><span style="display:flex;gap:4px;"><span class="chip" style="font-size:10px;">${escapeHtml(f.status)}</span>${f.status!=='DELIVERED'&&f.status!=='CANCELLED'?slaChip(f.sla):''}</span></div>
+      <div class="text-2 small" style="margin-top:6px;">Ship to: <strong>${escapeHtml(d.name||'')}</strong> · ${escapeHtml(d.phone||'')}<br>${escapeHtml([d.address,d.city,d.state,d.country].filter(Boolean).join(', '))}</div>
+      ${f.fulfillmentMode==='CJ_DROPSHIP'?'<div class="small text-2" style="margin-top:4px;">Dropship order — handled through your CJ account.</div>':''}
+      ${f.carrier?`<div class="text-2 small">Shipped via ${escapeHtml(f.carrier)} ${escapeHtml(f.trackingNumber||'')}</div>`:''}
+      ${co.shipFor===f.id ? `<div style="margin-top:8px;"><input id="coCarrier" placeholder="Carrier (e.g. GIG Logistics, DHL)" style="width:100%;margin-bottom:6px;"><input id="coTrack" placeholder="Tracking number" style="width:100%;margin-bottom:6px;"><input id="coUrl" placeholder="Tracking link (optional)" style="width:100%;margin-bottom:6px;"><div style="display:flex;gap:6px;"><button class="btn btn-primary btn-sm" ${co.busy?'disabled':''} onclick="coShip('${escapeHtml(f.id)}')">Confirm shipped</button><button class="btn btn-outline btn-sm" onclick="co.shipFor=null;render();">Cancel</button></div></div>` : `
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">
+        ${f.status==='PENDING' && !f.acknowledgedAtMs ?`<button class="btn btn-outline btn-sm" onclick="coAction('${escapeHtml(f.id)}','acknowledge')">I've seen it</button>`:''}
+        ${f.status==='PENDING'?`<button class="btn btn-outline btn-sm" onclick="coAction('${escapeHtml(f.id)}','mark_packed')">Mark packed</button>`:''}
+        ${open?`<button class="btn btn-primary btn-sm" onclick="co.shipFor='${escapeHtml(f.id)}';render();">Mark shipped</button>`:''}
+        ${open?`<button class="btn btn-outline btn-sm" onclick="coCancel('${escapeHtml(f.id)}')">Cancel</button>`:''}
+      </div>`}
+    </div>`;
+  }).join('');
+}
+
+/* ---------------- MONEY ---------------- */
+let cm = { payout:undefined, wds:null, banks:null, loading:false, error:'', busy:false, cj:undefined, resolved:null };
+async function cmLoad(force){
+  if(cm.loading || (cm.wds && !force)) return;
+  cm.loading = true; cm.error = '';
+  try{
+    const [p, w] = await Promise.all([capi('/api/creator-payout-account'), capi('/api/creator-withdraw')]);
+    cm.payout = p.payoutAccount || null; cm.wds = w.withdrawals || [];
+    try{ cm.cj = await capi('/api/creator-supplier-connection'); }catch(e){ cm.cj = null; }
+  }catch(e){ cm.error = creatorErrText(e); }
+  cm.loading = false; render();
+}
+async function cmLoadBanks(){
+  if(cm.banks) return;
+  try{ const r = await withTimeout(fetch(API_BASE+'/api/affiliate-banks'), 15000, 'Could not load banks.'); const d = await r.json(); cm.banks = (d && d.banks) || []; }
+  catch(e){ cm.banks = []; }
+  render();
+}
+async function cmSavePayout(){
+  const bankCode = (document.getElementById('cmBank')||{}).value || '';
+  const num = ((document.getElementById('cmAcct')||{}).value || '').trim();
+  const bank = (cm.banks||[]).find(b=>b.code===bankCode);
+  if(!bankCode || !/^\d{10}$/.test(num)){ toast('Choose your bank and enter your 10-digit account number','error'); return; }
+  cm.busy = true; render();
+  try{ const r = await capi('/api/creator-payout-account', { bankCode, bankName: bank?bank.name:'', accountNumber: num }); cm.payout = r.payoutAccount; cm.editPayout = false; toast('Verified: '+r.payoutAccount.accountName,'success'); }
+  catch(e){ toast(creatorErrText(e),'error'); }
+  cm.busy = false; render();
+}
+async function cmWithdraw(){
+  const amt = Number((document.getElementById('cmAmt')||{}).value);
+  if(!(amt>0)){ toast('Enter an amount','error'); return; }
+  if(!confirm('Request a withdrawal of '+cwNaira(amt)+'? A small fee applies and it is paid after review.')) return;
+  cm.busy = true; render();
+  try{ const r = await capi('/api/creator-withdraw', { amount: amt }); toast('Requested — you will receive '+cwNaira(r.amountPayable),'success'); cm.wds = null; creatorHome.data = null; cmLoad(true); }
+  catch(e){ toast(creatorErrText(e),'error'); }
+  cm.busy = false; render();
+}
+async function cmConnectCj(){
+  const email = ((document.getElementById('cjEmail')||{}).value||'').trim();
+  const apiKey = ((document.getElementById('cjKey')||{}).value||'').trim();
+  if(!email || !apiKey){ toast('Enter your CJ email and API key','error'); return; }
+  cm.busy = true; render();
+  try{ await capi('/api/creator-supplier-connection', { action:'connect', email, apiKey }, 40000); toast('CJ connected','success'); cm.cj = null; cm.wds = null; cmLoad(true); }
+  catch(e){ toast(creatorErrText(e),'error'); }
+  cm.busy = false; render();
+}
+async function cmDisconnectCj(){
+  if(!confirm('Disconnect your CJ account? Your dropship listings will stop working until you reconnect.')) return;
+  try{ await capi('/api/creator-supplier-connection', { action:'disconnect' }); toast('Disconnected','success'); cm.cj = null; cm.wds = null; cmLoad(true); }
+  catch(e){ toast(creatorErrText(e),'error'); }
+}
+function creatorMoneyTab(){
+  if(!cm.wds && !cm.error){ cmLoad(); return '<div class="text-2 small" style="padding:20px;text-align:center;">Loading…</div>'; }
+  if(cm.error && !cm.wds) return `<div class="card" style="padding:16px;"><p class="text-2 small" style="color:var(--error);">⚠️ ${escapeHtml(cm.error)}</p><button class="btn btn-outline" onclick="cm.error='';cmLoad(true);render();">Retry</button></div>`;
+  const h = creatorHome.data; const bal = h ? h.money.balanceAvailable : null;
+  if(!h) loadCreatorHome();
+  const editing = !cm.payout || cm.editPayout;
+  if(editing) cmLoadBanks();
+  const payoutBox = editing ? `<div class="card" style="padding:14px;margin-bottom:12px;"><strong>Payout account</strong>
+      <div class="text-2 small" style="margin:4px 0 8px;">Your name is verified with Paystack. Money is only ever sent to this account.</div>
+      <select id="cmBank" style="width:100%;margin-bottom:8px;"><option value="">${cm.banks?'Choose your bank…':'Loading banks…'}</option>${(cm.banks||[]).map(b=>`<option value="${escapeHtml(b.code)}">${escapeHtml(b.name)}</option>`).join('')}</select>
+      <input id="cmAcct" inputmode="numeric" maxlength="10" placeholder="10-digit account number" style="width:100%;margin-bottom:8px;">
+      <div style="display:flex;gap:6px;"><button class="btn btn-primary" ${cm.busy?'disabled':''} onclick="cmSavePayout()">${cm.busy?'Verifying…':'Verify & save'}</button>${cm.payout?'<button class="btn btn-outline" onclick="cm.editPayout=false;render();">Cancel</button>':''}</div></div>`
+    : `<div class="card" style="padding:14px;margin-bottom:12px;"><div style="display:flex;justify-content:space-between;"><strong>Payout account</strong><a href="#" onclick="event.preventDefault();cm.editPayout=true;render();" style="color:var(--accent);font-size:13px;">Change</a></div>
+      <div style="margin-top:6px;">${escapeHtml(cm.payout.accountName||'')}</div><div class="text-2 small">${escapeHtml(cm.payout.bankName||'')} · ****${escapeHtml(String(cm.payout.accountNumber||'').slice(-4))}</div></div>`;
+  const wd = cm.payout ? `<div class="card" style="padding:14px;margin-bottom:12px;"><strong>Withdraw</strong>
+      <div class="text-2 small" style="margin:4px 0 8px;">Available: ${bal==null?'…':cwNaira(bal)} · minimum ₦5,000 · one request per 7 days · 2.5% fee</div>
+      <div style="display:flex;gap:6px;"><input id="cmAmt" type="number" inputmode="decimal" placeholder="Amount in ₦" style="flex:1;"><button class="btn btn-primary" ${cm.busy?'disabled':''} onclick="cmWithdraw()">Request</button></div></div>` : '<div class="text-2 small" style="margin-bottom:12px;">Add a payout account to withdraw your earnings.</div>';
+  const history = cm.wds.length ? cm.wds.map(w=>`<div class="list-row"><span class="left">${cwNaira(w.amountRequested)} <span class="text-2 small" style="margin-left:6px;">pay ${cwNaira(w.amountPayable)}</span></span><span class="chip" style="font-size:10px;">${escapeHtml(w.status)}</span></div>`).join('') : '<div class="text-2 small" style="padding:10px 0;">No withdrawals yet.</div>';
+  const cj = cm.cj;
+  const cjBox = `<div class="card" style="padding:14px;margin-top:12px;"><strong>CJ Dropshipping</strong>
+    ${cj && cj.connected ? `<div class="text-2 small" style="margin:6px 0;">Connected: ${escapeHtml(cj.accountEmail||'')} · ${escapeHtml(cj.status||'')}</div><button class="btn btn-outline btn-sm" onclick="cmDisconnectCj()">Disconnect</button>
+      <div class="text-2 small" style="margin-top:8px;">Map your listings to CJ products from the Claude connector (see Home).</div>`
+    : `<div class="text-2 small" style="margin:4px 0 8px;">Connect your own CJ account so paid orders are placed in it. Your key is stored encrypted and never shown again.</div>
+      <input id="cjEmail" type="email" placeholder="CJ account email" style="width:100%;margin-bottom:6px;"><input id="cjKey" type="password" autocomplete="off" placeholder="CJ API key" style="width:100%;margin-bottom:6px;"><button class="btn btn-primary btn-sm" ${cm.busy?'disabled':''} onclick="cmConnectCj()">Connect</button>`}</div>`;
+  return `<div class="card" style="padding:14px;margin-bottom:12px;text-align:center;"><div class="text-2 small">Available balance</div><div style="font-size:26px;font-weight:800;">${bal==null?'…':cwNaira(bal)}</div></div>
+    ${payoutBox}${wd}
+    <h2 style="font-size:16px;margin:6px 0;">Withdrawal history</h2><div class="card" style="padding:4px 16px;">${history}</div>${cjBox}`;
+}
+
+/* =========================================================
    LEXDEN NOVA CREATOR — Stage J: Creator Home (AI co-pilot)
    Talks to /api/creator-ai. All numbers come from the server; the AI only
    phrases advice and can never change anything (suggest-only, blueprint §48).
@@ -6522,6 +7036,13 @@ function copyCreatorMcpUrl(){
   try{ navigator.clipboard.writeText(url).then(()=>toast('Link copied','success'), ()=>toast(url)); }catch(e){ toast(url); }
 }
 function screenCreatorHome(){
+  const bar = creatorTabBar();
+  const H1 = '<h1 class="screen-title">My Creator Account</h1>';
+  if(creatorTab === 'home') return creatorHomeTab().replace(H1, H1 + bar);
+  const body = creatorTab==='products' ? creatorProductsTab() : creatorTab==='orders' ? creatorOrdersTab() : creatorMoneyTab();
+  return `<div class="screen">${H1}${bar}${body}</div>`;
+}
+function creatorHomeTab(){
   if(!creatorHome.data && !creatorHome.error){
     loadCreatorHome();
     return `<div class="screen"><h1 class="screen-title">My Creator Account</h1><div class="text-2 small" style="padding:20px;text-align:center;">Loading your dashboard…</div></div>`;
@@ -8217,6 +8738,7 @@ const ADMIN_TABS = [
   {id:'payments', label:'Payments', ic:'card'},
   {id:'affiliate', label:'Affiliate Program', ic:'target'},
   {id:'creators', label:'Creator Applications', ic:'target'},
+  {id:'creatorOps', label:'Creator Ops', ic:'target'},
   {id:'errors', label:'Error Codes', ic:'bug'},
   {id:'suppliers', label:'Suppliers', ic:'package'},
   {id:'supplierRouting', label:'Supplier Routing', ic:'target'},
@@ -8367,7 +8889,7 @@ function renderAdminTab(){
     content: adminContent, branding: adminBranding, services: adminServicesTab, feed: adminFeed,
     testimonials: adminTestimonials, social: adminSocial, ai: adminAI, payments: adminPayments,
     faqs: adminFaqs, leads: adminLeads, newsletter: adminNewsletter, users: adminUsers, errors: adminErrorCodes,
-    affiliate: adminAffiliateProgram, creators: adminCreatorApplications,
+    affiliate: adminAffiliateProgram, creators: adminCreatorApplications, creatorOps: adminCreatorOps,
     sitemap: adminSitemap, export: adminExport, logs: adminLogs,
     suppliers: adminSuppliers, supplierRouting: adminSupplierRouting,
     cj: adminCJDropshipping,
@@ -8436,7 +8958,7 @@ function adminErrorCodes(){
     <p class="text-2 small">Every code with the same cause always shows the same code — if a shopper reports the same code twice, it's the same underlying issue.</p>`;
 }
 function adminProducts(){
-  const products = DB.products;
+  const products = DB.legacyProducts;
   return `
     <div class="admin-topbar"><h2>Products (${products.length})</h2><button class="btn btn-primary btn-sm" onclick="openProductForm()">+ Add Product</button></div>
     <div id="productFormWrap"></div>
@@ -8843,7 +9365,7 @@ function updateDiscountPreview(){
 async function saveProduct(id){
   const name = $('#f_name').value.trim();
   const nairaPrice = parseFloat($('#f_price').value);
-  const list = DB.products;
+  const list = DB.legacyProducts;
   const mediaUrls = Array.from({length:8}).map((_,i)=>$('#f_media'+i)?.value.trim()).filter(Boolean);
   const gallery = mediaUrls.map(url=>({url, type:guessMediaType(url)}));
   const coverImage = (gallery[0] && gallery[0].type==='image') ? gallery[0].url
@@ -8967,7 +9489,7 @@ async function saveProduct(id){
 function deleteProduct(id){
   const p = findProduct(id);
   if(!confirm(`Delete "${p?.name}"? This cannot be undone.`)) return;
-  DB.products = DB.products.filter(x=>x.id!==id);
+  DB.products = DB.legacyProducts.filter(x=>x.id!==id);
   DB.wishlist = DB.wishlist.filter(x=>x!==id);
   pushProductsToCloud();
   logActivity('Admin', `Deleted product "${p?.name}"`);
@@ -8987,7 +9509,7 @@ function adminCategories(){
       </div>
     </div>
     <table class="admin-table"><thead><tr><th>Name</th><th># Products</th><th></th></tr></thead>
-    <tbody>${cats.map(c=>`<tr><td>${escapeHtml(c.name)}</td><td>${DB.products.filter(p=>p.category===c.id).length}</td><td><button class="btn btn-danger btn-sm" onclick="deleteCategory('${c.id}')">Delete</button></td></tr>`).join('')}</tbody></table>`;
+    <tbody>${cats.map(c=>`<tr><td>${escapeHtml(c.name)}</td><td>${DB.legacyProducts.filter(p=>p.category===c.id).length}</td><td><button class="btn btn-danger btn-sm" onclick="deleteCategory('${c.id}')">Delete</button></td></tr>`).join('')}</tbody></table>`;
 }
 function addCategory(){
   const name = $('#newCatName').value.trim();
@@ -9508,7 +10030,7 @@ function deleteSupplier(id){
 // separate collection, matching how the rest of a product's physical
 // data already lives on the product itself.
 function adminSupplierRouting(){
-  const physicalProducts = DB.products.filter(p=>p.productType==='PHYSICAL');
+  const physicalProducts = DB.legacyProducts.filter(p=>p.productType==='PHYSICAL');
   const suppliers = DB.suppliers;
   if(!suppliers.length){
     return `<div class="admin-topbar"><h2>Supplier Routing</h2></div>
@@ -9543,7 +10065,7 @@ function adminSupplierRouting(){
   `;
 }
 function saveSupplierRouting(productId){
-  const list = DB.products;
+  const list = DB.legacyProducts;
   const idx = list.findIndex(p=>p.id===productId);
   if(idx === -1) return;
   const p = list[idx];
@@ -10097,7 +10619,7 @@ async function cjLoadSyncLogsIfVisible(){
   }
 }
 function cjImportedProductsTable(){
-  const imported = DB.products.filter(p=>p.physical && p.physical.cj && p.physical.cj.productId);
+  const imported = DB.legacyProducts.filter(p=>p.physical && p.physical.cj && p.physical.cj.productId);
   if(!imported.length) return `<p class="text-2 small">No products imported from CJ yet.</p>`;
   return `<table class="admin-table"><thead><tr><th>Name</th><th>Status</th><th>CJ Variant</th><th>Stock</th><th></th></tr></thead><tbody>
     ${imported.map(p=>`<tr>
@@ -10203,7 +10725,7 @@ async function importCjProduct(pid){
       },
     },
   };
-  DB.products = [...DB.products, data];
+  DB.products = [...DB.legacyProducts, data];
   const ok = await pushProductsToCloud();
   if(ok){
     logActivity('Admin', `Imported CJ product "${data.name}"`);
@@ -10233,7 +10755,7 @@ async function cjRefreshStock(productId){
   // Firestore (sync=1 above) — mirror that into this session's in-memory
   // DB.products so the panel reflects it immediately without a full reload.
   if(s){
-    DB.products = DB.products.map(x=>x.id===productId
+    DB.products = DB.legacyProducts.map(x=>x.id===productId
       ? {...x, physical:{...x.physical, stockStatus: s.inStock?'in_stock':'out_of_stock', cj:{...x.physical.cj, lastSyncedAt:new Date().toISOString()}}}
       : x);
   }
@@ -10700,6 +11222,165 @@ function adminCreatorApplications(){
   </div>`;
 }
 
+/* =========================================================
+   ADMIN — CREATOR OPS (listing review / payouts / orders & SLA / alerts)
+   Uses authedApi directly because some admin endpoints answer {ok,data}
+   and the finance one answers {ok,withdrawals}. Every dynamic value is escaped.
+   ========================================================= */
+let ao = { sub:'listings', data:{}, loading:false, error:'', busy:false, note:'', filter:{ listings:'SUBMITTED', wds:'pending', orders:'' } };
+async function aoApi(path, body){
+  const init = body ? { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) } : {};
+  const r = await authedApi(path, init, 30000, 'The server took too long. Please try again.');
+  let d = null; try{ d = await r.json(); }catch(e){}
+  if(d && d.ok) return (d.data !== undefined && d.data !== null) ? d.data : d;
+  const err = new Error((d && d.error && (d.error.message || d.error)) || 'Something went wrong.');
+  err.code = d && d.error && d.error.code; throw err;
+}
+function aoSetSub(s){ ao.sub = s; ao.error=''; ao.note=''; aoLoad(true); renderAdminTab(); }
+async function aoLoad(force){
+  const s = ao.sub;
+  if(ao.data[s] && !force) return;
+  ao.loading = true; ao.error = '';
+  try{
+    if(s==='listings') ao.data.listings = (await aoApi('/api/creator-admin-products'+(ao.filter.listings?'?status='+encodeURIComponent(ao.filter.listings):''))).products || [];
+    else if(s==='payouts'){
+      const [w,b] = await Promise.all([
+        aoApi('/api/creator-admin-finance'+(ao.filter.wds?'?status='+encodeURIComponent(ao.filter.wds):'')),
+        aoApi('/api/creator-admin-finance?action=list-balances')
+      ]);
+      ao.data.payouts = { withdrawals: w.withdrawals||[], balances: b.balances||[] };
+    }
+    else if(s==='orders'){
+      const [q,c,f] = await Promise.all([
+        aoApi('/api/creator-admin-sla?view=queue'),
+        aoApi('/api/creator-admin-sla?view=creators'),
+        aoApi('/api/creator-admin-fulfillments'+(ao.filter.orders?'?status='+encodeURIComponent(ao.filter.orders):''))
+      ]);
+      ao.data.orders = { queue:q.queue||[], creators:c.creators||[], fulfillments:f.fulfillments||[] };
+    }
+    else if(s==='alerts'){
+      const [a,r,st] = await Promise.all([
+        aoApi('/api/creator-admin-automation?view=alerts'),
+        aoApi('/api/creator-admin-automation?view=runs'),
+        aoApi('/api/creator-admin-automation?view=settings')
+      ]);
+      ao.data.alerts = { alerts:a.alerts||[], runs:r.runs||[], settings:st||{} };
+    }
+  }catch(e){ ao.error = e.message || 'Could not load.'; }
+  ao.loading = false;
+  if(appState.adminTab==='creatorOps') renderAdminTab();
+}
+async function aoPost(path, body, okMsg){
+  if(ao.busy) return;
+  ao.busy = true; ao.error=''; ao.note=''; renderAdminTab();
+  try{ await aoApi(path, body); ao.note = okMsg||'Done.'; ao.busy=false; await aoLoad(true); }
+  catch(e){ ao.error = e.message||'Action failed.'; ao.busy=false; }
+  if(appState.adminTab==='creatorOps') renderAdminTab();
+}
+function aoReason(label){ const r = window.prompt(label); return r && r.trim() ? r.trim() : null; }
+function aoListingAction(id, action, needReason){
+  let reason; if(needReason){ reason = aoReason('Reason (the creator will see this):'); if(!reason) return; }
+  aoPost('/api/creator-admin-products', { productId:id, action, reason }, 'Listing updated: '+action.replace('_',' ')+'.');
+}
+function aoWithdrawalAction(id, action){
+  if(action==='reject-withdrawal'){ const note = aoReason('Reason for rejecting (shown to the creator):'); if(!note) return; return aoPost('/api/creator-admin-finance',{ action, withdrawalId:id, note },'Withdrawal rejected.'); }
+  if(action==='pay-withdrawal-via-paystack' && !window.confirm('Send this payout through Paystack now? This moves real money.')) return;
+  if(action==='mark-withdrawal-paid' && !window.confirm('Mark as paid ONLY if you already sent the money yourself. Continue?')) return;
+  aoPost('/api/creator-admin-finance',{ action, withdrawalId:id },'Withdrawal updated.');
+}
+function aoSetFilter(k,v){ ao.filter[k]=v; aoLoad(true); }
+function aoResolveAlert(id){ const note = window.prompt('Note (optional):')||''; aoPost('/api/creator-admin-automation',{ action:'resolve_alert', alertId:id, note },'Alert resolved.'); }
+function aoRunJob(j){ aoPost('/api/creator-admin-automation',{ action:'run_job', job:j },'Job "'+j+'" ran.'); }
+function aoAutoRestrict(on){ aoPost('/api/creator-admin-automation',{ action:'set_auto_restrict', enabled:on }, on?'Automatic SLA pausing is ON.':'Automatic SLA pausing is OFF.'); }
+function aoLiftPause(scope){ const reason = aoReason('Reason for re-opening '+scope+'-paused listings:'); if(!reason) return; aoPost('/api/creator-admin-automation',{ action:'lift_pause', scope, reason },'Paused listings re-checked.'); }
+function aoDate(v){ try{ if(!v) return '—'; if(v._seconds) return new Date(v._seconds*1000).toLocaleString(); if(v.seconds) return new Date(v.seconds*1000).toLocaleString(); const d=new Date(v); return isNaN(d)?'—':d.toLocaleString(); }catch(e){ return '—'; } }
+function aoSelect(key, opts){
+  return `<select class="input" style="max-width:220px;" onchange="aoSetFilter('${key}',this.value)">${opts.map(o=>`<option value="${escapeHtml(o[0])}" ${ao.filter[key]===o[0]?'selected':''}>${escapeHtml(o[1])}</option>`).join('')}</select>`;
+}
+function aoListingsHtml(){
+  const list = ao.data.listings; if(!list) return '<p class="text-2 small">Loading…</p>';
+  return `<div style="margin-bottom:10px;">${aoSelect('listings',[['SUBMITTED','Waiting for review'],['PUBLISHED','Live'],['PAUSED','Paused'],['SUSPENDED','Suspended'],['REJECTED','Rejected'],['','Everything']])}</div>` +
+  (list.length ? list.map(p=>{
+    const v = p.latestVersion||{}, f = v.fields||p.publishedSnapshot||{};
+    const st = p.status;
+    const btns = st==='SUBMITTED' ? `
+      <button class="btn btn-primary btn-sm" ${ao.busy?'disabled':''} onclick="aoListingAction('${escapeHtml(p.id)}','approve',false)">Approve</button>
+      <button class="btn btn-outline btn-sm" ${ao.busy?'disabled':''} onclick="aoListingAction('${escapeHtml(p.id)}','request_changes',true)">Request changes</button>
+      <button class="btn btn-outline btn-sm" ${ao.busy?'disabled':''} onclick="aoListingAction('${escapeHtml(p.id)}','reject',true)">Reject</button>`
+      : (st==='PUBLISHED' ? `<button class="btn btn-outline btn-sm" ${ao.busy?'disabled':''} onclick="aoListingAction('${escapeHtml(p.id)}','suspend',true)">Suspend</button>`
+      : (st==='SUSPENDED'||st==='PAUSED' ? `<button class="btn btn-primary btn-sm" ${ao.busy?'disabled':''} onclick="aoListingAction('${escapeHtml(p.id)}','reinstate',false)">Reinstate</button>` : ''));
+    return `<div class="card" style="padding:12px;margin-bottom:8px;">
+      <div style="font-weight:700;">${escapeHtml(f.title||p.title||'Untitled')} <span class="chip" style="font-size:10px;">${escapeHtml(st||'')}</span></div>
+      <div class="text-2 small">${escapeHtml(f.offeringType||'')} · ${escapeHtml(f.currency||'')} ${escapeHtml(String(f.price!=null?f.price:''))} · creator ${escapeHtml(p.creatorId||'')}</div>
+      ${f.description?`<div class="text-2 small" style="margin-top:4px;">${escapeHtml(String(f.description).slice(0,240))}</div>`:''}
+      <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">${btns}</div></div>`;
+  }).join('') : '<p class="text-2 small">Nothing here.</p>');
+}
+function aoPayoutsHtml(){
+  const d = ao.data.payouts; if(!d) return '<p class="text-2 small">Loading…</p>';
+  const wds = d.withdrawals.map(w=>{
+    const b = w.status==='pending' ? `
+      <button class="btn btn-primary btn-sm" ${ao.busy?'disabled':''} onclick="aoWithdrawalAction('${escapeHtml(w.id)}','approve-withdrawal')">Approve</button>
+      <button class="btn btn-outline btn-sm" ${ao.busy?'disabled':''} onclick="aoWithdrawalAction('${escapeHtml(w.id)}','reject-withdrawal')">Reject</button>`
+      : w.status==='approved' ? `
+      <button class="btn btn-primary btn-sm" ${ao.busy?'disabled':''} onclick="aoWithdrawalAction('${escapeHtml(w.id)}','pay-withdrawal-via-paystack')">Pay via Paystack</button>
+      <button class="btn btn-outline btn-sm" ${ao.busy?'disabled':''} onclick="aoWithdrawalAction('${escapeHtml(w.id)}','mark-withdrawal-paid')">Mark paid (manual)</button>` : '';
+    return `<div class="card" style="padding:12px;margin-bottom:8px;">
+      <div style="font-weight:700;">${cwNaira(w.amountPayable)} <span class="chip" style="font-size:10px;">${escapeHtml(w.status||'')}</span></div>
+      <div class="text-2 small">Requested ${cwNaira(w.amountRequested)} · fee ${cwNaira(w.feeAmount)} · ${escapeHtml(aoDate(w.requestedAt))}</div>
+      <div class="text-2 small" style="opacity:.7;">creator ${escapeHtml(w.creatorId||'')}</div>
+      <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">${b}</div></div>`;
+  }).join('') || '<p class="text-2 small">No withdrawals.</p>';
+  const bals = d.balances.map(b=>`<div class="text-2 small" style="padding:4px 0;border-bottom:1px solid var(--border,#2a2a2a);">${escapeHtml(b.creatorId)} — available ${cwNaira(b.balanceAvailable)} · earned ${cwNaira(b.totalEarned)} · withdrawn ${cwNaira(b.totalWithdrawn)}</div>`).join('') || '<p class="text-2 small">No creator earnings yet.</p>';
+  return `<div style="margin-bottom:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">${aoSelect('wds',[['pending','Pending'],['approved','Approved'],['processing','Processing'],['paid','Paid'],['rejected','Rejected'],['','All']])}
+    <button class="btn btn-outline btn-sm" onclick="aoDownloadCsv('sales')">Sales CSV</button><button class="btn btn-outline btn-sm" onclick="aoDownloadCsv('withdrawals')">Withdrawals CSV</button></div>
+    ${wds}<h3 style="font-size:14px;margin:16px 0 8px;">Creator balances</h3>${bals}`;
+}
+async function aoDownloadCsv(kind){
+  try{
+    const r = await authedApi('/api/creator-admin-finance?export='+encodeURIComponent(kind),{},30000,'The export took too long.');
+    if(!r.ok) throw new Error('Export failed ('+r.status+').');
+    const blob = await r.blob(); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download='lexden-nova-creator-'+kind+'.csv'; document.body.appendChild(a); a.click(); a.remove();
+  }catch(e){ ao.error = e.message||'Export failed.'; renderAdminTab(); }
+}
+function aoSlaChip(s){ const o = s&&s.overall; return `<span class="chip" style="font-size:10px;${o==='BREACHED'?'color:var(--error);':(o==='AT_RISK'?'color:var(--warn,#d4af37);':'')}">${escapeHtml(o||'OK')}</span>`; }
+function aoOrdersHtml(){
+  const d = ao.data.orders; if(!d) return '<p class="text-2 small">Loading…</p>';
+  const q = d.queue.map(r=>`<div class="card" style="padding:12px;margin-bottom:8px;"><div style="font-weight:700;">${escapeHtml(r.productTitle||r.id)} ${aoSlaChip(r.sla)} <span class="chip" style="font-size:10px;">${escapeHtml(r.status||'')}</span></div><div class="text-2 small">creator ${escapeHtml(r.creatorId||'')} · order ${escapeHtml(r.orderId||'')} · due ${escapeHtml(r.sla&&r.sla.dueAtMs?new Date(r.sla.dueAtMs).toLocaleString():'—')}</div></div>`).join('') || '<p class="text-2 small">No orders at risk. 🎉</p>';
+  const c = d.creators.map(x=>`<div class="text-2 small" style="padding:4px 0;border-bottom:1px solid var(--border,#2a2a2a);">${escapeHtml(x.creatorId)} — breached ${escapeHtml(String(x.breached||0))} · at risk ${escapeHtml(String(x.atRisk!=null?x.atRisk:(x.at_risk||0)))}</div>`).join('') || '<p class="text-2 small">No data yet.</p>';
+  const f = d.fulfillments.map(x=>`<div class="text-2 small" style="padding:6px 0;border-bottom:1px solid var(--border,#2a2a2a);">${escapeHtml(x.productTitle||x.id)} · <b>${escapeHtml(x.status||'')}</b> ${aoSlaChip(x.sla)} · ${escapeHtml(x.trackingNumber||'')}</div>`).join('') || '<p class="text-2 small">None.</p>';
+  return `<h3 style="font-size:14px;margin-bottom:8px;">Late or at-risk orders (${d.queue.length})</h3>${q}
+    <h3 style="font-size:14px;margin:16px 0 8px;">Creators by delivery record</h3>${c}
+    <h3 style="font-size:14px;margin:16px 0 8px;">Physical orders</h3><div style="margin-bottom:8px;">${aoSelect('orders',[['','All'],['PENDING','Pending'],['SHIPPED','Shipped'],['DELIVERED','Delivered']])}</div>${f}`;
+}
+function aoAlertsHtml(){
+  const d = ao.data.alerts; if(!d) return '<p class="text-2 small">Loading…</p>';
+  const s = d.settings||{};
+  const open = d.alerts.filter(a=>a.status!=='RESOLVED' && a.status!=='resolved');
+  const al = open.map(a=>`<div class="card" style="padding:12px;margin-bottom:8px;"><div style="font-weight:700;">${escapeHtml(a.title||a.type||a.id)} <span class="chip" style="font-size:10px;">${escapeHtml(a.severity||a.status||'')}</span></div><div class="text-2 small">${escapeHtml(String(a.message||a.detail||'').slice(0,300))}</div><div style="margin-top:8px;"><button class="btn btn-outline btn-sm" ${ao.busy?'disabled':''} onclick="aoResolveAlert('${escapeHtml(a.id)}')">Mark resolved</button></div></div>`).join('') || '<p class="text-2 small">No open alerts.</p>';
+  const jobs = (s.jobs||[]).map(j=>`<button class="btn btn-outline btn-sm" ${ao.busy?'disabled':''} onclick="aoRunJob('${escapeHtml(j)}')">Run ${escapeHtml(j)}</button>`).join(' ');
+  const runs = d.runs.slice(0,10).map(r=>`<div class="text-2 small" style="padding:3px 0;">${escapeHtml(r.job||r.name||r.id)} · ${escapeHtml(r.status||'')} · ${escapeHtml(r.startedAtMs?new Date(r.startedAtMs).toLocaleString():'')}</div>`).join('') || '<p class="text-2 small">No runs yet.</p>';
+  return `<div class="card" style="padding:12px;margin-bottom:12px;">
+    <div class="text-2 small">Keep-alive / cron: <b>${s.cronConfigured?'configured':'NOT configured (set CRON_SECRET)'}</b></div>
+    <div style="margin-top:8px;"><b>Automatic SLA pausing:</b> ${s.autoRestrictSla?'ON':'OFF'}
+      <button class="btn btn-outline btn-sm" style="margin-left:8px;" ${ao.busy?'disabled':''} onclick="aoAutoRestrict(${s.autoRestrictSla?'false':'true'})">Turn ${s.autoRestrictSla?'OFF':'ON'}</button></div>
+    <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;"><button class="btn btn-outline btn-sm" onclick="aoLiftPause('sla')">Re-open SLA-paused</button><button class="btn btn-outline btn-sm" onclick="aoLiftPause('link')">Re-open link-paused</button><button class="btn btn-outline btn-sm" onclick="aoLiftPause('supplier')">Re-open supplier-paused</button></div></div>
+    <h3 style="font-size:14px;margin-bottom:8px;">Open alerts (${open.length})</h3>${al}
+    <h3 style="font-size:14px;margin:16px 0 8px;">Run a job now</h3><div style="display:flex;gap:8px;flex-wrap:wrap;">${jobs}</div>
+    <h3 style="font-size:14px;margin:16px 0 8px;">Recent runs</h3>${runs}`;
+}
+function adminCreatorOps(){
+  if(!ao.data[ao.sub] && !ao.loading) aoLoad(false);
+  const t = (id,l)=>`<button class="chip ${ao.sub===id?'active':''}" onclick="aoSetSub('${id}')">${l}</button>`;
+  const body = ao.sub==='listings'?aoListingsHtml():ao.sub==='payouts'?aoPayoutsHtml():ao.sub==='orders'?aoOrdersHtml():aoAlertsHtml();
+  return `<div class="admin-topbar"><h2>Creator Ops</h2><button class="btn btn-outline btn-sm" onclick="aoLoad(true)">Refresh</button></div>
+  <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">${t('listings','Listing review')}${t('payouts','Payouts')}${t('orders','Orders & SLA')}${t('alerts','Alerts & automation')}</div>
+  ${ao.error?`<p class="small" style="color:var(--error);">⚠️ ${escapeHtml(ao.error)}</p>`:''}
+  ${ao.note?`<p class="small" style="color:#2ee6a6;">✓ ${escapeHtml(ao.note)}</p>`:''}
+  ${ao.loading?'<p class="text-2 small">Loading…</p>':''}
+  ${body}`;
+}
+
 function affiliateWithdrawalCardHtml(w, affiliates){
   const a = (affiliates||[]).find(x=>x.id===w.affiliateId);
   // STRATEGIC DISPLAY: the account details and amount are the two things
@@ -10793,7 +11474,7 @@ function adminExport(){
 }
 function exportAppState(){
   const snapshot = {
-    products:DB.products, categories:DB.categories, testimonials:DB.testimonials,
+    products:DB.legacyProducts, categories:DB.categories, testimonials:DB.testimonials,
     faqs:DB.faqs, content:DB.content, feed:DB.feed, services:DB.services, management:DB.management,
     suppliers:DB.suppliers, exportedAt:new Date().toISOString(),
   };
