@@ -111,6 +111,7 @@ module.exports = async function handler(req, res) {
     if (matchingPublicKey) patch.paystackPublicKey = matchingPublicKey;
 
     await settingsRef.set({ content: patch }, { merge: true });
+    try { require('./_paystackMode').invalidatePaymentModeCache(); } catch (_) {}
     await db.collection('adminAuditLog').add({
       actorUid: admin.uid,
       actorEmail: admin.email,

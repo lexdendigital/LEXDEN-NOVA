@@ -45,31 +45,47 @@ module.exports = async function handler(req, res) {
     }
 
     const assetIds = Array.isArray(entitlement.assetIds) ? entitlement.assetIds : [];
-    if (!assetIds.length) {
-      return fail(res, { status: 404, code: 'NO_ASSETS', message: 'This product has no downloadable file on record. Contact support with your order reference.' });
-    }
 
-    const bucket = getFirebaseBucket();
-    const expiresAtMs = Date.now() + SIGNED_URL_TTL_MS;
+    // External-access products (course platform, community, software licence
+    // page…): the buyer gets the seller's access URL here, only after the
+    // entitlement check above. Read from the exact version that was bought.
+    let externalUrl = null;
+    try {
+      let fields = null;
+      if (entitlement.versionId) {
+        const v = await db.collection('productVersions').doc(entitlement.versionId).get();
+        fields = v.exists ? (v.data().fields || null) : null;
+      }
+      if (!fields) {
+        const p = await db.collection('products').doc(productId).get();
+        fields = p.exists ? (p.data().publishedSnapshot || null) : null;
+      }
+      if (fields && typeof fields.externalUrl === 'string' && /^https?:\/\//i.test(fields.externalUrl)) externalUrl = fields.externalUrl;
+    } catch (e) { console.error('external access lookup failed:', e && e.message); }
+
     const links = [];
-    for (const assetId of assetIds) {
-      const assetSnap = await db.collection('productAssets').doc(assetId).get();
-      if (!assetSnap.exists) continue;
-      const asset = assetSnap.data();
-      const [url] = await bucket.file(asset.storagePath).getSignedUrl({ action: 'read', expires: expiresAtMs });
-      links.push({ assetId, fileName: asset.fileName || null, mimeType: asset.mimeType || null, url, expiresAt: new Date(expiresAtMs).toISOString() });
+    if (assetIds.length) {
+      const bucket = getFirebaseBucket();
+      const expiresAtMs = Date.now() + SIGNED_URL_TTL_MS;
+      for (const assetId of assetIds) {
+        const assetSnap = await db.collection('productAssets').doc(assetId).get();
+        if (!assetSnap.exists) continue;
+        const asset = assetSnap.data();
+        const [url] = await bucket.file(asset.storagePath).getSignedUrl({ action: 'read', expires: expiresAtMs });
+        links.push({ assetId, fileName: asset.fileName || null, mimeType: asset.mimeType || null, url, expiresAt: new Date(expiresAtMs).toISOString() });
+      }
     }
 
-    if (!links.length) {
+    if (!links.length && !externalUrl) {
       return fail(res, { status: 404, code: 'NO_ASSETS', message: 'This product has no downloadable file on record. Contact support with your order reference.' });
     }
 
     await writeProductAuditLog({
       actorUid: decoded.uid, actorRole: 'buyer', action: 'download.issued',
-      productId, metadata: { assetIds: links.map(l => l.assetId), entitlementId: entitlement.id },
+      productId, metadata: { assetIds: links.map(l => l.assetId), external: !!externalUrl, entitlementId: entitlement.id },
     });
 
-    return ok(res, { links });
+    return ok(res, { links, externalUrl });
   } catch (e) {
     return fail(res, e);
   }

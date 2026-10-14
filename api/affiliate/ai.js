@@ -13,7 +13,7 @@
 // already-visible dashboard numbers, and this endpoint is read-only
 // (talks to Gemini, touches no database).
 
-const { getApiKeys, callGeminiWithRotation } = require('../gemini-shared');
+const { getApiKeys, callGeminiWithRotation, textOf } = require('../gemini-shared');
 
 function buildAffiliateSystemPrompt(stats) {
   const s = stats || {};
@@ -73,7 +73,7 @@ module.exports = async function handler(req, res) {
       console.error('Affiliate AI error after key rotation:', result.status, result.error);
       return res.status(200).json({ fallback: true });
     }
-    const html = result.data.candidates?.[0]?.content?.parts?.[0]?.text || "Sorry, I couldn't generate a response.";
+    const html = textOf(result.data) || "Sorry, I couldn't generate a response.";
     return res.status(200).json({ html });
   } catch (err) {
     console.error('Affiliate AI handler error:', err);

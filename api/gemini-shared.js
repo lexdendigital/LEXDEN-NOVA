@@ -34,57 +34,103 @@ function getApiKeys() {
 
 let rotateCursor = 0;
 const MAX_KEY_ATTEMPTS = 4;
-const PER_ATTEMPT_TIMEOUT_MS = 4000;
-const OVERALL_DEADLINE_MS = 12000;
+const PER_ATTEMPT_TIMEOUT_MS = 8000;   // gemini-2.5-flash with images can take >4s; 4s aborted healthy calls
+const OVERALL_DEADLINE_MS = 16000;     // client gives up at 20s (index.html callRealNovaAPI)
 
-async function callGeminiWithRotation(keys, requestBody) {
+// Primary model first, then cheaper/older ones: if a model is retired,
+// renamed or not enabled for a key (404/400 "model not found"), NOVA keeps
+// answering instead of silently falling back to the offline brain.
+function modelChain() {
+  const chain = [GEMINI_MODEL, 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'];
+  return [...new Set(chain.filter(Boolean))];
+}
+
+// 2.5 models "think" before answering and the thinking tokens count against
+// maxOutputTokens — with a small cap the reply can come back EMPTY. Turn
+// thinking off for chat (fast + never starves the answer). 2.0 models reject
+// the field, so only add it where supported.
+function bodyForModel(model, requestBody) {
+  if (!/^gemini-2\.5/.test(model)) return requestBody;
+  const gc = { ...(requestBody.generationConfig || {}) };
+  gc.thinkingConfig = { thinkingBudget: 0 };
+  return { ...requestBody, generationConfig: gc };
+}
+
+const textOf = (data) => {
+  const parts = data && data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts;
+  return Array.isArray(parts) ? parts.map(p => p && p.text || '').join('').trim() : '';
+};
+
+// 'key'   -> this key is the problem (rate limit, bad/expired/blocked key, server error, timeout): try the next key
+// 'model' -> this model is the problem: try the next model
+// 'stop'  -> the request itself is wrong; retrying elsewhere won't help
+function classify(status, bodyText) {
+  const t = String(bodyText || '');
+  if (status === 429 || status === 403 || status === 401 || status >= 500 || status === 0) return 'key';
+  if (status === 404) return 'model';
+  if (status === 400) {
+    if (/API_KEY_INVALID|API key not valid|API key expired|invalid api key/i.test(t)) return 'key';
+    if (/model|not found|not supported/i.test(t)) return 'model';
+    return 'stop';
+  }
+  return 'stop';
+}
+
+async function callGeminiWithRotation(keys, requestBody, opts = {}) {
   if (keys.length === 0) {
     return { ok: false, status: 500, error: "no_keys" };
   }
-  const attempts = Math.min(MAX_KEY_ATTEMPTS, keys.length);
+  const doFetch = opts.fetchImpl || fetch;
+  const models = opts.models || modelChain();
   const startIdx = rotateCursor % keys.length;
   rotateCursor = (rotateCursor + 1) % keys.length;
-  const deadlineAt = Date.now() + OVERALL_DEADLINE_MS;
+  const deadlineAt = Date.now() + (opts.deadlineMs || OVERALL_DEADLINE_MS);
 
   let lastErr = null;
-  for (let i = 0; i < attempts; i++) {
-    const timeLeft = deadlineAt - Date.now();
-    if (timeLeft <= 250) {
-      lastErr = lastErr || { status: 504, body: "overall_deadline_exceeded" };
-      break;
-    }
-    const key = keys[(startIdx + i) % keys.length];
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), Math.min(PER_ATTEMPT_TIMEOUT_MS, timeLeft));
-    try {
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${key}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(requestBody),
-          signal: controller.signal,
+  for (const model of models) {
+    let keyAttempts = 0;
+    for (let i = 0; i < keys.length && keyAttempts < MAX_KEY_ATTEMPTS; i++) {
+      const timeLeft = deadlineAt - Date.now();
+      if (timeLeft <= 250) return { ok: false, status: 504, error: lastErr || { status: 504, body: "overall_deadline_exceeded" } };
+      keyAttempts++;
+      const key = keys[(startIdx + i) % keys.length];
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), Math.min(opts.perAttemptMs || PER_ATTEMPT_TIMEOUT_MS, timeLeft));
+      let verdict;
+      try {
+        const res = await doFetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+          {
+            method: "POST",
+            // Key in a header, not the URL, so it never lands in access logs.
+            headers: { "Content-Type": "application/json", "x-goog-api-key": key },
+            body: JSON.stringify(bodyForModel(model, requestBody)),
+            signal: controller.signal,
+          }
+        );
+        clearTimeout(timer);
+        if (res.ok) {
+          const data = await res.json();
+          if (textOf(data)) return { ok: true, data, model };
+          // 200 but no text (safety block / empty): treat as this model's miss.
+          lastErr = { status: 200, model, body: "empty_response:" + JSON.stringify((data && data.promptFeedback) || (data && data.candidates && data.candidates[0] && data.candidates[0].finishReason) || "") };
+          verdict = 'model';
+        } else {
+          const body = await res.text().catch(() => "");
+          lastErr = { status: res.status, model, body: body.slice(0, 300) };
+          verdict = classify(res.status, body);
         }
-      );
-      clearTimeout(timer);
-
-      if (res.ok) {
-        const data = await res.json();
-        return { ok: true, data };
+      } catch (err) {
+        clearTimeout(timer);
+        lastErr = { status: 0, model, body: String(err) };
+        verdict = 'key';
       }
-      if (res.status === 429 || res.status >= 500 || res.status === 403) {
-        lastErr = { status: res.status, body: await res.text().catch(() => "") };
-        continue;
-      }
-      lastErr = { status: res.status, body: await res.text().catch(() => "") };
-      break;
-    } catch (err) {
-      clearTimeout(timer);
-      lastErr = { status: 0, body: String(err) };
-      continue;
+      if (verdict === 'stop') return { ok: false, status: lastErr.status || 500, error: lastErr };
+      if (verdict === 'model') break; // next model
+      // 'key' -> next key
     }
   }
-  return { ok: false, status: lastErr?.status || 500, error: lastErr };
+  return { ok: false, status: (lastErr && lastErr.status) || 500, error: lastErr };
 }
 
-module.exports = { GEMINI_MODEL, getApiKeys, callGeminiWithRotation };
+module.exports = { GEMINI_MODEL, getApiKeys, callGeminiWithRotation, modelChain, classify, textOf };

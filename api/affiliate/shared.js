@@ -41,11 +41,33 @@ async function requireAffiliateAuth(req) {
     e.status = 401;
     throw e;
   }
+  // The Admin app MUST be initialised before getAuth(). On a cold start the
+  // first request can be an auth-only endpoint (e.g. /api/creator-application)
+  // that has not touched Firestore yet; getAuth() then throws "default app
+  // does not exist", which used to be reported to the shopper as an expired
+  // session. Config problems are a 500, never a fake 401.
+  try {
+    getDb();
+  } catch (e) {
+    const err = new Error('Server auth is not configured: ' + (e && e.message ? e.message : 'init failed'));
+    err.status = 500;
+    throw err;
+  }
   try {
     return await getAuth().verifyIdToken(token);
   } catch (e) {
-    const err = new Error('Invalid or expired session — please sign in again.');
-    err.status = 401;
+    const code = e && (e.code || (e.errorInfo && e.errorInfo.code)) || '';
+    const msg = String(e && e.message || '');
+    // Only genuine token problems are a 401. Anything else (network blip
+    // fetching Google's certs, clock skew on the host) is a retryable 503.
+    const tokenProblem = /^auth\/(argument-error|id-token-expired|id-token-revoked|invalid-id-token|user-disabled|user-not-found)/.test(String(code)) ||
+      /decoding Firebase ID token|expired|invalid/i.test(msg) && !/ECONN|ETIMEDOUT|ENOTFOUND|fetch failed|socket/i.test(msg);
+    const err = new Error(tokenProblem
+      ? 'Invalid or expired session — please sign in again.'
+      : 'Could not verify your sign-in right now — please try again in a moment.');
+    err.status = tokenProblem ? 401 : 503;
+    err.code = tokenProblem ? 'BAD_TOKEN' : 'AUTH_UNAVAILABLE';
+    console.error('[auth] verifyIdToken failed:', code, msg.slice(0, 200));
     throw err;
   }
 }

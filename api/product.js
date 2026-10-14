@@ -20,6 +20,23 @@ module.exports = async (req, res) => {
       title = product.name || title;
       description = firstParagraph(product.description, 200) || description;
       if (product.image) image = ogImage(product.image);
+    } else {
+      // Not a catalog product: it may be a creator listing (public, sanitised data only).
+      try {
+        const { getDb } = require('./affiliate/shared');
+        const { toPublicListing } = require('./creator-listings');
+        const ps = await getDb().collection('products').doc(id).get();
+        if (ps.exists) {
+          const prod = { id: ps.id, ...ps.data() };
+          const cs = prod.creatorId ? await getDb().collection('creators').doc(prod.creatorId).get() : null;
+          const l = toPublicListing(prod, cs && cs.exists ? cs.data() : null);
+          if (l) {
+            title = l.title || title;
+            description = firstParagraph(l.description, 200) || description;
+            if (l.images && l.images[0]) image = ogImage(l.images[0]);
+          }
+        }
+      } catch (e) { /* keep the default preview */ }
     }
   }
 

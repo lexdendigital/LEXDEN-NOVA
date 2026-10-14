@@ -86,100 +86,81 @@ module.exports = async function handler(req, res) {
   }
 
   const db = admin.firestore();
+  const t0 = Date.now();
+  const stage = (name) => console.log(`send-otp [${email.replace(/(^.).*(@.*$)/, "$1***$2")}] ${name} +${Date.now() - t0}ms`);
 
-  // SECURITY FIX (roadmap 3.4 — per-IP rate limiting): a fixed-window
-  // counter keyed by the caller's IP, checked before we even look at the
-  // per-email cooldown. Behind Vercel, the real client IP is the FIRST
-  // entry in x-forwarded-for (Vercel's edge appends its own hops after
-  // it) — falling back to the raw socket address covers local/dev runs
-  // where that header is absent.
-  const ip = String((req.headers["x-forwarded-for"] || "").split(",")[0] || req.socket?.remoteAddress || "unknown").trim();
-  const ipRef = db.collection("otp_ip_limits").doc(ip.replace(/[^a-zA-Z0-9.:_-]/g, "_") || "unknown");
-  const ref = db.collection("email_otps").doc(email);
-
-  // SPEED FIX (roadmap "codes in under 5s"): the IP-limit doc and the
-  // per-email cooldown doc are two completely independent Firestore
-  // documents — there's no reason to read one, fully finish deciding what
-  // to do about it, and only THEN start reading the other. Firing both
-  // .get() calls together and awaiting them as a pair shaves one full
-  // Firestore round trip (typically 100-300ms, more on a slow mobile
-  // network) off every code send, since they now happen in parallel
-  // instead of back-to-back.
-  const [ipSnap, existing] = await Promise.all([
-    ipRef.get().catch(e => { console.warn("send-otp: IP rate-limit read failed (continuing)", e); return null; }),
-    ref.get(),
-  ]);
+  // HARD DEADLINE: whatever stalls (Firestore, Brevo, a cold network), the
+  // browser gets an answer in 15 seconds instead of "Sending…" forever.
+  let finished = false;
+  const done = (status, payload) => { if (finished) return; finished = true; clearTimeout(deadline); res.status(status).json(payload); };
+  const deadline = setTimeout(() => {
+    console.error(`send-otp: DEADLINE hit after ${Date.now() - t0}ms`);
+    done(504, { error: "The email service took too long. Please try again in a moment." });
+  }, 15000);
 
   try {
+    const ip = String((req.headers["x-forwarded-for"] || "").split(",")[0] || req.socket?.remoteAddress || "unknown").trim();
+    const ipRef = db.collection("otp_ip_limits").doc(ip.replace(/[^a-zA-Z0-9.:_-]/g, "_") || "unknown");
+    const ref = db.collection("email_otps").doc(email);
+
+    stage("reading limits");
+    const [ipSnap, existing] = await Promise.all([
+      ipRef.get().catch(e => { console.warn("send-otp: IP rate-limit read failed (continuing)", e.message); return null; }),
+      ref.get(),
+    ]);
+    stage("limits read");
+
     const now = Date.now();
-    if (ipSnap && ipSnap.exists) {
-      const d = ipSnap.data();
-      if (now - (d.windowStart || 0) < IP_WINDOW_MS) {
-        if ((d.count || 0) >= IP_MAX_SENDS) {
-          return res.status(429).json({ error: "Too many code requests from this connection — try again later." });
+    try {
+      if (ipSnap && ipSnap.exists) {
+        const d = ipSnap.data();
+        if (now - (d.windowStart || 0) < IP_WINDOW_MS) {
+          if ((d.count || 0) >= IP_MAX_SENDS) return done(429, { error: "Too many code requests from this connection — try again later." });
+          await ipRef.set({ windowStart: d.windowStart, count: (d.count || 0) + 1 }, { merge: true });
+        } else {
+          await ipRef.set({ windowStart: now, count: 1 });
         }
-        await ipRef.set({ windowStart: d.windowStart, count: (d.count || 0) + 1 }, { merge: true });
-      } else {
+      } else if (ipSnap) {
         await ipRef.set({ windowStart: now, count: 1 });
       }
-    } else if (ipSnap) {
-      await ipRef.set({ windowStart: now, count: 1 });
+    } catch (e) {
+      console.warn("send-otp: IP rate-limit bookkeeping failed (continuing)", e.message);
     }
-  } catch (e) {
-    // Rate-limit bookkeeping failing should never be the reason a real
-    // signup can't get a code — log it and continue rather than blocking.
-    console.warn("send-otp: IP rate-limit check failed (continuing)", e);
-  }
 
-  try {
     if (existing.exists) {
       const age = Date.now() - (existing.data().createdAt || 0);
       if (age < RESEND_COOLDOWN_MS) {
-        return res.status(429).json({
-          error: `Wait ${Math.ceil((RESEND_COOLDOWN_MS - age) / 1000)}s before requesting another code.`,
-        });
+        return done(429, { error: `Wait ${Math.ceil((RESEND_COOLDOWN_MS - age) / 1000)}s before requesting another code.` });
       }
     }
 
-    // SECURITY FIX (roadmap 3.4 — crypto-secure OTP): Math.random() is not
-    // a cryptographically secure generator — its internal state can, in
-    // principle, be inferred from enough output, which matters for
-    // anything used as a security code. crypto.randomInt() draws from the
-    // OS's CSPRNG instead. Range is exclusive of the upper bound, so
-    // 1000000 (not 999999) keeps it a genuine 100000–999999 spread.
+    // crypto.randomInt = OS CSPRNG; only an HMAC of the code is stored.
     const code = String(crypto.randomInt(100000, 1000000));
-    // SECURITY FIX (roadmap 3.4 — don't store the code in plaintext): only
-    // an HMAC of the code is written to Firestore now; the raw code exists
-    // only in memory here and in the email itself. Anyone with read access
-    // to this collection (a misconfigured rule, a leaked export, an admin
-    // SDK credential in the wrong hands) still can't read out a live code.
     const codeHash = hashCode(code, email);
     await ref.set({ codeHash, createdAt: Date.now(), expiresAt: Date.now() + CODE_TTL_MS, attempts: 0 });
+    stage("code stored");
 
-    // Reuses send-email.js's Brevo call in-process (same pattern
-    // send-auth-email.js already uses) rather than an HTTP round trip to
-    // itself. templateKey "verify" → BREVO_TPL_VERIFY, now carrying a
-    // {{ params.code }} instead of a link — see the updated
-    // 02-email-verification.html template.
-    const sendEmail = require("./send-email.js");
-    const fakeReq = { method: "POST", headers: req.headers, body: {
-      templateKey: "verify", to: { email }, params: { code },
-    }};
-    let statusCode = 200, body = null;
-    const fakeRes = {
-      setHeader() {},
-      status(c) { statusCode = c; return this; },
-      json(p) { body = p; return this; },
-      end() { return this; },
-    };
-    await sendEmail(fakeReq, fakeRes);
-    if (statusCode >= 400) {
-      console.error("send-otp: Brevo send failed", body);
-      return res.status(500).json({ error: "Could not send the code email." });
+    // Send DIRECTLY (not via send-email.js): that route reports success even
+    // when Brevo rejected the mail and only queued it — fine for a receipt,
+    // wrong for a sign-up code the person is staring at the screen waiting
+    // for. Here a failed send is reported honestly, with a reason.
+    const { sendEmailFast } = require("./email-shared");
+    const result = await sendEmailFast({ templateKey: "verify", to: { email }, params: { code } });
+    stage(result.ok ? "email sent" : "email FAILED");
+    if (!result.ok) {
+      console.error("send-otp: Brevo send failed:", result.error);
+      await ref.delete().catch(() => {}); // don't make them wait out the cooldown for a code that never left
+      const msg = String(result.error || "");
+      let friendly = "Could not send the code email. Please try again.";
+      if (/BREVO_API_KEY not set|BREVO_TPL_VERIFY not set/.test(msg)) friendly = "Email service is not fully set up yet. Please contact support.";
+      else if (/Brevo 401|Brevo 403/.test(msg)) friendly = "The email service rejected our request. Please contact support.";
+      else if (/Brevo 400/.test(msg)) friendly = "That email address was refused. Check it and try again.";
+      else if (/abort/i.test(msg)) friendly = "The email service is slow right now. Please try again.";
+      return done(502, { error: friendly });
     }
-    return res.status(200).json({ ok: true });
+    return done(200, { ok: true });
   } catch (e) {
-    console.error("send-otp failed", e);
-    return res.status(500).json({ error: "Could not send the code." });
+    console.error("send-otp failed:", e && e.message);
+    return done(500, { error: "Could not send the code." });
   }
 };

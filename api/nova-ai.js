@@ -13,7 +13,7 @@
 // Gemini key-rotation logic now lives in gemini-shared.js (shared with
 // the new Affiliate Assistant, api/affiliate/ai.js) — same behavior as
 // before, just no longer duplicated between the two files.
-const { getApiKeys, callGeminiWithRotation } = require('./gemini-shared');
+const { getApiKeys, callGeminiWithRotation, textOf } = require('./gemini-shared');
 
 /* ============================================================
    IMAGE GROUNDING
@@ -26,7 +26,7 @@ const MAX_PRODUCT_IMAGES = 8;
 const MAX_FEED_IMAGES = 6;
 const MAX_TOTAL_IMAGES = 12;
 const MAX_IMAGE_BYTES = 3 * 1024 * 1024; // 3MB safety cap per image
-const IMAGE_FETCH_TIMEOUT_MS = 4000;
+const IMAGE_FETCH_TIMEOUT_MS = 2500; // images are a bonus — never let them slow the answer
 
 const imageCache = new Map(); // url -> {mime, base64}
 const IMAGE_CACHE_MAX = 300;
@@ -179,11 +179,11 @@ module.exports = async function handler(req, res) {
     const result = await callGeminiWithRotation(keys, requestBody);
 
     if (!result.ok) {
-      console.error("Gemini API error after key rotation:", result.status, result.error);
-      return res.status(200).json({ fallback: true });
+      console.error("Gemini API error after key+model rotation:", result.status, JSON.stringify(result.error));
+      return res.status(200).json({ fallback: true, reason: `gemini_${result.status || 'error'}` });
     }
 
-    const html = result.data.candidates?.[0]?.content?.parts?.[0]?.text || "Sorry, I couldn't generate a response.";
+    const html = textOf(result.data) || "Sorry, I couldn't generate a response.";
     return res.status(200).json({ html });
   } catch (err) {
     console.error("Handler error:", err);

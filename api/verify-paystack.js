@@ -61,7 +61,7 @@ const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const { queueEmailBackground } = require('./email-shared');
 const cjOrderHandler = require('./cj-order');
 const { resolveProductSelection } = require('./product-variants');
-const { resolvePaystackSecretKey } = require('./_paystackMode');
+const { paystackKeyCandidates } = require('./_paystackMode');
 // LEXDEN NOVA CREATOR (Stages D/E/F): creator-product purchases are a
 // second catalog (products/{id}), checked ONLY after the legacy lookup
 // misses, so the proven legacy checkout path is untouched.
@@ -106,16 +106,29 @@ function fsFields(fields) {
 // Fetches `catalog/{docId}` via Firestore's public REST API. Returns null
 // (never throws) on any failure — callers must decide what "couldn't
 // verify" means for their own logic.
-async function getCatalogDoc(docId) {
+// 20s cache: the whole products catalog doc was re-downloaded on every
+// payment (often hundreds of KB). A stale price can only matter if the admin
+// changed it in the last 20s, and the underpayment check below re-reads fresh
+// before it ever rejects, so a cached price can never wrongly fail a payment.
+const CATALOG_TTL_MS = 20 * 1000;
+const catalogCache = new Map(); // docId -> { at, data }
+async function getCatalogDoc(docId, opts = {}) {
+  const hit = catalogCache.get(docId);
+  if (!opts.fresh && hit && Date.now() - hit.at < CATALOG_TTL_MS) return hit.data;
   const url = `https://firestore.googleapis.com/v1/projects/${FIRESTORE_PROJECT}/databases/(default)/documents/catalog/${docId}`;
   try {
-    const r = await fetch(url);
-    if (!r.ok) return null;
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 5000);
+    const r = await fetch(url, { signal: ctl.signal });
+    clearTimeout(timer);
+    if (!r.ok) return hit ? hit.data : null;
     const data = await r.json();
-    if (!data || !data.fields) return null;
-    return fsFields(data.fields);
+    if (!data || !data.fields) return hit ? hit.data : null;
+    const out = fsFields(data.fields);
+    catalogCache.set(docId, { at: Date.now(), data: out });
+    return out;
   } catch {
-    return null;
+    return hit ? hit.data : null; // stale beats nothing
   }
 }
 
@@ -126,10 +139,10 @@ async function getCatalogDoc(docId) {
 // side (missing catalog/settings, unknown product, etc.) — callers treat
 // null as "can't validate" rather than "free", so a lookup failure never
 // accidentally lets a payment through.
-async function getExpectedAmount(productId, currency, variantId) {
+async function getExpectedAmount(productId, currency, variantId, opts = {}) {
   const [productsDoc, settingsDoc] = await Promise.all([
-    getCatalogDoc('products'),
-    getCatalogDoc('settings'),
+    getCatalogDoc('products', opts),
+    getCatalogDoc('settings', opts),
   ]);
   const list = productsDoc && Array.isArray(productsDoc.list) ? productsDoc.list : null;
   const product = list && list.find(p => p && String(p.id) === String(productId));
@@ -342,6 +355,31 @@ function sendBrevoTemplate(templateEnvKeySuffix, to, params) {
   queueEmailBackground({ templateKey, to, params });
 }
 
+// Verifies a reference with Paystack, trying each candidate secret key (a
+// reference exists in exactly one mode). 8s cap per attempt, one quick retry
+// on a network/5xx failure. Never throws.
+async function verifyWithPaystack(reference, keys) {
+  let lastMessage = null;
+  for (const key of keys) {
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const ctl = new AbortController();
+        const timer = setTimeout(() => ctl.abort(), 8000);
+        const r = await fetch(`https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`, { headers: { Authorization: `Bearer ${key}` }, signal: ctl.signal });
+        clearTimeout(timer);
+        if (r.status >= 500) { lastMessage = 'Paystack is having trouble right now.'; continue; }
+        const j = await r.json().catch(() => ({}));
+        if (r.ok && j.status && j.data) return { ok: true, data: j.data };
+        lastMessage = j.message || 'Paystack could not find or verify this transaction.';
+        break; // definitive answer for this key — try the next key
+      } catch (e) {
+        lastMessage = 'Could not reach Paystack right now — this will retry automatically.';
+      }
+    }
+  }
+  return { ok: false, error: lastMessage || 'Paystack could not find or verify this transaction.' };
+}
+
 module.exports = async function handler(req, res) {
   // CORS: index.html is hosted on GitHub Pages and may change host again
   // later, so this allows any origin to POST — the security boundary here
@@ -393,11 +431,13 @@ module.exports = async function handler(req, res) {
   // RENDER_API_KEY. Falls back to the single legacy PAYSTACK_SECRET_KEY
   // when no mode has been set yet, so nothing breaks for an install that
   // hasn't adopted the live/test split.
-  const secretKey = await resolvePaystackSecretKey();
-  if (!secretKey) {
-    console.error('No Paystack secret key resolved — check PAYSTACK_SECRET_KEY_LIVE / PAYSTACK_SECRET_KEY_TEST / PAYSTACK_SECRET_KEY in Render, and catalog/settings.content.paymentMode.');
-    return res.status(500).json({ ok: false, error: 'Payment verification is not configured on the server yet.' });
-  }
+  // SPEED: everything below that does NOT depend on Paystack's answer starts
+  // now, in parallel — key lookup (cached), the catalog price docs (cached),
+  // and the "already confirmed?" order read. Previously these ran one after
+  // another, each a separate network round trip, before AND after Paystack.
+  const keysP = paystackKeyCandidates();
+  getCatalogDoc('products').catch(() => null);
+  getCatalogDoc('settings').catch(() => null);
 
   let db;
   try {
@@ -406,15 +446,28 @@ module.exports = async function handler(req, res) {
     console.error('Firebase Admin init failed:', e.message);
     return res.status(500).json({ ok: false, error: 'Server could not connect to the database.' });
   }
+  const existingP = db.collection('orders').doc(reference).get().catch((e) => { console.error('Firestore existing-order check failed:', e.message); return null; });
+
+  const keys = await keysP;
+  if (!keys.length) {
+    console.error('No Paystack secret key resolved — check PAYSTACK_SECRET_KEY_LIVE / PAYSTACK_SECRET_KEY_TEST / PAYSTACK_SECRET_KEY in Render, and catalog/settings.content.paymentMode.');
+    return res.status(500).json({ ok: false, error: 'Payment verification is not configured on the server yet.' });
+  }
+
+  // Ask Paystack right away (in parallel with the order read). A reference
+  // belongs to exactly one mode, so if the first key says "not found" the
+  // next configured key is tried — a settings hiccup can never block a payment.
+  const paystackP = verifyWithPaystack(reference, keys);
 
   // ---- Idempotency: if this reference was already verified and an order
   // already exists for it, don't re-charge logic or write a duplicate order
   // — just confirm success again. This makes the endpoint safe to call
   // repeatedly, which matters because the client auto-retries pending
-  // payments (see bumpPendingAttempt / removePendingPayment in index.html).
+  // payments and the Paystack webhook may confirm the same reference.
   try {
-    const existing = await db.collection('orders').doc(reference).get();
-    if (existing.exists) {
+    const existing = await existingP;
+    if (existing && existing.exists) {
+      paystackP.catch(() => {}); // not needed
       // Creator-product safety net: the entitlement grant / fulfillment
       // creation below are awaited but deliberately non-fatal to the
       // payment response. Without this, an order whose grant failed once
@@ -455,32 +508,16 @@ module.exports = async function handler(req, res) {
       return res.status(200).json({ ok: true });
     }
   } catch (e) {
-    console.error('Firestore existing-order check failed:', e.message);
-    // Not fatal — fall through and let Paystack verification + the write
-    // below be the source of truth.
+    console.error('existing-order handling failed:', e.message);
+    // Not fatal — fall through; Paystack verification + the write below are the source of truth.
   }
 
-  // ---- Ask Paystack directly whether this reference was really paid.
-  // This is the one call in the whole flow that can be trusted — it uses
-  // the secret key, which only this server (never the browser) has.
-  let paystackData;
-  try {
-    const psRes = await fetch(
-      `https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`,
-      { headers: { Authorization: `Bearer ${secretKey}` } }
-    );
-    const psJson = await psRes.json();
-    if (!psRes.ok || !psJson.status) {
-      return res.status(200).json({
-        ok: false,
-        error: psJson.message || 'Paystack could not find or verify this transaction.',
-      });
-    }
-    paystackData = psJson.data;
-  } catch (e) {
-    console.error('Paystack verify request failed:', e.message);
-    return res.status(200).json({ ok: false, error: 'Could not reach Paystack right now — this will retry automatically.' });
-  }
+  // ---- Paystack's answer (already in flight). This is the one call in the
+  // whole flow that can be trusted — it uses the secret key, which only this
+  // server (never the browser) has.
+  const verdict = await paystackP;
+  if (!verdict.ok) return res.status(200).json({ ok: false, error: verdict.error });
+  const paystackData = verdict.data;
 
   // ---- Check the transaction actually succeeded and matches what the
   // client claims it paid for. Never trust amount/currency/reference from
@@ -505,10 +542,25 @@ module.exports = async function handler(req, res) {
   if (!selection) {
     selection = await getCreatorProductSelection(db, productId, paidCurrency, productName);
   }
+  if (!selection) {
+    // Maybe the product was added/changed within the cache window.
+    selection = await getExpectedAmount(productId, paidCurrency, variantId, { fresh: true });
+  }
   const expectedAmount = selection && selection.price;
   if (expectedAmount !== null && expectedAmount !== undefined) {
     const tolerance = Math.max(1, Math.ceil(expectedAmount * 0.02)); // 2%, min 1 unit
-    if (amountMajor < expectedAmount - tolerance) {
+    let blocked = amountMajor < expectedAmount - tolerance;
+    if (blocked && !selection.creator) {
+      // Re-read the catalog FRESH before rejecting: the cached price may be
+      // up to 20s old (e.g. the admin just lowered it). Never reject on a stale read.
+      const fresh = await getExpectedAmount(productId, paidCurrency, variantId, { fresh: true });
+      if (fresh && fresh.price !== null && fresh.price !== undefined) {
+        selection = fresh;
+        const t2 = Math.max(1, Math.ceil(fresh.price * 0.02));
+        blocked = amountMajor < fresh.price - t2;
+      }
+    }
+    if (blocked) {
       console.warn(
         `Underpayment blocked: ref=${reference} product=${productId} variant=${variantId || 'legacy'} ` +
         `paid=${amountMajor} ${paidCurrency} expected~=${expectedAmount} ${paidCurrency}`
@@ -533,7 +585,10 @@ module.exports = async function handler(req, res) {
   const buyerEmail = email || paystackData.customer?.email;
 
   try {
-    await db.collection('orders').doc(reference).set({
+    // create() (not set()): if the browser's verify call and the Paystack
+    // webhook race, exactly ONE wins the write and runs the side effects
+    // (emails, affiliate, creator credit); the other just confirms.
+    await db.collection('orders').doc(reference).create({
       uid: uid || null,
       email: buyerEmail || null,
       productId,
@@ -562,6 +617,9 @@ module.exports = async function handler(req, res) {
       } : {}),
     });
   } catch (e) {
+    if (e && (e.code === 6 || /ALREADY_EXISTS/i.test(String(e.message)))) {
+      return res.status(200).json({ ok: true }); // the other request is finishing this order
+    }
     console.error('Firestore order write failed:', e.message);
     return res.status(500).json({ ok: false, error: 'Payment verified but the order could not be saved — contact support with this reference.' });
   }
@@ -610,6 +668,12 @@ module.exports = async function handler(req, res) {
       amount: `${paidCurrency} ${amountMajor.toLocaleString()}`,
       payment_status: 'Paid',
       order_date: orderDate,
+      // Marketplace (creator) orders: lets the v2 template say what happens
+      // next. Harmless extras for the legacy template (unused params).
+      ...(selection.creator ? {
+        delivery_type: selection.creator.offeringType === 'PHYSICAL_PRODUCT' ? 'PHYSICAL' : 'DIGITAL',
+        ...(selection.creator.processingDays ? { processing_days: String(selection.creator.processingDays) } : {}),
+      } : {}),
     });
   }
   sendBrevoTemplate('BREVO_TPL_ADMIN', { email: process.env.ADMIN_NOTIFY_EMAIL || 'lexdendigital@gmail.com' }, {

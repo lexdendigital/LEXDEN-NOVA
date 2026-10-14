@@ -33,30 +33,57 @@ function fsFields(fields) {
   return out;
 }
 
-async function getPaymentMode() {
+// 30s cache + stale-on-error: this runs on EVERY verification, and a public
+// REST round trip to Firestore each time was pure latency. If Firestore is
+// briefly unreachable the last known mode is used instead of silently
+// flipping to the legacy key.
+const MODE_TTL_MS = 30 * 1000;
+let modeCache = { at: 0, mode: undefined };
+
+async function getPaymentMode(opts = {}) {
   if (!FIRESTORE_PROJECT) return null;
+  const now = Date.now();
+  if (!opts.fresh && modeCache.mode !== undefined && now - modeCache.at < MODE_TTL_MS) return modeCache.mode;
   try {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 3000);
     const url = `https://firestore.googleapis.com/v1/projects/${FIRESTORE_PROJECT}/databases/(default)/documents/catalog/settings`;
-    const r = await fetch(url);
-    if (!r.ok) return null;
+    const r = await fetch(url, { signal: ctl.signal });
+    clearTimeout(timer);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
     const data = await r.json();
-    if (!data || !data.fields) return null;
-    const content = fsFields(data.fields).content;
+    const content = data && data.fields ? fsFields(data.fields).content : null;
     const mode = content && content.paymentMode;
-    return mode === 'live' || mode === 'test' ? mode : null;
+    const resolved = mode === 'live' || mode === 'test' ? mode : null;
+    modeCache = { at: now, mode: resolved };
+    return resolved;
   } catch {
-    return null;
+    return modeCache.mode !== undefined ? modeCache.mode : null; // stale beats wrong
   }
+}
+
+function keyForMode(mode) {
+  if (mode === 'live') return process.env.PAYSTACK_SECRET_KEY_LIVE || process.env.PAYSTACK_SECRET_KEY || null;
+  if (mode === 'test') return process.env.PAYSTACK_SECRET_KEY_TEST || process.env.PAYSTACK_SECRET_KEY || null;
+  return process.env.PAYSTACK_SECRET_KEY || null;
 }
 
 /** Resolves the Paystack SECRET key to use right now. Legacy-safe: if no
  * mode has ever been set in Firestore, behaves exactly like the old
  * single-PAYSTACK_SECRET_KEY code did. */
 async function resolvePaystackSecretKey() {
-  const mode = await getPaymentMode();
-  if (mode === 'live') return process.env.PAYSTACK_SECRET_KEY_LIVE || process.env.PAYSTACK_SECRET_KEY || null;
-  if (mode === 'test') return process.env.PAYSTACK_SECRET_KEY_TEST || process.env.PAYSTACK_SECRET_KEY || null;
-  return process.env.PAYSTACK_SECRET_KEY || null;
+  return keyForMode(await getPaymentMode());
 }
 
-module.exports = { getPaymentMode, resolvePaystackSecretKey };
+/** Every distinct secret key configured (mode key first). Used when the mode
+ * can't be read: a reference belongs to exactly one mode, so trying each key
+ * is safe and means a Firestore hiccup can never block a payment. */
+async function paystackKeyCandidates() {
+  const first = await resolvePaystackSecretKey();
+  const all = [first, process.env.PAYSTACK_SECRET_KEY_LIVE, process.env.PAYSTACK_SECRET_KEY_TEST, process.env.PAYSTACK_SECRET_KEY].filter(Boolean);
+  return [...new Set(all)];
+}
+
+function invalidatePaymentModeCache() { modeCache = { at: 0, mode: undefined }; }
+
+module.exports = { invalidatePaymentModeCache, getPaymentMode, resolvePaystackSecretKey, paystackKeyCandidates, keyForMode };
