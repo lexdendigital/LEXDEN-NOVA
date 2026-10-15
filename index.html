@@ -6595,6 +6595,9 @@ function screenCreator(){
   const status = d && d.status;
 
   if(!status || status==='NOT_APPLIED'){
+    // A type has been picked on the intro screen: show the form (previously
+    // the intro was returned again, so the buttons looked dead).
+    if(creatorForm && creatorForm.creatorType) return screenCreatorForm(d || {});
     return screenCreatorIntro();
   }
   if(status==='APPLICATION_DRAFT' || status==='CHANGES_REQUESTED'){
