@@ -96,7 +96,7 @@ function buildHome({ creator, priv, products, sales, fulfillments, unreadNotific
   return {
     creator: { displayName: (creator && (creator.displayName || creator.storeName)) || null, status: (creator && creator.status) || null },
     money: {
-      balanceAvailable: round2(priv && priv.balanceAvailable), totalEarned: round2(priv && priv.totalEarned), totalWithdrawn: round2(priv && priv.totalWithdrawn),
+      balanceAvailable: round2(priv && priv.balanceAvailable), balancePending: round2(priv && priv.balancePending), totalEarned: round2(priv && priv.totalEarned), totalWithdrawn: round2(priv && priv.totalWithdrawn),
       hasPayoutAccount: !!(priv && priv.payoutAccount && priv.payoutAccount.accountNumber),
     },
     products: { total: (products || []).length, byStatus, needAttention: (products || []).filter((p) => ['REJECTED', 'CHANGES_REQUESTED', 'PAUSED'].includes(p.status)).length },

@@ -285,6 +285,12 @@ async function reconciliationJob(db, ctx) {
   return out;
 }
 
+// ------------------------------------------------------------- earnings holds
+async function holdsJob(db, ctx) {
+  const { releaseDueHolds } = require('../creator/ledger');
+  return releaseDueHolds(db, ctx.nowMs, ctx.limit || 200);
+}
+
 // ------------------------------------------------------------- email queue
 async function emailQueueJob(db, ctx) {
   const { callHandler } = require('../../mcp/lib/callHandler');
@@ -299,7 +305,8 @@ const JOBS = {
   links: { run: linkHealthJob, minIntervalMs: 60 * 60 * 1000 },
   sla: { run: slaJob, minIntervalMs: 30 * 60 * 1000 },
   reconcile: { run: reconciliationJob, minIntervalMs: 22 * 60 * 60 * 1000 },
+  holds: { run: holdsJob, minIntervalMs: 15 * 60 * 1000 },
   emailQueue: { run: emailQueueJob, minIntervalMs: 5 * 60 * 1000 },
 };
 
-module.exports = { JOBS, supplierHealthJob, cjOrderJob, linkHealthJob, slaJob, reconciliationJob, emailQueueJob, checkProductLink, pauseProduct };
+module.exports = { JOBS, supplierHealthJob, cjOrderJob, linkHealthJob, slaJob, reconciliationJob, holdsJob, emailQueueJob, checkProductLink, pauseProduct };

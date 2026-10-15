@@ -37,6 +37,7 @@ function toPublicListing(product, creator) {
     id: product.id,
     sellerId: product.creatorId,
     sellerName: creator.displayName || 'Creator',
+    sellerUsername: typeof creator.username === 'string' ? creator.username : null,
     sellerVerified: !!creator.verifiedBusiness,
     sellerImage: typeof creator.profileImageUrl === 'string' && /^https:\/\//i.test(creator.profileImageUrl) ? creator.profileImageUrl : null,
     offeringType: s.offeringType || null,

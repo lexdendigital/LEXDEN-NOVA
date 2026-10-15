@@ -33,7 +33,7 @@ module.exports = async function handler(req, res) {
       .get();
     const items = snap.docs.map(d => {
       const v = d.data();
-      return { id: d.id, productId: v.productId, productTitle: v.productTitle || null, grantedAt: v.grantedAt, price: v.price, currency: v.currency };
+      return { id: d.id, orderId: v.orderId || null, productId: v.productId, productTitle: v.productTitle || null, grantedAt: v.grantedAt, price: v.price, currency: v.currency };
     });
     return ok(res, { entitlements: items });
   } catch (e) {

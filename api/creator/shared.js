@@ -13,7 +13,17 @@ const { assertSellerNotBlocked } = require('./state-machine');
 // same Firebase Admin verifyIdToken() call underneath.
 const requireAuth = requireAffiliateAuth;
 
+// Stage K: the ADMIN MCP has already verified the admin through OAuth and
+// re-checks isAdminEmail on every request, so it can hand creator-admin handlers
+// a request carrying TRUSTED_ADMIN (a Symbol: HTTP clients can never forge it).
+// The email is re-checked here too. Everything after identity is unchanged.
+const TRUSTED_ADMIN = Symbol('lexden.trustedAdmin');
+
 async function requireAdminAuth(req) {
+  const trusted = req && req[TRUSTED_ADMIN];
+  if (trusted && typeof trusted.uid === 'string' && trusted.uid && isAdminEmail(trusted.email)) {
+    return { uid: trusted.uid, email: trusted.email };
+  }
   const decoded = await requireAuth(req);
   if (!isAdminEmail(decoded.email)) {
     const e = new Error('Not authorized.');
@@ -132,7 +142,7 @@ function fail(res, err) {
 module.exports = {
   getDb, getAuthAdmin, getFirebaseBucket, FieldValue, setCors,
   requireAuth, requireAdminAuth, isAdminEmail,
-  getCreatorDoc, getApplicationDoc, getPrivateDoc, requireActiveCreator, TRUSTED_CREATOR,
+  getCreatorDoc, getApplicationDoc, getPrivateDoc, requireActiveCreator, TRUSTED_CREATOR, TRUSTED_ADMIN,
   writeCreatorAuditLog, ok, fail,
   getProductDoc, getVersionDoc, writeProductAuditLog,
 };

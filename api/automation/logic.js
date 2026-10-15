@@ -53,15 +53,22 @@ function pickDue(items, lastField, gapMs, nowMs, limit) {
 function reconcileCreator({ priv, sales, withdrawals }) {
   const round2 = (n) => Math.round(n * 100) / 100;
   const issues = [];
-  const earned = round2(sales.reduce((s, x) => s + (Number(x.creatorEarning) || 0), 0));
+  const sum = (list) => round2(list.reduce((s, x) => s + (Number(x.creatorEarning) || 0), 0));
+  // A sale with no status is an old-style, immediately available sale.
+  const statusOf = (x) => x.status || 'available';
+  const availableEarned = sum(sales.filter((x) => statusOf(x) === 'available'));
+  const pendingEarned = sum(sales.filter((x) => statusOf(x) === 'held' || statusOf(x) === 'disputed'));
+  const earned = round2(availableEarned + pendingEarned); // refunded sales no longer count as earned
   const withdrawn = round2(withdrawals.filter((w) => w.status !== 'rejected').reduce((s, w) => s + (Number(w.amountRequested) || 0), 0));
   const totalEarned = Number((priv && priv.totalEarned) || 0);
   const balance = Number((priv && priv.balanceAvailable) || 0);
-  const expectedBalance = round2(earned - withdrawn);
+  const pending = Number((priv && priv.balancePending) || 0);
+  const expectedBalance = round2(availableEarned - withdrawn);
   if (Math.abs(totalEarned - earned) > BALANCE_TOLERANCE) issues.push({ code: 'TOTAL_EARNED_MISMATCH', stored: totalEarned, computed: earned });
   if (Math.abs(balance - expectedBalance) > BALANCE_TOLERANCE) issues.push({ code: 'BALANCE_MISMATCH', stored: balance, computed: expectedBalance });
+  if (Math.abs(pending - pendingEarned) > BALANCE_TOLERANCE) issues.push({ code: 'PENDING_MISMATCH', stored: pending, computed: pendingEarned });
   if (balance < -BALANCE_TOLERANCE) issues.push({ code: 'NEGATIVE_BALANCE', stored: balance, computed: expectedBalance });
-  return { ok: issues.length === 0, issues, earned, withdrawn, expectedBalance };
+  return { ok: issues.length === 0, issues, earned, withdrawn, expectedBalance, pendingEarned };
 }
 
 /** Order-level ledger/fulfillment completeness. Pure over already-loaded sets. */
