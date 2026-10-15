@@ -482,6 +482,16 @@ service cloud.firestore {
       allow read: if isAdmin() || (isSignedIn() && resource.data.creatorId == request.auth.uid);
       allow write: if false;
     }
+    // Stage K: disputes hold the buyer's email and private messages, so they are
+    // admin-read only; buyers and creators reach them through /api/creator-disputes.
+    match /creatorDisputes/{id} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+    // Username claims: server only.
+    match /creatorUsernames/{name} {
+      allow read, write: if false;
+    }
     // creatorWithdrawals/{id} — payout requests (mirrors affiliateWithdrawals).
     match /creatorWithdrawals/{withdrawalId} {
       allow read: if isAdmin() || (isSignedIn() && resource.data.creatorId == request.auth.uid);

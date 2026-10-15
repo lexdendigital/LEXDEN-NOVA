@@ -1143,6 +1143,8 @@ img{max-width:100%;display:block;}
     transition: border-color 0.15s var(--ease-sharp), box-shadow 0.15s var(--ease-sharp), background 0.2s var(--ease-sharp);
   }
   .form-field textarea{resize:vertical;min-height:70px;}
+  .input{width:100%;box-sizing:border-box;padding:9px 11px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13.5px;font-family:inherit;}
+  textarea.input{resize:vertical;min-height:70px;}
   .form-field input:focus,.form-field select:focus,.form-field textarea:focus{
     outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(0,217,255,0.15);
   }
@@ -2656,7 +2658,7 @@ function mapCreatorListing(l){
       image: images[0] || '', gallery: images, description: l.description || '', specs,
       tags: [], seller: l.sellerName || 'Creator', status: 'published',
       affiliateLink: '#', productType: l.physical ? 'PHYSICAL' : 'DIGITAL',
-      _creator: { price: l.isFree ? 0 : l.price, currency: cur, sellerId: l.sellerId, verified: !!l.sellerVerified, offeringType: l.offeringType, inStock: l.inStock !== false },
+      _creator: { price: l.isFree ? 0 : l.price, currency: cur, sellerId: l.sellerId, sellerUsername: l.sellerUsername || null, verified: !!l.sellerVerified, offeringType: l.offeringType, inStock: l.inStock !== false },
     };
     if(l.physical){
       prod.physical = {
@@ -3635,12 +3637,191 @@ function screenLibrary(){
       <div style="display:flex;justify-content:space-between;gap:8px;"><strong>${escapeHtml(f.productTitle||'Order')}</strong><span class="chip" style="font-size:10px;">${escapeHtml(f.status||'')}</span></div>
       ${f.carrier||f.trackingNumber?`<div class="text-2 small" style="margin-top:6px;">${escapeHtml(f.carrier||'')} ${escapeHtml(f.trackingNumber||'')}${f.trackingUrl&&/^https?:\/\//i.test(f.trackingUrl)?` · <a href="${escapeHtml(f.trackingUrl)}" target="_blank" rel="noopener" style="color:var(--accent);">Track</a>`:''}</div>`:'<div class="text-2 small" style="margin-top:6px;">The seller is preparing your order.</div>'}
       ${f.status==='SHIPPED'?`<button class="btn btn-primary btn-sm" style="margin-top:8px;" onclick="confirmShipmentDelivery('${escapeHtml(f.id)}', this)">I received it</button>`:''}
+      <button class="btn btn-outline btn-sm" style="margin-top:8px;" onclick="rpOpen('${escapeHtml(f.id)}','${escapeHtml(String(f.productTitle||'').replace(/'/g,''))}')">Report a problem</button>
+      ${rp.orderId && rp.orderId===f.id ? rpForm() : ''}
     </div>`).join('') : '';
   return `<div class="screen"><h1 class="screen-title">My Library</h1>
     ${items.length ? items.map(i=>`<div class="card" style="padding:14px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;gap:10px;">
       <div><div style="font-weight:700;">${escapeHtml(i.productTitle||'Purchase')}</div><div class="text-2 small">Digital purchase</div></div>
-      <button class="btn btn-primary btn-sm" onclick="openLibraryItem('${escapeHtml(i.productId)}', this)">Download / Open</button></div>`).join('') : '<div class="card" style="padding:18px;text-align:center;" ><div class="text-2 small">Nothing here yet. Digital products you buy from creators will appear here.</div></div>'}
+      <div style="display:flex;flex-direction:column;gap:6px;"><button class="btn btn-primary btn-sm" onclick="openLibraryItem('${escapeHtml(i.productId)}', this)">Download / Open</button>${i.orderId?`<button class="btn btn-outline btn-sm" onclick="rpOpen('${escapeHtml(i.orderId)}','${escapeHtml(String(i.productTitle||'').replace(/'/g,''))}')">Report a problem</button>`:''}</div></div>${rp.orderId && rp.orderId===i.orderId ? rpForm() : ''}`).join('') : '<div class="card" style="padding:18px;text-align:center;" ><div class="text-2 small">Nothing here yet. Digital products you buy from creators will appear here.</div></div>'}
     ${shipHtml}
+    ${libraryDisputesHtml()}
+  </div>`;
+}
+
+/* =========================================================
+   STAGE K — seller pages, creator "More" tab, buyer disputes
+   All dynamic text goes through escapeHtml.
+   ========================================================= */
+// ---------- public seller page (#seller/<username> or #seller/id:<uid>) ----------
+window.__sellerCache = window.__sellerCache || {};
+function sellerHash(c){ return c && c.sellerUsername ? '#seller/'+encodeURIComponent(c.sellerUsername) : (c && c.sellerId ? '#seller/id:'+encodeURIComponent(c.sellerId) : ''); }
+async function fetchSeller(key){
+  const e = window.__sellerCache[key] = window.__sellerCache[key] || { loading:true };
+  e.loading = true;
+  try{
+    const qs = key.startsWith('id:') ? 'id='+encodeURIComponent(key.slice(3)) : 'u='+encodeURIComponent(key);
+    const r = await withTimeout(fetch(API_BASE+'/api/creator-seller?'+qs, {cache:'no-store'}), 15000, 'Loading this seller timed out.');
+    const d = await r.json();
+    if(d && d.ok){ e.data = d.data; e.error = ''; e.notFound = false; }
+    else { e.notFound = r.status===404; e.error = (d && d.error && d.error.message) || 'Could not load this seller.'; }
+  }catch(err){ e.error = err.message || 'Could not reach the server.'; }
+  e.loading = false;
+  if(location.hash.startsWith('#seller/')) render();
+}
+function screenSeller(rawKey){
+  let key = ''; try{ key = decodeURIComponent(rawKey||''); }catch(e){ key = rawKey||''; }
+  const e = window.__sellerCache[key];
+  const back = `<div style="margin-bottom:10px;"><button class="btn btn-outline btn-sm" onclick="history.length>1?history.back():navigate('#home')">← Back</button></div>`;
+  if(!e){ fetchSeller(key); return `<div class="screen">${back}<div class="text-2 small" style="padding:20px;text-align:center;">Loading seller…</div></div>`; }
+  if(e.loading && !e.data) return `<div class="screen">${back}<div class="text-2 small" style="padding:20px;text-align:center;">Loading seller…</div></div>`;
+  if(e.notFound) return `<div class="screen">${back}<div class="card" style="padding:18px;text-align:center;">This seller page is not available.</div></div>`;
+  if(!e.data) return `<div class="screen">${back}<div class="card" style="padding:16px;"><p class="text-2 small" style="color:var(--error);">⚠️ ${escapeHtml(e.error||'Could not load.')}</p><button class="btn btn-outline" onclick="delete window.__sellerCache['${escapeHtml(key).replace(/'/g,'')}'];render();">Retry</button></div></div>`;
+  const s = e.data.seller;
+  const mapped = (e.data.listings||[]).map(mapCreatorListing).filter(Boolean);
+  // make sure the cards can open their detail page
+  window.__creatorProducts = window.__creatorProducts || [];
+  mapped.forEach(m=>{ if(!window.__creatorProducts.some(x=>x.id===m.id)) window.__creatorProducts.push(m); });
+  return `<div class="screen">${back}
+    <div class="card" style="padding:18px;margin-bottom:14px;text-align:center;">
+      ${s.image?`<img src="${escapeHtml(s.image)}" alt="" style="width:72px;height:72px;border-radius:50%;object-fit:cover;margin-bottom:8px;">`:`<div class="avatar" style="margin:0 auto 8px;">${escapeHtml((s.displayName||'LN').slice(0,2).toUpperCase())}</div>`}
+      <h1 class="screen-title" style="margin:0;">${escapeHtml(s.displayName)}${s.verified?' <span class="chip" style="font-size:10px;">verified</span>':''}</h1>
+      ${s.username?`<div class="text-2 small">@${escapeHtml(s.username)}</div>`:''}
+      ${s.tagline?`<div style="margin-top:6px;">${escapeHtml(s.tagline)}</div>`:''}
+      ${s.bio?`<div class="text-2 small" style="margin-top:8px;white-space:pre-wrap;">${escapeHtml(s.bio)}</div>`:''}
+      <div class="text-2 small" style="margin-top:8px;">${mapped.length} listing${mapped.length===1?'':'s'}</div>
+    </div>
+    ${mapped.length ? `<div class="grid-products">${mapped.map(p=>productCard(p)).join('')}</div>` : '<div class="card" style="padding:18px;text-align:center;"><div class="text-2 small">No listings right now.</div></div>'}
+  </div>`;
+}
+
+// ---------- buyer: report a problem + my disputes ----------
+const DISPUTE_REASONS = [['NOT_AS_DESCRIBED','Not as described'],['NOT_RECEIVED','I did not receive it'],['FILE_PROBLEM','File or link problem'],['OTHER','Something else']];
+let rp = { orderId:null, title:'', reason:'NOT_AS_DESCRIBED', details:'', busy:false, err:'' };
+window.__myDisputes = null;
+async function fetchMyDisputes(force){
+  if(window.__myDisputes && !force) return;
+  try{ window.__myDisputes = (await capi('/api/creator-disputes?role=buyer')).disputes || []; }
+  catch(e){ window.__myDisputes = []; }
+  if(location.hash === '#library') render();
+}
+function rpOpen(orderId, title){ rp = { orderId, title:title||'', reason:'NOT_AS_DESCRIBED', details:'', busy:false, err:'' }; render(); }
+function rpCancel(){ rp.orderId = null; render(); }
+function rpField(k, v){ rp[k] = v; }
+async function rpSubmit(){
+  if(rp.busy) return;
+  rp.busy = true; rp.err = ''; render();
+  try{
+    await capi('/api/creator-disputes', { action:'open', orderId:rp.orderId, reason:rp.reason, details:rp.details });
+    toast('Your report was sent. The seller and our team will look at it.', 'success');
+    rp.orderId = null; window.__myDisputes = null; fetchMyDisputes(true);
+  }catch(e){ rp.err = creatorErrText(e); }
+  rp.busy = false; render();
+}
+function rpForm(){
+  return `<div class="card" style="padding:14px;margin:0 0 10px;border:1px solid var(--warn,#d4af37);">
+    <div style="font-weight:700;margin-bottom:6px;">Report a problem: ${escapeHtml(rp.title)}</div>
+    <div class="text-2 small" style="margin-bottom:8px;">Use this within 14 days of buying. The seller's earning for this order is put on hold until our team decides.</div>
+    <select class="input" onchange="rpField('reason',this.value)">${DISPUTE_REASONS.map(r=>`<option value="${r[0]}" ${rp.reason===r[0]?'selected':''}>${escapeHtml(r[1])}</option>`).join('')}</select>
+    <textarea class="input" rows="4" maxlength="2000" placeholder="Tell us what went wrong…" style="margin-top:8px;" oninput="rpField('details',this.value)">${escapeHtml(rp.details)}</textarea>
+    ${rp.err?`<div class="small" style="color:var(--error);margin-top:6px;">⚠️ ${escapeHtml(rp.err)}</div>`:''}
+    <div style="display:flex;gap:8px;margin-top:8px;"><button class="btn btn-primary btn-sm" ${rp.busy?'disabled':''} onclick="rpSubmit()">${rp.busy?'Sending…':'Send report'}</button><button class="btn btn-outline btn-sm" onclick="rpCancel()">Cancel</button></div></div>`;
+}
+const DISPUTE_STATUS_TEXT = { OPEN:'Open', RESOLVED_REFUND:'Refund approved', RESOLVED_REJECTED:'Closed (no refund)' };
+function disputeThreadHtml(d, role){
+  const msgs = (d.messages||[]).map(m=>`<div style="margin:6px 0;padding:8px 10px;border-radius:10px;background:var(--surface-2,rgba(128,128,128,.12));"><div class="text-2 small" style="font-weight:700;">${escapeHtml(m.by==='buyer'?'Buyer':m.by==='creator'?'Seller':'LEXDEN NOVA team')}</div><div style="white-space:pre-wrap;font-size:14px;">${escapeHtml(m.text)}</div></div>`).join('');
+  const reply = d.status==='OPEN' ? `<div style="display:flex;gap:6px;margin-top:6px;"><input id="dmsg_${escapeHtml(d.id)}" class="input" maxlength="2000" placeholder="Write a reply…" style="flex:1;"><button class="btn btn-primary btn-sm" onclick="disputeReply('${escapeHtml(d.id)}','${role}')">Send</button></div>` : '';
+  return `<div class="card" style="padding:12px;margin-bottom:10px;">
+    <div style="display:flex;justify-content:space-between;gap:8px;"><strong>${escapeHtml(d.productTitle||'Order')}</strong><span class="chip" style="font-size:10px;">${escapeHtml(DISPUTE_STATUS_TEXT[d.status]||d.status||'')}</span></div>
+    <div class="text-2 small">${escapeHtml((DISPUTE_REASONS.find(r=>r[0]===d.reason)||[0,d.reason])[1])}</div>
+    ${msgs}${d.status!=='OPEN'&&d.resolutionNote?`<div class="text-2 small" style="margin-top:6px;">Decision: ${escapeHtml(d.resolutionNote)}</div>`:''}${reply}</div>`;
+}
+async function disputeReply(id, role){
+  const el = document.getElementById('dmsg_'+id); const text = el ? el.value.trim() : '';
+  if(text.length < 2){ toast('Write a message first', 'error'); return; }
+  try{
+    await capi('/api/creator-disputes', { action:'message', disputeId:id, text });
+    toast('Reply sent', 'success');
+    if(role==='creator'){ cx.disputes = null; cxLoad(true); } else { window.__myDisputes = null; fetchMyDisputes(true); }
+  }catch(e){ toast(creatorErrText(e), 'error'); }
+}
+function libraryDisputesHtml(){
+  if(!window.__myDisputes){ fetchMyDisputes(); return ''; }
+  const list = window.__myDisputes;
+  return list.length ? `<h2 style="font-size:16px;margin:18px 0 8px;">My reports</h2>`+list.map(d=>disputeThreadHtml(d,'buyer')).join('') : '';
+}
+
+// ---------- creator: More tab ----------
+let cx = { profile:null, policies:null, notes:null, disputes:null, loading:false, error:'', info:'', busy:false, form:null };
+async function cxLoad(force){
+  if(cx.loading) return;
+  if(!force && cx.profile && cx.notes && cx.disputes) return;
+  cx.loading = true; cx.error = '';
+  try{
+    const [p, n, d] = await Promise.all([ capi('/api/creator-profile'), capi('/api/creator-notifications'), capi('/api/creator-disputes?role=creator') ]);
+    cx.profile = p.profile; cx.policies = p.policies; cx.notes = n; cx.disputes = d.disputes || [];
+    if(!cx.form) cx.form = { username:p.profile.username||'', tagline:p.profile.tagline||'', bio:p.profile.bio||'' };
+  }catch(e){ cx.error = creatorErrText(e); }
+  cx.loading = false;
+  if(location.hash==='#creator' && creatorTab==='more') render();
+}
+function cxField(k,v){ cx.form[k] = v; }
+async function cxSaveProfile(){
+  if(cx.busy) return; cx.busy = true; cx.error = ''; cx.info = ''; render();
+  try{
+    const r = await capi('/api/creator-profile', { action:'update', username:cx.form.username, tagline:cx.form.tagline, bio:cx.form.bio });
+    cx.profile = r.profile; cx.info = 'Saved.';
+  }catch(e){ cx.error = creatorErrText(e); }
+  cx.busy = false; render();
+}
+async function cxMarkRead(){
+  try{ await capi('/api/creator-notifications', { action:'mark_read' }); cx.notes = null; creatorHome.data = null; cxLoad(true); }catch(e){ toast(creatorErrText(e),'error'); }
+}
+function cxCopyLink(){
+  const u = cx.profile && cx.profile.username ? location.origin + location.pathname + '#seller/' + cx.profile.username : '';
+  if(!u) return;
+  try{ navigator.clipboard.writeText(u); toast('Link copied', 'success'); }catch(e){ toast(u, 'info'); }
+}
+function creatorMoreTab(){
+  if(!cx.profile && !cx.error){ cxLoad(); return '<div class="text-2 small" style="padding:20px;text-align:center;">Loading…</div>'; }
+  if(cx.error && !cx.profile) return `<div class="card" style="padding:16px;"><p class="text-2 small" style="color:var(--error);">⚠️ ${escapeHtml(cx.error)}</p><button class="btn btn-outline" onclick="cx.error='';cxLoad(true);render();">Retry</button></div>`;
+  const p = cx.profile, pol = cx.policies || {}, f = cx.form || {};
+  const notes = (cx.notes && cx.notes.notifications) || [];
+  const unread = cx.notes ? cx.notes.unreadCount : 0;
+  const open = (cx.disputes||[]).filter(d=>d.status==='OPEN').length;
+  const aoDt = v => { try{ return v ? new Date(v).toLocaleString() : ''; }catch(e){ return ''; } };
+  return `
+  <div class="card" style="padding:16px;margin-bottom:14px;">
+    <h3 style="font-size:15px;margin-bottom:8px;">Public profile</h3>
+    <div class="text-2 small" style="margin-bottom:8px;">${escapeHtml(p.displayName)}${p.verified?' · verified':''}. Your name and status come from your approved application.</div>
+    <div class="form-field"><label>Username (your public page link)</label><input class="input" maxlength="25" value="${escapeHtml(f.username)}" placeholder="e.g. ada_books" oninput="cxField('username',this.value)"></div>
+    <div class="form-field"><label>Tagline</label><input class="input" maxlength="100" value="${escapeHtml(f.tagline)}" oninput="cxField('tagline',this.value)"></div>
+    <div class="form-field"><label>About you</label><textarea class="input" rows="4" maxlength="500" oninput="cxField('bio',this.value)">${escapeHtml(f.bio)}</textarea></div>
+    ${cx.error?`<div class="small" style="color:var(--error);margin-bottom:6px;">⚠️ ${escapeHtml(cx.error)}</div>`:''}${cx.info?`<div class="small" style="color:#2ee6a6;margin-bottom:6px;">✓ ${escapeHtml(cx.info)}</div>`:''}
+    <div style="display:flex;gap:8px;flex-wrap:wrap;"><button class="btn btn-primary btn-sm" ${cx.busy?'disabled':''} onclick="cxSaveProfile()">${cx.busy?'Saving…':'Save profile'}</button>
+    ${p.username?`<button class="btn btn-outline btn-sm" onclick="navigate('#seller/${escapeHtml(p.username)}')">View my page</button><button class="btn btn-outline btn-sm" onclick="cxCopyLink()">Copy link</button>`:''}</div>
+  </div>
+
+  <div class="card" style="padding:16px;margin-bottom:14px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;"><h3 style="font-size:15px;">Notifications ${unread?`<span class="chip" style="font-size:10px;">${unread} new</span>`:''}</h3>${unread?`<button class="btn btn-outline btn-sm" onclick="cxMarkRead()">Mark all read</button>`:''}</div>
+    ${notes.length ? notes.slice(0,30).map(n=>`<div style="padding:8px 0;border-bottom:1px solid var(--border,#2a2a2a);${n.read?'opacity:.65;':''}"><div style="font-weight:${n.read?'500':'700'};">${escapeHtml(n.title||n.type||'Notice')}</div><div class="text-2 small">${escapeHtml(String(n.message||n.detail||'').slice(0,300))}</div><div class="text-2 small" style="opacity:.6;">${escapeHtml(aoDt(n.createdAtMs))}</div></div>`).join('') : '<div class="text-2 small" style="margin-top:8px;">Nothing yet.</div>'}
+  </div>
+
+  <div class="card" style="padding:16px;margin-bottom:14px;">
+    <h3 style="font-size:15px;margin-bottom:8px;">Disputes ${open?`<span class="chip" style="font-size:10px;">${open} open</span>`:''}</h3>
+    ${(cx.disputes||[]).length ? cx.disputes.map(d=>disputeThreadHtml(d,'creator')).join('') : '<div class="text-2 small">No disputes. 🎉</div>'}
+  </div>
+
+  <div class="card" style="padding:16px;">
+    <h3 style="font-size:15px;margin-bottom:8px;">Selling policies</h3>
+    <div class="text-2 small" style="line-height:1.7;">
+      • Platform fee: <b>${escapeHtml(String(pol.platformFeePct))}%</b> of each sale.<br>
+      • Payouts: minimum <b>${cwNaira(pol.minWithdrawalNGN)}</b>, withdrawal fee <b>${escapeHtml(String(pol.withdrawalFeePct))}%</b>, one request every <b>${escapeHtml(String(pol.withdrawalCooldownDays))}</b> days (Sundays not counted). Every payout is approved by our team.<br>
+      • Earnings hold: ${pol.holdDays ? `new sales are held for <b>${escapeHtml(String(pol.holdDays))} day(s)</b> before you can withdraw them.` : 'new sales are withdrawable immediately.'}<br>
+      • Buyers can open a dispute within <b>${escapeHtml(String(pol.disputeWindowDays))} days</b>. The earning for that order is frozen until our team decides. If a refund is approved, that earning is reversed.<br>
+      • Digital items must match their description; physical orders need tracking and are delivered within your stated processing time.<br>
+      • Suspended or restricted sellers' listings are hidden from the store.
+    </div>
   </div>`;
 }
 
@@ -4381,6 +4562,8 @@ function render(){
     body = screenService();
   } else if(hash === '#creator'){
     body = screenCreator();
+  } else if(hash.startsWith('#seller/')){
+    body = screenSeller(hash.slice(8));
   } else if(hash === '#library'){
     body = screenLibrary();
   } else if(hash === '#wishlist'){
@@ -5520,7 +5703,7 @@ function screenProductDetail(id){
       <h3>About the seller</h3>
       <div class="flex gap-8" style="align-items:center;">
         <div class="avatar">${(p.seller||'LN').slice(0,2).toUpperCase()}</div>
-        <div><div style="font-weight:600;font-size:13.5px;">${escapeHtml(p.seller||'Lexden Partner')}</div>${hasAdminAffiliateLink(p) ? '<div class="text-2 small">Verified affiliate partner</div>' : ''}</div>
+        <div><div style="font-weight:600;font-size:13.5px;">${escapeHtml(p.seller||'Lexden Partner')}</div>${p._creator && sellerHash(p._creator) ? `<a href="${sellerHash(p._creator)}" style="color:var(--accent);font-size:12.5px;">View seller page →</a>` : ''}${hasAdminAffiliateLink(p) ? '<div class="text-2 small">Verified affiliate partner</div>' : ''}</div>
       </div>
     </div>
 
@@ -6682,10 +6865,10 @@ function creatorErrText(e){
 const cwNaira = v => '₦' + Number(v||0).toLocaleString(undefined,{maximumFractionDigits:2});
 const cwStatusColor = s => ({PUBLISHED:'#2ee6a6',APPROVED:'#2ee6a6',SUBMITTED:'var(--warn,#d4af37)',IN_REVIEW:'var(--warn,#d4af37)',CHANGES_REQUESTED:'var(--warn,#d4af37)',PAUSED:'#999',DRAFT:'#999',REJECTED:'var(--error)',SUSPENDED:'var(--error)',ARCHIVED:'#999'}[s]||'#999');
 
-window.__resetCreatorWorkspace = function(){ cp = { list:null, loading:false, error:'', form:null, busy:false, formError:'', info:'' }; co = { list:null, loading:false, error:'', shipFor:null, busy:false }; cm = { payout:undefined, wds:null, banks:null, loading:false, error:'', busy:false, cj:undefined, resolved:null }; creatorHome = { data:null, summary:'', loading:false, error:null, aiText:'', aiNote:'', aiBusy:false, aiError:'', question:'', checklist:null, uid:null }; window.__libraryCache = null; window.__myShipments = null; creatorTab = 'home'; };
+window.__resetCreatorWorkspace = function(){ cp = { list:null, loading:false, error:'', form:null, busy:false, formError:'', info:'' }; co = { list:null, loading:false, error:'', shipFor:null, busy:false }; cm = { payout:undefined, wds:null, banks:null, loading:false, error:'', busy:false, cj:undefined, resolved:null }; creatorHome = { data:null, summary:'', loading:false, error:null, aiText:'', aiNote:'', aiBusy:false, aiError:'', question:'', checklist:null, uid:null }; window.__libraryCache = null; window.__myShipments = null; window.__myDisputes = null; cx = { profile:null, policies:null, notes:null, disputes:null, loading:false, error:'', info:'', busy:false, form:null }; creatorTab = 'home'; };
 function creatorTabBar(){
   const t = (id,label)=>`<button class="chip ${creatorTab===id?'active':''}" style="flex:1;justify-content:center;" onclick="setCreatorTab('${id}')">${label}</button>`;
-  return `<div style="display:flex;gap:6px;margin-bottom:14px;">${t('home','🏠 Home')}${t('products','📦 Products')}${t('orders','🚚 Orders')}${t('money','💰 Money')}</div>`;
+  return `<div style="display:flex;gap:6px;margin-bottom:14px;">${t('home','🏠 Home')}${t('products','📦 Products')}${t('orders','🚚 Orders')}${t('money','💰 Money')}${t('more','⚙️ More')}</div>`;
 }
 
 /* ---------------- PRODUCTS ---------------- */
@@ -7042,7 +7225,7 @@ function screenCreatorHome(){
   const bar = creatorTabBar();
   const H1 = '<h1 class="screen-title">My Creator Account</h1>';
   if(creatorTab === 'home') return creatorHomeTab().replace(H1, H1 + bar);
-  const body = creatorTab==='products' ? creatorProductsTab() : creatorTab==='orders' ? creatorOrdersTab() : creatorMoneyTab();
+  const body = creatorTab==='products' ? creatorProductsTab() : creatorTab==='orders' ? creatorOrdersTab() : creatorTab==='more' ? creatorMoreTab() : creatorMoneyTab();
   return `<div class="screen">${H1}${bar}${body}</div>`;
 }
 function creatorHomeTab(){
@@ -10973,6 +11156,20 @@ async function callAffiliateAdminAction(action, payload){
 
 window.__affiliatesCache = null;
 window.__affiliatesError = null;
+// Admin lists used to re-fetch + re-render in an endless loop (every render
+// kicked a fetch whose completion re-rendered, even when cached), which could
+// freeze the tab and hid the applications. adminKick starts a load only when
+// there is no data, no recorded error and none already running, and re-renders
+// ONCE when it finishes. The Refresh buttons still force a reload.
+window.__adminLoading = window.__adminLoading || {};
+function adminKick(key, loader, tab){
+  if(window.__adminLoading[key]) return;
+  window.__adminLoading[key] = true;
+  Promise.resolve().then(loader).catch(e=>console.warn('admin load failed', key, e && e.message)).then(()=>{
+    window.__adminLoading[key] = false;
+    if(appState.adminTab===tab) renderAdminTab();
+  });
+}
 async function fetchAffiliatesFromCloud(force){
   if(window.__affiliatesCache && !force) return window.__affiliatesCache;
   if(!window.__fb){ window.__affiliatesError = 'Cloud connection is not ready yet.'; return []; }
@@ -10982,8 +11179,7 @@ async function fetchAffiliatesFromCloud(force){
   try{
     const u = fbAuth.currentUser;
     if(u){
-      const token = await u.getIdToken();
-      const r = await withTimeout(fetch(API_BASE+'/api/affiliate-admin',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify({action:'list-affiliates'})}), 20000, 'Server list timed out');
+      const r = await authedApi('/api/affiliate-admin',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'list-affiliates'})}, 45000, 'Server list timed out');
       const d = await r.json();
       if(d && d.ok){ window.__affiliatesCache = d.affiliates; window.__affiliatesError = null; return d.affiliates; }
     }
@@ -11021,8 +11217,8 @@ async function fetchAffiliateWithdrawalsFromCloud(force){
 }
 
 function adminAffiliateProgram(){
-  fetchAffiliatesFromCloud().then(()=>{ if(appState.adminTab==='affiliate') renderAdminTab(); });
-  fetchAffiliateWithdrawalsFromCloud().then(()=>{ if(appState.adminTab==='affiliate') renderAdminTab(); });
+  if(!window.__affiliatesCache && !window.__affiliatesError) adminKick('affiliates', ()=>fetchAffiliatesFromCloud(), 'affiliate');
+  if(!window.__affWithdrawalsCache && !window.__affWithdrawalsError) adminKick('affWithdrawals', ()=>fetchAffiliateWithdrawalsFromCloud(), 'affiliate');
   const c = DB.content;
   const affiliates = window.__affiliatesCache || [];
   const withdrawals = window.__affWithdrawalsCache || [];
@@ -11108,10 +11304,7 @@ async function fetchCreatorApplicationsAdmin(force){
   const user = fbAuth.currentUser;
   if(!user){ window.__creatorAdminError = 'Not signed in.'; return []; }
   try{
-    const token = await user.getIdToken();
-    const r = await withTimeout(fetch(API_BASE+'/api/creator-admin-applications', {
-      headers:{'Authorization':'Bearer '+token},
-    }), 20000, 'Loading applications timed out.');
+    const r = await authedApi('/api/creator-admin-applications', {}, 45000, 'Loading applications timed out — the server may be waking up. Tap Refresh.');
     const d = await r.json();
     if(d && d.ok){ window.__creatorAdminCache = d.data.applications; window.__creatorAdminError = null; return d.data.applications; }
     window.__creatorAdminError = (d && d.error && d.error.message) || 'Could not load applications.';
@@ -11133,9 +11326,9 @@ async function fetchActiveCreators(force){
   try{
     const snap = await withTimeout(getDocs(collection(fbDb, "creators")), 15000, 'Timed out loading creators.');
     const list = []; snap.forEach(d=>list.push({ id:d.id, ...d.data() }));
-    window.__activeCreatorsCache = list;
+    window.__activeCreatorsCache = list; window.__activeCreatorsError = null;
     return list;
-  }catch(e){ console.warn('creators list failed', e); return []; }
+  }catch(e){ console.warn('creators list failed', e); window.__activeCreatorsError = e.message || 'Could not load creators.'; return []; }
 }
 async function creatorAdminAction(uid, action, needsReason){
   let reason = null;
@@ -11147,11 +11340,10 @@ async function creatorAdminAction(uid, action, needsReason){
   const user = fbAuth.currentUser;
   if(!user){ toast('Not signed in', 'error'); return; }
   try{
-    const token = await user.getIdToken();
-    const r = await withTimeout(fetch(API_BASE+'/api/creator-admin-applications', {
-      method:'POST', headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+    const r = await authedApi('/api/creator-admin-applications', {
+      method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ uid, action, reason }),
-    }), 20000, 'Action timed out.');
+    }, 45000, 'Action timed out — please try again.');
     const d = await r.json();
     if(!d.ok){ toast((d.error&&d.error.message)||'Action failed', 'error'); return; }
     toast(`${action.replace(/_/g,' ')} → ${d.data.status}`, 'success');
@@ -11163,8 +11355,8 @@ async function creatorAdminAction(uid, action, needsReason){
   }
 }
 function adminCreatorApplications(){
-  fetchCreatorApplicationsAdmin().then(()=>{ if(appState.adminTab==='creators') renderAdminTab(); });
-  fetchActiveCreators().then(()=>{ if(appState.adminTab==='creators') renderAdminTab(); });
+  if(!window.__creatorAdminCache && !window.__creatorAdminError) adminKick('creatorApps', ()=>fetchCreatorApplicationsAdmin(), 'creators');
+  if(!window.__activeCreatorsCache && !window.__activeCreatorsError) adminKick('activeCreators', ()=>fetchActiveCreators(), 'creators');
   const apps = window.__creatorAdminCache || [];
   const creators = window.__activeCreatorsCache || [];
   const submitted = apps.filter(a=>a.status==='SUBMITTED');
@@ -11182,7 +11374,7 @@ function adminCreatorApplications(){
     </div>`;
 
   return `
-  <div class="admin-topbar"><h2>Creator Applications</h2><button class="btn btn-outline btn-sm" onclick="fetchCreatorApplicationsAdmin(true).then(renderAdminTab);fetchActiveCreators(true).then(renderAdminTab);">Refresh</button></div>
+  <div class="admin-topbar"><h2>Creator Applications</h2><button class="btn btn-outline btn-sm" onclick="window.__creatorAdminError=null;window.__activeCreatorsError=null;fetchCreatorApplicationsAdmin(true).then(renderAdminTab);fetchActiveCreators(true).then(renderAdminTab);">Refresh</button></div>
   ${window.__creatorAdminError ? `<p class="text-2 small" style="color:var(--error);">⚠️ ${escapeHtml(window.__creatorAdminError)}</p>` : ''}
 
   <div class="card" style="padding:16px;margin-bottom:16px;">
@@ -11230,7 +11422,7 @@ function adminCreatorApplications(){
    Uses authedApi directly because some admin endpoints answer {ok,data}
    and the finance one answers {ok,withdrawals}. Every dynamic value is escaped.
    ========================================================= */
-let ao = { sub:'listings', data:{}, loading:false, error:'', busy:false, note:'', filter:{ listings:'SUBMITTED', wds:'pending', orders:'' } };
+let ao = { sub:'listings', data:{}, loading:false, error:'', busy:false, note:'', filter:{ listings:'SUBMITTED', wds:'pending', orders:'', disputes:'OPEN' }, paystack:false };
 async function aoApi(path, body){
   const init = body ? { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) } : {};
   const r = await authedApi(path, init, 30000, 'The server took too long. Please try again.');
@@ -11260,6 +11452,11 @@ async function aoLoad(force){
         aoApi('/api/creator-admin-fulfillments'+(ao.filter.orders?'?status='+encodeURIComponent(ao.filter.orders):''))
       ]);
       ao.data.orders = { queue:q.queue||[], creators:c.creators||[], fulfillments:f.fulfillments||[] };
+    }
+    else if(s==='disputes') ao.data.disputes = (await aoApi('/api/creator-admin-risk?view=disputes'+(ao.filter.disputes?'&status='+encodeURIComponent(ao.filter.disputes):''))).disputes || [];
+    else if(s==='reconcile'){
+      const [rep, st] = await Promise.all([ aoApi('/api/creator-admin-risk?view=reconcile'+(ao.paystack?'&paystack=1':'')), aoApi('/api/creator-admin-risk?view=settings') ]);
+      ao.data.reconcile = { report: rep, settings: st };
     }
     else if(s==='alerts'){
       const [a,r,st] = await Promise.all([
@@ -11291,6 +11488,20 @@ function aoWithdrawalAction(id, action){
   if(action==='mark-withdrawal-paid' && !window.confirm('Mark as paid ONLY if you already sent the money yourself. Continue?')) return;
   aoPost('/api/creator-admin-finance',{ action, withdrawalId:id },'Withdrawal updated.');
 }
+function aoResolveDispute(id, decision){
+  const note = aoReason(decision==='REFUND' ? 'Why is the buyer being refunded? (both sides will see this)' : 'Why is the dispute rejected? (both sides will see this)');
+  if(!note) return;
+  if(decision==='REFUND' && !window.confirm('This reverses the creator\'s earning for the order. You must then refund the buyer yourself from the Paystack dashboard. Continue?')) return;
+  aoPost('/api/creator-admin-risk', { action:'resolve_dispute', disputeId:id, decision, note }, decision==='REFUND' ? 'Decision saved. Remember to refund the buyer from Paystack.' : 'Dispute rejected; earning released.');
+}
+function aoSetHold(){
+  const v = window.prompt('Hold new creator sales for how many days before they can be withdrawn? (0 = no hold, max 60)', String((ao.data.reconcile&&ao.data.reconcile.settings&&ao.data.reconcile.settings.holdDays)||0));
+  if(v===null) return;
+  const days = Number(v);
+  if(!Number.isInteger(days) || days<0 || days>60){ ao.error='Enter a whole number from 0 to 60.'; renderAdminTab(); return; }
+  aoPost('/api/creator-admin-risk', { action:'set_hold_days', days }, 'Hold period saved.');
+}
+function aoTogglePaystack(){ ao.paystack = !ao.paystack; aoLoad(true); }
 function aoSetFilter(k,v){ ao.filter[k]=v; aoLoad(true); }
 function aoResolveAlert(id){ const note = window.prompt('Note (optional):')||''; aoPost('/api/creator-admin-automation',{ action:'resolve_alert', alertId:id, note },'Alert resolved.'); }
 function aoRunJob(j){ aoPost('/api/creator-admin-automation',{ action:'run_job', job:j },'Job "'+j+'" ran.'); }
@@ -11356,6 +11567,34 @@ function aoOrdersHtml(){
     <h3 style="font-size:14px;margin:16px 0 8px;">Creators by delivery record</h3>${c}
     <h3 style="font-size:14px;margin:16px 0 8px;">Physical orders</h3><div style="margin-bottom:8px;">${aoSelect('orders',[['','All'],['PENDING','Pending'],['SHIPPED','Shipped'],['DELIVERED','Delivered']])}</div>${f}`;
 }
+function aoDisputesHtml(){
+  const list = ao.data.disputes; if(!list) return '<p class="text-2 small">Loading…</p>';
+  const msgs = d => (d.messages||[]).map(m=>`<div style="margin:4px 0;padding:6px 8px;border-radius:8px;background:var(--surface-2,rgba(128,128,128,.12));"><b class="small">${escapeHtml(m.by==='buyer'?'Buyer':m.by==='creator'?'Seller':'Admin')}:</b> <span style="white-space:pre-wrap;font-size:13.5px;">${escapeHtml(m.text)}</span></div>`).join('');
+  return `<div style="margin-bottom:10px;">${aoSelect('disputes',[['OPEN','Open'],['RESOLVED_REFUND','Refunded'],['RESOLVED_REJECTED','Rejected'],['','All']])}</div>` +
+  (list.length ? list.map(d=>`<div class="card" style="padding:12px;margin-bottom:8px;">
+    <div style="font-weight:700;">${escapeHtml(d.productTitle||'Order')} <span class="chip" style="font-size:10px;">${escapeHtml(d.status||'')}</span></div>
+    <div class="text-2 small">${escapeHtml(String(d.currency||''))} ${escapeHtml(String(d.amount!=null?d.amount:''))} · ${escapeHtml(String(d.reason||'').replace(/_/g,' ').toLowerCase())} · opened ${escapeHtml(d.openedAtMs?new Date(d.openedAtMs).toLocaleString():'')}</div>
+    <div class="text-2 small" style="opacity:.75;">order ${escapeHtml(d.orderId||'')} · creator ${escapeHtml(d.creatorId||'')} · buyer ${escapeHtml(d.buyerEmail||d.buyerUid||'')}</div>
+    ${msgs(d)}
+    ${d.status==='OPEN'?`<div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;"><button class="btn btn-primary btn-sm" ${ao.busy?'disabled':''} onclick="aoResolveDispute('${escapeHtml(d.id)}','REFUND')">Refund buyer</button><button class="btn btn-outline btn-sm" ${ao.busy?'disabled':''} onclick="aoResolveDispute('${escapeHtml(d.id)}','REJECT')">Reject dispute</button></div>`
+      : (d.status==='RESOLVED_REFUND'?`<div class="small" style="margin-top:6px;color:var(--warn,#d4af37);">Refund the buyer from the Paystack dashboard (the app does not send money).</div>`:'')}
+  </div>`).join('') : '<p class="text-2 small">Nothing here.</p>');
+}
+function aoReconcileHtml(){
+  const d = ao.data.reconcile; if(!d) return '<p class="text-2 small">Loading…</p>';
+  const r = d.report, t = r.totals||{};
+  const pay = r.paystack ? `<h3 style="font-size:14px;margin:16px 0 8px;">Paystack check (${escapeHtml(String(r.paystack.checked))} recent sales)</h3>
+    <p class="small">${r.paystack.mismatches?`<span style="color:var(--error);">${escapeHtml(String(r.paystack.mismatches))} mismatch(es)</span>`:'No mismatches'} · ${escapeHtml(String(r.paystack.unverified))} not confirmable</p>` +
+    r.paystack.rows.filter(x=>x.result!=='MATCH').map(x=>`<div class="text-2 small" style="padding:3px 0;">${escapeHtml(x.reference)} — <b>${escapeHtml(x.result)}</b> ${x.result==='MISMATCH'?escapeHtml('Paystack '+x.paystackAmount+' vs ledger '+x.ledgerAmount):escapeHtml(x.detail||'')}</div>`).join('') : '';
+  return `<div class="card" style="padding:12px;margin-bottom:12px;">
+      <div><b>Hold new sales:</b> ${d.settings.holdDays?escapeHtml(String(d.settings.holdDays))+' day(s)':'off'} <button class="btn btn-outline btn-sm" style="margin-left:8px;" onclick="aoSetHold()">Change</button></div>
+      <div class="text-2 small" style="margin-top:6px;">Disputes can be opened for ${escapeHtml(String(d.settings.disputeWindowDays))} days. This report only reads data; it never moves money.</div></div>
+    <div class="card" style="padding:12px;margin-bottom:12px;"><div class="text-2 small" style="line-height:1.7;">Sales recorded: <b>${escapeHtml(String(t.sales))}</b> · Platform fees: <b>${cwNaira(t.platformFee)}</b><br>Creators' earnings held: <b>${cwNaira(t.earnedHeld)}</b> · available: <b>${cwNaira(t.earnedAvailable)}</b><br>Withdrawn/requested: <b>${cwNaira(t.withdrawn)}</b> · Refunded earnings: <b>${cwNaira(t.refunded)}</b></div></div>
+    <h3 style="font-size:14px;margin-bottom:8px;">Creator balances ${r.problems?`<span class="chip" style="font-size:10px;color:var(--error);">${escapeHtml(String(r.problems))} problem(s)</span>`:'<span class="chip" style="font-size:10px;">all reconcile</span>'}</h3>
+    ${r.creators.map(c=>`<div class="text-2 small" style="padding:5px 0;border-bottom:1px solid var(--border,#2a2a2a);">${c.ok?'✅':'⚠️'} ${escapeHtml(c.creatorId)} — earned ${cwNaira(c.earned)} · withdrawn ${cwNaira(c.withdrawn)} · balance ${cwNaira(c.storedBalance)} (expected ${cwNaira(c.expectedBalance)})${c.issues.length?`<div style="color:var(--error);">${c.issues.map(i=>escapeHtml(i.code+': stored '+i.stored+', computed '+i.computed)).join('; ')}</div>`:''}</div>`).join('') || '<p class="text-2 small">No creators with earnings yet.</p>'}
+    <div style="margin-top:14px;"><button class="btn btn-outline btn-sm" ${ao.loading?'disabled':''} onclick="aoTogglePaystack()">${ao.paystack?'Hide Paystack check':'Also check against Paystack'}</button></div>
+    ${pay}`;
+}
 function aoAlertsHtml(){
   const d = ao.data.alerts; if(!d) return '<p class="text-2 small">Loading…</p>';
   const s = d.settings||{};
@@ -11375,9 +11614,9 @@ function aoAlertsHtml(){
 function adminCreatorOps(){
   if(!ao.data[ao.sub] && !ao.loading) aoLoad(false);
   const t = (id,l)=>`<button class="chip ${ao.sub===id?'active':''}" onclick="aoSetSub('${id}')">${l}</button>`;
-  const body = ao.sub==='listings'?aoListingsHtml():ao.sub==='payouts'?aoPayoutsHtml():ao.sub==='orders'?aoOrdersHtml():aoAlertsHtml();
+  const body = ao.sub==='listings'?aoListingsHtml():ao.sub==='payouts'?aoPayoutsHtml():ao.sub==='orders'?aoOrdersHtml():ao.sub==='disputes'?aoDisputesHtml():ao.sub==='reconcile'?aoReconcileHtml():aoAlertsHtml();
   return `<div class="admin-topbar"><h2>Creator Ops</h2><button class="btn btn-outline btn-sm" onclick="aoLoad(true)">Refresh</button></div>
-  <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">${t('listings','Listing review')}${t('payouts','Payouts')}${t('orders','Orders & SLA')}${t('alerts','Alerts & automation')}</div>
+  <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">${t('listings','Listing review')}${t('payouts','Payouts')}${t('orders','Orders & SLA')}${t('disputes','Disputes')}${t('reconcile','Reconciliation')}${t('alerts','Alerts & automation')}</div>
   ${ao.error?`<p class="small" style="color:var(--error);">⚠️ ${escapeHtml(ao.error)}</p>`:''}
   ${ao.note?`<p class="small" style="color:#2ee6a6;">✓ ${escapeHtml(ao.note)}</p>`:''}
   ${ao.loading?'<p class="text-2 small">Loading…</p>':''}

@@ -197,6 +197,11 @@ const CREATOR_ENDPOINTS = [
   'creator-ai',
   // Storefront bridge — public, read-only, sanitised listings
   'creator-listings',
+  // Stage K — disputes, profile/seller pages, admin risk (holds, reconciliation)
+  'creator-disputes',
+  'creator-profile',
+  'creator-seller',
+  'creator-admin-risk',
 ];
 for (const name of CREATOR_ENDPOINTS) {
   app.all(`/api/${name}`, require(`./api/${name}`));
