@@ -109,6 +109,8 @@ function defaultDeps() {
       supplierOrders: require('../api/creator-supplier-orders'),
       notifications: require('../api/creator-notifications'),
       ai: require('../api/creator-ai'),
+      profile: require('../api/creator-profile'),
+      disputes: require('../api/creator-disputes'),
     },
   };
 }
@@ -145,6 +147,7 @@ function register(server, { uid, email = null, deps } = {}) {
       creator: { displayName: c.displayName || c.storeName || null, status: c.status || null },
       money: {
         balanceAvailable: p.balanceAvailable || 0,
+        balancePending: p.balancePending || 0,
         totalEarned: p.totalEarned || 0,
         totalWithdrawn: p.totalWithdrawn || 0,
         hasPayoutAccount: !!(p.payoutAccount && p.payoutAccount.accountNumber),
@@ -282,6 +285,51 @@ function register(server, { uid, email = null, deps } = {}) {
   }, async ({ unreadOnly }) => {
     const r = await call(d.handlers.notifications, { method: 'GET', query: unreadOnly ? { unread: '1' } : {} });
     return r.isError ? r : asText(plain(JSON.parse(r.content[0].text)));
+  });
+
+  server.registerTool('creator_get_profile', {
+    title: 'My public profile and selling rules',
+    description: 'Your public profile (display name, username, tagline, bio) and the rules you sell under: platform fee %, payout minimum and fee, how long new sales are held before they can be withdrawn, and the buyer dispute window. Your public seller page is at #seller/<username> on the store.',
+    inputSchema: {},
+    annotations: READ,
+  }, async () => {
+    const r = await call(d.handlers.profile, { method: 'GET' });
+    return r.isError ? r : asText(plain(JSON.parse(r.content[0].text)));
+  });
+
+  server.registerTool('creator_update_profile', {
+    title: 'Update my public profile',
+    description: 'Sets your public username (3–24 letters, numbers or underscore; unique), tagline and bio. These are shown publicly on your seller page. Your display name and verification cannot be changed here.',
+    inputSchema: {
+      username: z.string().max(25).optional(),
+      tagline: z.string().max(100).optional(),
+      bio: z.string().max(500).optional(),
+      confirm: confirmField,
+    },
+    annotations: WRITE_IDEMPOTENT,
+  }, ({ username, tagline, bio }) => call(d.handlers.profile, { method: 'POST', body: { action: 'update', ...(username !== undefined ? { username } : {}), ...(tagline !== undefined ? { tagline } : {}), ...(bio !== undefined ? { bio } : {}) } }));
+
+  server.registerTool('creator_list_disputes', {
+    title: 'My buyer disputes',
+    description: 'Disputes buyers opened on your orders, with the conversation so far (the buyer\'s email is never shown). While a dispute is OPEN, the earning for that order is frozen. Only the admin can decide it.',
+    inputSchema: { status: z.enum(['OPEN', 'RESOLVED_REFUND', 'RESOLVED_REJECTED']).optional() },
+    annotations: READ,
+  }, async ({ status }) => {
+    const snap = await db().collection('creatorDisputes').where('creatorId', '==', uid).get();
+    const rows = snap.docs.map((x) => { const { buyerEmail, buyerUid, openedAt, ...rest } = x.data(); return { id: x.id, ...rest }; })
+      .filter((x) => !status || x.status === status).sort((a, b) => (b.openedAtMs || 0) - (a.openedAtMs || 0));
+    return asText(plain({ disputes: rows }));
+  });
+
+  server.registerTool('creator_reply_to_dispute', {
+    title: 'Reply to a buyer dispute',
+    description: 'Adds your reply to an OPEN dispute on your own order. It cannot decide, refund or close anything.',
+    inputSchema: { disputeId: z.string().min(1).max(200), text: z.string().min(2).max(2000), confirm: confirmField },
+    annotations: WRITE,
+  }, async ({ disputeId, text }) => {
+    try {
+      return asText(await require('../api/creator-disputes').addMessage(db(), uid, { disputeId, text }));
+    } catch (e) { return asText({ error: e.code || 'ERROR', message: e.message }, true); }
   });
 
   server.registerTool('creator_mark_notifications_read', {
@@ -430,6 +478,7 @@ const TOOL_NAMES = [
   'creator_get_supplier_status', 'creator_list_dropship_mappings', 'creator_test_dropship_mapping',
   'creator_check_supplier_health', 'creator_list_supplier_orders', 'creator_sync_dropship_order',
   'creator_get_weekly_report', 'creator_get_product_checklist',
+  'creator_get_profile', 'creator_update_profile', 'creator_list_disputes', 'creator_reply_to_dispute',
 ];
 
 module.exports = { register, TOOL_NAMES, OFFERING_TYPES, maskAccount, fromEnvelope, plain, VERSION_KEYS };
