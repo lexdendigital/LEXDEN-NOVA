@@ -57,7 +57,19 @@ function register(server, { email = null, uid = null, deps } = {}) {
     description: 'start_review (SUBMITTED→IN_REVIEW), approve (makes them an ACTIVE creator), request_changes or reject (a reason is required and is shown to the applicant). Requires confirm: true.',
     inputSchema: { uid: z.string().min(1).max(128), action: z.enum(['start_review', 'approve', 'request_changes', 'reject']), reason: z.string().max(1000).optional(), confirm: confirmField },
     annotations: WRITE,
-  }, ({ uid: target, action, reason }) => call(d.handlers.applications, { method: 'POST', body: { uid: target, action, reason } }));
+  }, async ({ uid: target, action, reason }) => {
+    const send = (a) => d.callHandler(d.handlers.applications, { method: 'POST', body: { uid: target, action: a, reason: a === action ? reason : undefined }, extras: extras() });
+    let r = await send(action);
+    // Convenience: a brand-new application is SUBMITTED, but approve / reject / request_changes
+    // are only legal from IN_REVIEW. When the admin says "approve", move it into review first
+    // (the same two steps they would click in the portal), then apply their decision.
+    const err = r.body && r.body.error;
+    if (['approve', 'reject', 'request_changes'].includes(action) && err && err.code === 'INVALID_TRANSITION' && /from SUBMITTED/.test(String(err.message))) {
+      const started = await send('start_review');
+      if (started.body && started.body.ok !== false && !started.body.error) r = await send(action);
+    }
+    return fromEnvelope(r);
+  });
 
   server.registerTool('nova_set_creator_status', {
     title: 'Restrict, suspend, revoke or reactivate a creator',

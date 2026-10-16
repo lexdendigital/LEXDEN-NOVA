@@ -70,7 +70,7 @@ async function createAuthCode({ clientId, redirectUri, codeChallenge, codeChalle
 // even if two /token requests race — the old delete-then-validate
 // version had no such guarantee (both requests could read the doc
 // before either delete landed).
-async function consumeAuthCode({ code, clientId, redirectUri, codeVerifier, resource }) {
+async function consumeAuthCode({ code, clientId, redirectUri, codeVerifier, resource, clientAuthenticated = false }) {
   const db = getDb();
   const ref = db.collection('mcpAuthCodes').doc(sha256(code));
   const data = await db.runTransaction(async (t) => {
@@ -86,7 +86,13 @@ async function consumeAuthCode({ code, clientId, redirectUri, codeVerifier, reso
   if (Date.now() > data.expiresAt) throw oauthError('invalid_grant', 'Authorization code expired.');
   if (data.clientId !== clientId) throw oauthError('invalid_grant', 'client_id mismatch.');
   if (data.redirectUri !== redirectUri) throw oauthError('invalid_grant', 'redirect_uri mismatch.');
-  if (!codeVerifier || !pkceMatches(codeVerifier, data.codeChallenge, data.codeChallengeMethod)) {
+  if (data.codeChallenge) {
+    if (!codeVerifier || !pkceMatches(codeVerifier, data.codeChallenge, data.codeChallengeMethod)) {
+      throw oauthError('invalid_grant', 'PKCE verification failed.');
+    }
+  } else if (!clientAuthenticated) {
+    // A code minted without PKCE (ChatGPT Custom GPT Actions) can only be
+    // redeemed by a client that proved it holds the client secret.
     throw oauthError('invalid_grant', 'PKCE verification failed.');
   }
   // FIX (README section 6): if the token request names a resource, it

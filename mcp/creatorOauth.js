@@ -30,6 +30,7 @@
 const crypto = require('crypto');
 const oauth = require('./oauth');
 const tokens = require('./lib/tokens');
+const chatgpt = require('./lib/chatgptClient');
 const { getAuthAdmin } = require('../api/affiliate/shared');
 const { getCreatorDoc } = require('../api/creator/shared');
 const { assertSellerNotBlocked } = require('../api/creator/state-machine');
@@ -307,7 +308,7 @@ function registerRoutes(app, deps = {}) {
   async function redirectAllowed(clientId, redirectUri) {
     const registered = await oauth.getRegisteredClient(clientId).catch(() => null);
     const inRegistration = !!(registered && Array.isArray(registered.redirectUris) && registered.redirectUris.includes(redirectUri));
-    const inAllowlist = allowedRedirectUris().includes(redirectUri);
+    const inAllowlist = allowedRedirectUris().includes(redirectUri) || chatgpt.staticRedirectOk(clientId, redirectUri);
     // A client that registered must use one of ITS registered URIs, even if
     // another is on the global allowlist.
     if (registered && Array.isArray(registered.redirectUris) && registered.redirectUris.length && !inRegistration) return { ok: false, registered };
@@ -323,7 +324,8 @@ function registerRoutes(app, deps = {}) {
       oauth.logStep(rid, 'creator authorize REJECTED redirect_uri', { client: client_id });
       return res.status(400).send('This connector is not configured to send you back to that address.');
     }
-    if (response_type !== 'code' || !client_id || !code_challenge || (code_challenge_method && code_challenge_method !== 'S256')) {
+    const noPkceOk = chatgpt.isStaticClientId(client_id) && !code_challenge;
+    if (response_type !== 'code' || !client_id || (!code_challenge && !noPkceOk) || (code_challenge_method && code_challenge_method !== 'S256')) {
       oauth.logStep(rid, 'creator authorize REJECTED invalid_request', { client: client_id });
       const url = new URL(redirect_uri);
       url.searchParams.set('error', 'invalid_request');
@@ -364,7 +366,7 @@ function registerRoutes(app, deps = {}) {
       oauth.logStep(rid, 'creator complete REJECTED redirect_uri', { client: p.client_id });
       return res.status(400).json({ error: 'invalid_request', error_description: 'Unrecognized redirect_uri.' });
     }
-    if (!p.code_challenge || (p.code_challenge_method && p.code_challenge_method !== 'S256')) {
+    if ((!p.code_challenge && !chatgpt.isStaticClientId(p.client_id)) || (p.code_challenge_method && p.code_challenge_method !== 'S256')) {
       return res.status(400).json({ error: 'invalid_request', error_description: 'PKCE (S256) is required.' });
     }
     if (p.resource && p.resource !== resourceOf(req) && String(p.resource).replace(/\/+$/, '') !== resourceOf(req)) {
@@ -385,7 +387,7 @@ function registerRoutes(app, deps = {}) {
     const code = await tokens.createAuthCode({
       clientId: p.client_id,
       redirectUri: p.redirect_uri,
-      codeChallenge: p.code_challenge,
+      codeChallenge: p.code_challenge || null,
       codeChallengeMethod: 'S256',
       resource: p.resource ? resourceOf(req) : null,
       email: decoded.email || null,
@@ -406,14 +408,17 @@ function registerRoutes(app, deps = {}) {
     const body = req.body || {};
     res.set('Cache-Control', 'no-store');
     try {
+      const client = chatgpt.authenticateClient(body, req.headers);
       let session;
       if (body.grant_type === 'authorization_code') {
         session = await tokens.consumeAuthCode({
-          code: body.code, clientId: body.client_id, redirectUri: body.redirect_uri,
+          code: body.code, clientId: body.client_id || client.clientId, redirectUri: body.redirect_uri,
           codeVerifier: body.code_verifier, resource: body.resource || null,
+          clientAuthenticated: client.authenticated,
         });
       } else if (body.grant_type === 'refresh_token') {
         session = await tokens.consumeRefreshToken(body.refresh_token);
+        if (chatgpt.isStaticClientId(session.clientId) && !client.authenticated) throw Object.assign(new Error('invalid_client'), { oauth: true, detail: 'Client secret required.' });
         // A suspended/revoked creator must not be able to keep refreshing.
         const still = evaluateCreatorAccess(await (deps.getCreatorDoc || getCreatorDoc)(session.uid));
         if (!still.ok) throw realmError(still.message);
@@ -435,7 +440,7 @@ function registerRoutes(app, deps = {}) {
     } catch (e) {
       if (e.oauth) {
         oauth.logStep(rid, `creator token REJECTED ${e.message}`, { client: body.client_id });
-        return res.status(400).json({ error: e.message, error_description: e.detail });
+        return res.status(e.status || 400).json({ error: e.message, error_description: e.detail });
       }
       console.error(`[mcp/creator-oauth] rid=${rid} /token failed:`, e.message);
       return res.status(500).json({ error: 'server_error' });

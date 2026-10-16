@@ -1,0 +1,159 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "LEXDEN NOVA Creator Actions",
+    "version": "1.0.0",
+    "description": "Run the LEXDEN NOVA Creator tools for a creator, for their own account only. First call listTools, then describeTool, then callTool."
+  },
+  "servers": [
+    {
+      "url": "https://lexden-nova.onrender.com"
+    }
+  ],
+  "paths": {
+    "/gpt/creator/tools": {
+      "get": {
+        "operationId": "listTools",
+        "summary": "List available tools",
+        "description": "Compact catalog of tool names and what they do. Use search to narrow it down.",
+        "x-openai-isConsequential": false,
+        "parameters": [
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 80
+            },
+            "description": "Word to look for in tool names/descriptions, e.g. \"creator application\"."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 60
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Tool catalog",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/gpt/creator/tools/{name}": {
+      "get": {
+        "operationId": "describeTool",
+        "summary": "Get one tool's exact arguments",
+        "description": "Returns the JSON schema of the arguments for one tool. Call this before callTool.",
+        "x-openai-isConsequential": false,
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 80
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Tool description",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/gpt/creator/call": {
+      "post": {
+        "operationId": "callTool",
+        "summary": "Run a tool",
+        "description": "Runs one tool with the given arguments. Actions that change data need confirm: true, only after the user agreed.",
+        "x-openai-isConsequential": true,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "tool"
+                ],
+                "properties": {
+                  "tool": {
+                    "type": "string",
+                    "description": "Exact tool name from listTools."
+                  },
+                  "arguments": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "description": "Arguments exactly as described by describeTool."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Tool result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "oauth": {
+        "type": "oauth2",
+        "flows": {
+          "authorizationCode": {
+            "authorizationUrl": "https://lexden-nova.onrender.com/creator/authorize",
+            "tokenUrl": "https://lexden-nova.onrender.com/creator/token",
+            "scopes": {
+              "creator": "Manage your own creator account"
+            }
+          }
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "oauth": [
+        "creator"
+      ]
+    }
+  ]
+}

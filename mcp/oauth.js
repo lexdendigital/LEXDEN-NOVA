@@ -53,6 +53,7 @@
 const crypto = require('crypto');
 const { getAuthAdmin, isAdminEmail, getDb, FieldValue } = require('../api/affiliate/shared');
 const tokens = require('./lib/tokens');
+const chatgpt = require('./lib/chatgptClient');
 
 const DEFAULT_REDIRECT_URIS = [
   'https://claude.ai/api/mcp/auth_callback',
@@ -253,7 +254,7 @@ function registerRoutes(app) {
     const { response_type, client_id, redirect_uri, code_challenge, code_challenge_method, resource } = req.query;
     const registered = await getRegisteredClient(client_id).catch(() => null);
     const redirectRegistered = !!(registered && Array.isArray(registered.redirectUris) && registered.redirectUris.includes(redirect_uri));
-    if (!redirect_uri || (!allowedRedirectUris().includes(redirect_uri) && !redirectRegistered)) {
+    if (!redirect_uri || (!allowedRedirectUris().includes(redirect_uri) && !redirectRegistered && !chatgpt.staticRedirectOk(client_id, redirect_uri))) {
       logStep(rid, 'authorize REJECTED redirect_uri not allowlisted', { client: client_id, redirect: redirect_uri });
       return res.status(400).send('This connector is not configured to send you back to that address. Check MCP_EXTRA_REDIRECT_URIS if this is a legitimate client.');
     }
@@ -266,7 +267,8 @@ function registerRoutes(app) {
       logStep(rid, 'authorize REJECTED redirect_uri not in this client\'s registration', { client: client_id });
       return res.status(400).send('redirect_uri does not match what this client registered.');
     }
-    if (response_type !== 'code' || !client_id || !code_challenge || (code_challenge_method && code_challenge_method !== 'S256')) {
+    const noPkceOk = chatgpt.isStaticClientId(client_id) && !code_challenge;
+    if (response_type !== 'code' || !client_id || (!code_challenge && !noPkceOk) || (code_challenge_method && code_challenge_method !== 'S256')) {
       logStep(rid, 'authorize REJECTED invalid_request', { client: client_id });
       const url = new URL(redirect_uri);
       url.searchParams.set('error', 'invalid_request');
@@ -285,7 +287,7 @@ function registerRoutes(app) {
     const p = params || {};
     const registered = await getRegisteredClient(p.client_id).catch(() => null);
     const redirectRegistered = !!(registered && Array.isArray(registered.redirectUris) && registered.redirectUris.includes(p.redirect_uri));
-    if (!p.redirect_uri || (!allowedRedirectUris().includes(p.redirect_uri) && !redirectRegistered)) {
+    if (!p.redirect_uri || (!allowedRedirectUris().includes(p.redirect_uri) && !redirectRegistered && !chatgpt.staticRedirectOk(p.client_id, p.redirect_uri))) {
       logStep(rid, 'authorize/complete REJECTED bad redirect_uri', { client: p.client_id });
       return res.status(400).json({ error: 'invalid_request', error_description: 'Unrecognized redirect_uri.' });
     }
@@ -303,7 +305,7 @@ function registerRoutes(app) {
     const code = await tokens.createAuthCode({
       clientId: p.client_id,
       redirectUri: p.redirect_uri,
-      codeChallenge: p.code_challenge,
+      codeChallenge: p.code_challenge || null,
       codeChallengeMethod: p.code_challenge_method || 'S256',
       resource: p.resource || null, // FIX (§6)
       email: decoded.email,
@@ -333,11 +335,13 @@ function registerRoutes(app) {
     const rid = reqId();
     const body = req.body || {};
     try {
+      const client = chatgpt.authenticateClient(body, req.headers);
       if (body.grant_type === 'authorization_code') {
         logStep(rid, 'token grant=authorization_code', { client: body.client_id });
         const { email, uid, scope, clientId, resource } = await tokens.consumeAuthCode({
-          code: body.code, clientId: body.client_id, redirectUri: body.redirect_uri,
+          code: body.code, clientId: body.client_id || client.clientId, redirectUri: body.redirect_uri,
           codeVerifier: body.code_verifier, resource: body.resource || null,
+          clientAuthenticated: client.authenticated,
         });
         assertAdminGrant(scope);
         const access = await tokens.issueAccessToken({ email, uid, scope, clientId, resource });
@@ -348,6 +352,7 @@ function registerRoutes(app) {
       if (body.grant_type === 'refresh_token') {
         logStep(rid, 'token grant=refresh_token', { client: body.client_id || '(unspecified)' });
         const { email, uid, scope, clientId, resource } = await tokens.consumeRefreshToken(body.refresh_token);
+        if (chatgpt.isStaticClientId(clientId) && !client.authenticated) throw Object.assign(new Error('invalid_client'), { oauth: true, detail: 'Client secret required.' });
         assertAdminGrant(scope);
         const access = await tokens.issueAccessToken({ email, uid, scope, clientId, resource });
         const refresh_token = await tokens.issueRefreshToken({ email, uid, scope, clientId, resource });
@@ -359,7 +364,7 @@ function registerRoutes(app) {
     } catch (e) {
       if (e.oauth) {
         logStep(rid, `token REJECTED ${e.message}`, { client: body.client_id });
-        return res.status(400).json({ error: e.message, error_description: e.detail });
+        return res.status(e.status || 400).json({ error: e.message, error_description: e.detail });
       }
       // FIX (§9): never leak the raw exception (which could include
       // Firestore/internal details) into the OAuth response body — log

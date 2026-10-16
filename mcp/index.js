@@ -22,6 +22,7 @@ const { recordServerError } = require('./tools/diagnostics');
 const creatorOauth = require('./creatorOauth');
 const creatorTools = require('./creatorTools');
 const { isAdminEmail } = require('../api/affiliate/shared');
+const gptActions = require('./gptActions');
 
 const CREATOR_INSTRUCTIONS = [
   'LEXDEN NOVA Creator connector. You act ONLY for the signed-in creator; every tool is already scoped to their account.',
@@ -104,6 +105,36 @@ function buildCreatorServer(authInfo, deps) {
   return mcpServer;
 }
 
+// ChatGPT Actions (mcp/gptActions.js): collect the SAME tools the MCP servers
+// register, as plain callables, bound to the verified identity of this request.
+// Returns Map(name -> { name, config, run(args) }). Every run is audit-logged.
+function collectTools(kind, authInfo, deps) {
+  const uid = authInfo && authInfo.extra ? authInfo.extra.uid : null;
+  const email = authInfo && authInfo.extra ? authInfo.extra.email : null;
+  const tools = new Map();
+  const shim = {
+    registerTool(name, config, handler) {
+      tools.set(name, {
+        name, config,
+        async run(args) {
+          const started = Date.now();
+          try {
+            const result = await handler(args, {});
+            writeAuditEntry({ email, uid, realm: kind, tool: name, args, ok: !(result && result.isError), tookMs: Date.now() - started }).catch(() => {});
+            return result;
+          } catch (e) {
+            writeAuditEntry({ email, uid, realm: kind, tool: name, args, ok: false, error: e.message, tookMs: Date.now() - started }).catch(() => {});
+            return { content: [{ type: 'text', text: `Error: ${e.message || 'Tool call failed.'}` }], isError: true };
+          }
+        },
+      });
+    },
+  };
+  if (kind === 'admin') for (const mod of TOOL_MODULES) mod.register(shim, { email, uid });
+  else creatorTools.register(shim, { uid, email, deps });
+  return tools;
+}
+
 function mountMcp(app) {
   if (!process.env.MCP_BASE_URL) {
     console.warn('[mcp] MCP_BASE_URL is not set — OAuth redirect/metadata URLs will fall back to the incoming request\'s own host, which breaks if that ever differs from your real public URL. Set MCP_BASE_URL in your environment (see MCP-SETUP.md).');
@@ -138,10 +169,20 @@ function mountMcp(app) {
     resourcePath: '/mcp/creator',
     checkIdentity: (authInfo) => creatorOauth.creatorIdentityCheck(authInfo),
   });
+  // ---- ChatGPT Custom GPT Actions (same tools, same realms, same checks)
+  gptActions.mountGpt(app, {
+    collectTools,
+    baseUrl: oauth.baseUrl,
+    identityChecks: {
+      admin: adminIdentityCheck,
+      creator: (authInfo) => creatorOauth.creatorIdentityCheck(authInfo),
+    },
+  });
+
   app.all('/mcp/creator', creatorGate, (req, res) => {
     console.log(`[mcp/creator] authenticated method=${req.method}`);
     creatorNode(req, res, req.body);
   });
 }
 
-module.exports = { mountMcp, recordServerError, buildCreatorServer, adminIdentityCheck, CREATOR_INSTRUCTIONS };
+module.exports = { mountMcp, collectTools, recordServerError, buildCreatorServer, adminIdentityCheck, CREATOR_INSTRUCTIONS };
