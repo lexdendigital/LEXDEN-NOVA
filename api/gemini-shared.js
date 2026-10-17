@@ -41,12 +41,7 @@ const OVERALL_DEADLINE_MS = 16000;     // client gives up at 20s (index.html cal
 // renamed or not enabled for a key (404/400 "model not found"), NOVA keeps
 // answering instead of silently falling back to the offline brain.
 function modelChain() {
-  // gemini-2.0-flash was retired by Google ("This model ... is no longer
-  // available") — replaced with gemini-3.8-flash, the model Google's own
-  // 404 response recommends. gemini-2.5-flash / gemini-2.5-flash-lite are
-  // still served (not deprecated as of this writing) so they stay as
-  // earlier-choice fallbacks ahead of it.
-  const chain = [GEMINI_MODEL, 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-3.8-flash'];
+  const chain = [GEMINI_MODEL, 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'];
   return [...new Set(chain.filter(Boolean))];
 }
 
@@ -124,11 +119,16 @@ async function callGeminiWithRotation(keys, requestBody, opts = {}) {
           const body = await res.text().catch(() => "");
           lastErr = { status: res.status, model, body: body.slice(0, 300) };
           verdict = classify(res.status, body);
+          // Logged per-attempt (not just the final swallowed error) so a
+          // failure chain is diagnosable from Render logs instead of only
+          // showing whichever model/key happened to fail last.
+          console.error(`Gemini attempt failed [model=${model} keyIdx=${(startIdx + i) % keys.length} status=${res.status} verdict=${verdict}]: ${body.slice(0, 200)}`);
         }
       } catch (err) {
         clearTimeout(timer);
         lastErr = { status: 0, model, body: String(err) };
         verdict = 'key';
+        console.error(`Gemini attempt threw [model=${model} keyIdx=${(startIdx + i) % keys.length}]: ${String(err).slice(0, 200)}`);
       }
       if (verdict === 'stop') return { ok: false, status: lastErr.status || 500, error: lastErr };
       if (verdict === 'model') break; // next model
