@@ -41,7 +41,12 @@ const OVERALL_DEADLINE_MS = 16000;     // client gives up at 20s (index.html cal
 // renamed or not enabled for a key (404/400 "model not found"), NOVA keeps
 // answering instead of silently falling back to the offline brain.
 function modelChain() {
-  const chain = [GEMINI_MODEL, 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'];
+  // gemini-2.0-flash was retired by Google ("This model ... is no longer
+  // available") — replaced with gemini-3.8-flash, the model Google's own
+  // 404 response recommends. gemini-2.5-flash / gemini-2.5-flash-lite are
+  // still served (not deprecated as of this writing) so they stay as
+  // earlier-choice fallbacks ahead of it.
+  const chain = [GEMINI_MODEL, 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-3.8-flash'];
   return [...new Set(chain.filter(Boolean))];
 }
 
