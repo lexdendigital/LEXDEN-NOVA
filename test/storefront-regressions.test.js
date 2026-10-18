@@ -3,7 +3,11 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+// The app used to be one big index.html. It is now split (index.html + css/ + js/ + admin/ + creator/),
+// so these checks read ALL of those files together, exactly as the old single file read.
+const root = path.join(__dirname, '..');
+const walk = (d, ext) => fs.existsSync(path.join(root, d)) ? fs.readdirSync(path.join(root, d)).filter(f => f.endsWith(ext)).sort().map(f => fs.readFileSync(path.join(root, d, f), 'utf8')) : [];
+const html = [fs.readFileSync(path.join(root, 'index.html'), 'utf8'), ...walk('css', '.css'), ...walk('js', '.js'), ...walk('admin', '.js'), ...walk('creator', '.js')].join('\n');
 
 test('affiliate partner disclosure is conditional on an absolute admin link', () => {
   assert.match(html, /function hasAdminAffiliateLink\(p\)/);

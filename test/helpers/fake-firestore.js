@@ -22,6 +22,11 @@ function makeDb(seed = {}) {
       store[c][id] = opts && opts.merge ? merge(store[c][id] || {}, clone(data)) : clone(data);
     },
     async update(data) { store[c][id] = merge(store[c][id] || {}, clone(data)); },
+    // create(): fails like Firestore if the doc already exists (gRPC code 6)
+    async create(data) {
+      if (store[c] && store[c][id] !== undefined) throw Object.assign(new Error('ALREADY_EXISTS'), { code: 6 });
+      store[c] = store[c] || {}; store[c][id] = clone(data);
+    },
   });
   const query = (c, filters = []) => ({
     where(f, op, v) { return query(c, [...filters, [f, v]]); },
@@ -45,11 +50,21 @@ function makeDb(seed = {}) {
       this._chain = p.catch(() => {});
       return p;
     },
+    // write batch: queued, applied in order on commit()
+    batch() {
+      const w = [];
+      return {
+        set: (ref, data, opts) => { w.push(() => ref.set(data, opts)); },
+        update: (ref, data) => { w.push(() => ref.update(data)); },
+        async commit() { for (const f of w) await f(); },
+      };
+    },
     _chain: Promise.resolve(),
     async _runTx(fn) {
       const tx = {
         get: (ref) => ref.get(),
         set: (ref, data, opts) => { tx._w.push(() => ref.set(data, opts)); },
+        update: (ref, data) => { tx._w.push(() => ref.update(data)); },
         _w: [],
       };
       const r = await fn(tx);

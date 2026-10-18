@@ -1,6 +1,7 @@
 // mcp/tools/catalog.js — Products & Categories tabs
 const { z } = require('zod');
-const { getDb, getFirebaseBucket } = require('../../api/affiliate/shared');
+const { getDb } = require('../../api/affiliate/shared');
+const fileStorage = require('../../api/file-storage');
 const { listCatalogDoc, upsertCatalogItem, appendCatalogProductMedia, deleteCatalogItem } = require('../lib/settings');
 const { decodeProductImage, buildImagePath, appendProductImage } = require('../lib/productImage');
 const { randomUUID } = require('node:crypto');
@@ -117,7 +118,7 @@ function register(server) {
 
   server.registerTool('nova_upload_product_image', {
     title: 'Upload and attach a product image',
-    description: 'Uploads a ChatGPT-generated or otherwise admin-approved PNG, JPEG, or WebP image to Lexden Nova Firebase Storage and attaches its permanent URL to the selected existing product in catalog/products (gallery and images). Use when no exact product image can be verified, or when the admin requests generated artwork. Generate the image first, then send its base64 bytes or data:image/*;base64 URI. Provide honest alt text; for physical goods, generated artwork must be a clearly illustrative/lifestyle image and must not imply inaccurate product details. Does not publish the product. Maximum 5 MB; supports at most 8 gallery items.',
+    description: 'Uploads a ChatGPT-generated or otherwise admin-approved PNG, JPEG, or WebP image to Lexden Nova Cloudinary and attaches its permanent URL to the selected existing product in catalog/products (gallery and images). Use when no exact product image can be verified, or when the admin requests generated artwork. Generate the image first, then send its base64 bytes or data:image/*;base64 URI. Provide honest alt text; for physical goods, generated artwork must be a clearly illustrative/lifestyle image and must not imply inaccurate product details. Does not publish the product. Maximum 5 MB; supports at most 8 gallery items.',
     inputSchema: {
       productId: z.string().min(1).max(120),
       generatedImage: z.string().min(1).max(7_000_000),
@@ -131,24 +132,15 @@ function register(server) {
     const { buffer, contentType, extension } = decodeProductImage(generatedImage);
     // Fail before uploading if the product gallery is already full.
     appendProductImage(product, 'https://pending.invalid/image', alt.trim());
-    const token = randomUUID();
     const objectPath = buildImagePath(productId, extension);
-    const bucket = getFirebaseBucket();
-    const file = bucket.file(objectPath);
-    await file.save(buffer, {
-      resumable: false,
-      metadata: {
-        contentType,
-        cacheControl: 'public,max-age=31536000,immutable',
-        metadata: { firebaseStorageDownloadTokens: token, productId, origin: 'nova-mcp-product-image' },
-      },
-    });
-    const imageUrl = `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucket.name)}/o/${encodeURIComponent(objectPath)}?alt=media&token=${token}`;
+    // Cloudinary (free plan) instead of Firebase Storage (paid).
+    const uploaded = await fileStorage.savePublicImage(objectPath, buffer, contentType);
+    const imageUrl = uploaded.url;
     try {
       const saved = await appendCatalogProductMedia(db, productId, { url: imageUrl, type: 'image', alt: alt.trim() });
       return { content: [{ type: 'text', text: JSON.stringify({ productId, productName: product.name || '', imageUrl, alt: alt.trim(), galleryCount: (saved.gallery || []).length, status: saved.status || 'draft', message: 'Image uploaded and attached. The product publication status was not changed.' }, null, 2) }] };
     } catch (error) {
-      await file.delete({ ignoreNotFound: true }).catch(() => {});
+      await fileStorage.deletePublicImage(uploaded.publicId);
       throw error;
     }
   });
