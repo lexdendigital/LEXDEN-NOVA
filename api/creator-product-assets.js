@@ -24,7 +24,8 @@
 // POST /api/creator-product-assets { productId, fileBase64, fileName, mimeType }
 // GET  /api/creator-product-assets?productId=X -> own assets for that product
 const crypto = require('crypto');
-const { getFirebaseBucket, requireActiveCreator, getProductDoc, writeProductAuditLog, getDb, FieldValue, ok, fail, setCors } = require('./creator/shared');
+const fileStorage = require('./file-storage');
+const { requireActiveCreator, getProductDoc, writeProductAuditLog, getDb, FieldValue, ok, fail, setCors } = require('./creator/shared');
 
 const ALLOWED_MIME_TO_EXT = {
   'application/pdf': 'pdf', 'application/zip': 'zip', 'application/x-zip-compressed': 'zip',
@@ -81,11 +82,10 @@ module.exports = async function handler(req, res) {
   const storagePath = `product-assets/${uid}/${productId}/${assetId}.${ext}`;
 
   try {
-    const bucket = getFirebaseBucket();
-    await bucket.file(storagePath).save(buffer, { contentType: mimeType, resumable: false });
+    const stored = await fileStorage.savePrivate(storagePath, buffer, mimeType);
 
     await getDb().collection('productAssets').doc(assetId).set({
-      productId, creatorId: uid, storagePath, mimeType,
+      productId, creatorId: uid, storagePath, storageProvider: stored.storageProvider, mimeType,
       fileName: typeof fileName === 'string' ? fileName.slice(0, 200) : null,
       sizeBytes: buffer.length,
       sha256,

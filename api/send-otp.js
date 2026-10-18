@@ -96,7 +96,7 @@ module.exports = async function handler(req, res) {
   const deadline = setTimeout(() => {
     console.error(`send-otp: DEADLINE hit after ${Date.now() - t0}ms`);
     done(504, { error: "The email service took too long. Please try again in a moment." });
-  }, 15000);
+  }, 8000);
 
   try {
     const ip = String((req.headers["x-forwarded-for"] || "").split(",")[0] || req.socket?.remoteAddress || "unknown").trim();
@@ -116,12 +116,12 @@ module.exports = async function handler(req, res) {
         const d = ipSnap.data();
         if (now - (d.windowStart || 0) < IP_WINDOW_MS) {
           if ((d.count || 0) >= IP_MAX_SENDS) return done(429, { error: "Too many code requests from this connection — try again later." });
-          await ipRef.set({ windowStart: d.windowStart, count: (d.count || 0) + 1 }, { merge: true });
+          ipRef.set({ windowStart: d.windowStart, count: (d.count || 0) + 1 }, { merge: true }).catch(() => {}); // background: don't make the person wait
         } else {
-          await ipRef.set({ windowStart: now, count: 1 });
+          ipRef.set({ windowStart: now, count: 1 }).catch(() => {});
         }
       } else if (ipSnap) {
-        await ipRef.set({ windowStart: now, count: 1 });
+        ipRef.set({ windowStart: now, count: 1 }).catch(() => {});
       }
     } catch (e) {
       console.warn("send-otp: IP rate-limit bookkeeping failed (continuing)", e.message);
@@ -137,15 +137,20 @@ module.exports = async function handler(req, res) {
     // crypto.randomInt = OS CSPRNG; only an HMAC of the code is stored.
     const code = String(crypto.randomInt(100000, 1000000));
     const codeHash = hashCode(code, email);
-    await ref.set({ codeHash, createdAt: Date.now(), expiresAt: Date.now() + CODE_TTL_MS, attempts: 0 });
-    stage("code stored");
+    // Store the code and send the email AT THE SAME TIME (not one after the other).
+    // The code is always stored before the person can read the email and type it in.
 
     // Send DIRECTLY (not via send-email.js): that route reports success even
     // when Brevo rejected the mail and only queued it — fine for a receipt,
     // wrong for a sign-up code the person is staring at the screen waiting
     // for. Here a failed send is reported honestly, with a reason.
     const { sendEmailFast } = require("./email-shared");
-    const result = await sendEmailFast({ templateKey: "verify", to: { email }, params: { code } });
+    const [stored, result] = await Promise.all([
+      ref.set({ codeHash, createdAt: Date.now(), expiresAt: Date.now() + CODE_TTL_MS, attempts: 0 }).then(() => true, (e) => { console.error("send-otp: could not store code:", e.message); return false; }),
+      sendEmailFast({ templateKey: "verify", to: { email }, params: { code } }),
+    ]);
+    stage("code stored=" + stored);
+    if (!stored) return done(500, { error: "Could not send the code. Please try again." });
     stage(result.ok ? "email sent" : "email FAILED");
     if (!result.ok) {
       console.error("send-otp: Brevo send failed:", result.error);

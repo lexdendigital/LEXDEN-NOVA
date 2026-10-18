@@ -11,12 +11,16 @@ module.exports = async (req, res) => {
   let title = APP_NAME;
   let description = FALLBACK_DESCRIPTION;
   let image = FALLBACK_IMAGE;
+  let found = false;
+  let feedRead = false;
 
   if (id) {
     const settings = await getCatalogDoc('settings');
+    feedRead = !!(settings && Array.isArray(settings.feed));
     const feed = settings && Array.isArray(settings.feed) ? settings.feed : [];
     const post = feed.find(p => p && String(p.id) === id);
     if (post) {
+      found = true;
       title = post.title || title;
       description = firstParagraph(post.body) || description;
       const media = Array.isArray(post.media) ? post.media : [];
@@ -30,7 +34,9 @@ module.exports = async (req, res) => {
   // fast cached response; an admin edit to the post still shows up within
   // a minute rather than being stuck behind a long-lived cache.
   res.setHeader('Cache-Control', 'public, max-age=60, s-maxage=300, stale-while-revalidate=600');
-  res.status(200).send(renderRedirectPage({
+  const missing = !!id && feedRead && !found;   // deleted/demo posts: real 404 so Google drops them
+  const page = renderRedirectPage({
     title, description, image, canonicalUrl, destUrl, type: 'article',
-  }));
+  });
+  res.status(missing ? 404 : 200).send(missing ? page.replace('</head>', '<meta name="robots" content="noindex">\n</head>') : page);
 };

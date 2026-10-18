@@ -16,7 +16,8 @@
 // GET  /api/creator-documents  -> the signed-in user's own document list
 //                                 (metadata only — never the storage path)
 const crypto = require('crypto');
-const { getFirebaseBucket, requireAuth, writeCreatorAuditLog, getDb, FieldValue, ok, fail, setCors } = require('./creator/shared');
+const fileStorage = require('./file-storage');
+const { requireAuth, writeCreatorAuditLog, getDb, FieldValue, ok, fail, setCors } = require('./creator/shared');
 
 const ALLOWED_DOC_TYPES = ['identity', 'business_registration', 'address_evidence', 'other'];
 const ALLOWED_MIME_TO_EXT = { 'image/jpeg': 'jpg', 'image/png': 'png', 'application/pdf': 'pdf' };
@@ -80,17 +81,15 @@ module.exports = async function handler(req, res) {
   const storagePath = `creator-documents/${uid}/${docId}.${ext}`;
 
   try {
-    const bucket = getFirebaseBucket();
-    const file = bucket.file(storagePath);
-    // NOT { public: true } / no makePublic() call anywhere — this is the
-    // whole point of this endpoint. Metadata-only, no predictable public
-    // URL is ever handed back.
-    await file.save(buffer, { contentType: mimeType, resumable: false });
+    // Private upload (Cloudinary "authenticated" — no public link exists).
+    // Metadata-only; no predictable public URL is ever handed back.
+    const stored = await fileStorage.savePrivate(storagePath, buffer, mimeType);
 
     await getDb().collection('creatorDocuments').doc(docId).set({
       creatorId: uid,
       docType,
       storagePath,
+      storageProvider: stored.storageProvider,
       mimeType,
       fileName: typeof fileName === 'string' ? fileName.slice(0, 200) : null,
       sizeBytes: buffer.length,

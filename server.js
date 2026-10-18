@@ -140,6 +140,11 @@ for (const name of ENDPOINTS) {
   app.all(`/api/${name}`, safeHandler(require(`./api/${name}`)));
 }
 
+// ---- Live sitemap + robots (real catalog only; see api/sitemap.js) ----
+const sitemapHandler = require('./api/sitemap');
+app.get(['/sitemap.xml', '/api/sitemap'], safeHandler(sitemapHandler));
+app.get('/robots.txt', sitemapHandler.robots);
+
 // ---- Affiliate program (added for the affiliate mega-update) — files
 // live under api/affiliate/ (its own directory, as requested) but keep
 // their original /api/affiliate-* URLs since index.html and
@@ -193,6 +198,8 @@ const CREATOR_ENDPOINTS = [
   'creator-admin-suppliers', 'creator-admin-sla',
   // Stage I — automation: scheduler door, creator notifications, admin controls
   'creator-cron', 'creator-notifications', 'creator-admin-automation',
+  // Email diagnostics (CRON_SECRET-protected): shows exactly why mail is not arriving
+  'email-health',
   // Stage J — Creator AI Home (suggest-only co-pilot)
   'creator-ai',
   // Storefront bridge — public, read-only, sanitised listings

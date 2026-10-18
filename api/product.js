@@ -11,12 +11,16 @@ module.exports = async (req, res) => {
   let title = APP_NAME;
   let description = FALLBACK_DESCRIPTION;
   let image = FALLBACK_IMAGE;
+  let found = false;
+  let catalogRead = false;
 
   if (id) {
     const catalog = await getCatalogDoc('products');
+    catalogRead = !!(catalog && Array.isArray(catalog.list));
     const list = catalog && Array.isArray(catalog.list) ? catalog.list : [];
     const product = list.find(p => p && String(p.id) === id);
     if (product) {
+      found = true;
       title = product.name || title;
       description = firstParagraph(product.description, 200) || description;
       if (product.image) image = ogImage(product.image);
@@ -31,18 +35,23 @@ module.exports = async (req, res) => {
           const cs = prod.creatorId ? await getDb().collection('creators').doc(prod.creatorId).get() : null;
           const l = toPublicListing(prod, cs && cs.exists ? cs.data() : null);
           if (l) {
+            found = true;
             title = l.title || title;
             description = firstParagraph(l.description, 200) || description;
             if (l.images && l.images[0]) image = ogImage(l.images[0]);
           }
         }
-      } catch (e) { /* keep the default preview */ }
+      } catch (e) { catalogRead = false; /* keep the default preview; never call it missing on an error */ }
     }
   }
 
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.setHeader('Cache-Control', 'public, max-age=60, s-maxage=300, stale-while-revalidate=600');
-  res.status(200).send(renderRedirectPage({
+  // An id that is definitely not in the catalog (demo items, deleted products) is a real 404 so
+  // Google drops it, but only when the catalog was read fine, never on a temporary error.
+  const missing = !!id && catalogRead && !found;
+  const page = renderRedirectPage({
     title, description, image, canonicalUrl, destUrl, type: 'product',
-  }));
+  });
+  res.status(missing ? 404 : 200).send(missing ? page.replace('</head>', '<meta name="robots" content="noindex">\n</head>') : page);
 };

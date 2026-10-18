@@ -8,7 +8,8 @@
 // signed URLs for every asset that entitlement covers.
 //
 // Response: { ok:true, data: { links: [{ assetId, fileName, mimeType, url, expiresAt }] } }
-const { requireAuth, getDb, getFirebaseBucket, writeProductAuditLog, ok, fail, setCors } = require('./creator/shared');
+const fileStorage = require('./file-storage');
+const { requireAuth, getDb, writeProductAuditLog, ok, fail, setCors } = require('./creator/shared');
 const { findActiveEntitlement, canDownloadAsset } = require('./creator/entitlements');
 
 // Long enough for an 8MB download on a slow connection (Stage C's
@@ -65,13 +66,12 @@ module.exports = async function handler(req, res) {
 
     const links = [];
     if (assetIds.length) {
-      const bucket = getFirebaseBucket();
       const expiresAtMs = Date.now() + SIGNED_URL_TTL_MS;
       for (const assetId of assetIds) {
         const assetSnap = await db.collection('productAssets').doc(assetId).get();
         if (!assetSnap.exists) continue;
         const asset = assetSnap.data();
-        const [url] = await bucket.file(asset.storagePath).getSignedUrl({ action: 'read', expires: expiresAtMs });
+        const url = await fileStorage.signedDownloadUrl(asset, expiresAtMs);
         links.push({ assetId, fileName: asset.fileName || null, mimeType: asset.mimeType || null, url, expiresAt: new Date(expiresAtMs).toISOString() });
       }
     }

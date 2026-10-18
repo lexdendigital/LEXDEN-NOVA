@@ -16,7 +16,7 @@
 //      Seller-stage decisions (once APPROVED/ACTIVE):
 //        { uid, action: 'suspend' | 'restrict' | 'reactivate' | 'revoke', reason? }
 const {
-  getDb, FieldValue, requireAdminAuth, getCreatorDoc, getApplicationDoc,
+  getDb, getAuthAdmin, FieldValue, requireAdminAuth, getCreatorDoc, getApplicationDoc,
   writeCreatorAuditLog, ok, fail, setCors,
 } = require('./creator/shared');
 const {
@@ -32,8 +32,14 @@ const { queueEmailBackground } = require('./email-shared');
 async function notifyApplicant(uid, templateKey, params) {
   try {
     const privSnap = await getDb().collection('creatorPrivate').doc(uid).get();
-    const email = privSnap.exists && privSnap.data().email;
+    let email = privSnap.exists && privSnap.data().email;
+    // Fallback: the applicant may not have typed an email in the form — use the
+    // email on their LEXDEN NOVA login instead, so the decision email still goes out.
+    if (!email) {
+      try { const u = await getAuthAdmin().getUser(uid); email = u && u.email; } catch (e) { console.error('creator notification: auth email lookup failed:', e.message); }
+    }
     if (email) queueEmailBackground({ templateKey, to: { email }, params });
+    else console.error(`creator notification: no email address found for ${uid}; "${templateKey}" not sent`);
   } catch (e) {
     console.error('creator notification email lookup failed:', e);
   }

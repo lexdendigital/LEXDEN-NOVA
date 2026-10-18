@@ -4,7 +4,7 @@
 // One doc per order; doc ID = the Paystack reference (1:1 with
 // orders/{reference}).
 const crypto = require('crypto');
-const { getDb: sharedGetDb, FieldValue, getFirebaseBucket } = require('./shared');
+const { getDb: sharedGetDb, FieldValue } = require('./shared');
 const { FULFILLMENT_STATES, assertFulfillmentTransition } = require('./fulfillment-state-machine');
 const { slaPolicyFor, computeDeadlines } = require('./sla');
 
@@ -134,7 +134,7 @@ async function saveProofPhoto(orderId, fileBase64, mimeType) {
   if (!buffer.length) throw proofError('The decoded proof photo is empty.', 'EMPTY_FILE', 422);
   if (buffer.length > PROOF_MAX_BYTES) throw proofError(`Proof photos must be ${PROOF_MAX_BYTES / (1024 * 1024)}MB or smaller.`, 'FILE_TOO_LARGE', 413);
   const storagePath = `fulfillment-proof/${orderId}/${crypto.randomUUID()}.${ext}`;
-  await getFirebaseBucket().file(storagePath).save(buffer, { contentType: mimeType, resumable: false });
+  await require('../file-storage').savePrivate(storagePath, buffer, mimeType);
   return storagePath;
 }
 

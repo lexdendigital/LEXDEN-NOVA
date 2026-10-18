@@ -41,8 +41,13 @@
 
 const admin = require('firebase-admin');
 
-const EMAIL_TIMEOUT_MS = 4000; // hard cap per attempt — leaves headroom under a 5s budget
-const MAX_FAST_ATTEMPTS = 2;   // 1 try + 1 immediate retry, both inside the timeout budget
+// Whole fast path (all attempts together) must finish inside ~2.8s so the person
+// waiting on a sign-up code gets an answer within 3 seconds. Brevo normally replies in
+// well under a second; a quick connection error still gets one immediate retry
+// because the budget is shared, not per attempt.
+const EMAIL_BUDGET_MS = 2800;
+const EMAIL_TIMEOUT_MS = EMAIL_BUDGET_MS;
+const MAX_FAST_ATTEMPTS = 2;
 
 function initAdmin() {
   if (admin.apps.length) return admin.app();
@@ -63,7 +68,7 @@ function dbOrNull() {
 
 // One raw, timeout-bounded attempt at Brevo's transactional email API.
 // payload: { templateKey, to:{email,name?}, params:{...}, replyTo?, sender? }
-async function attemptSend(payload) {
+async function attemptSend(payload, timeoutMs = EMAIL_TIMEOUT_MS) {
   const apiKey = process.env.BREVO_API_KEY;
   const templateEnvKey = `BREVO_TPL_${String(payload.templateKey || '').toUpperCase()}`;
   const templateId = Number(process.env[templateEnvKey]);
@@ -83,7 +88,7 @@ async function attemptSend(payload) {
   if (payload.replyTo) body.replyTo = { email: payload.replyTo };
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), EMAIL_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), Math.max(300, timeoutMs));
   try {
     const r = await fetch('https://api.brevo.com/v3/smtp/email', {
       method: 'POST',
@@ -107,16 +112,23 @@ async function attemptSend(payload) {
 // inside a 5-second guarantee even with one retry.
 async function sendEmailFast(payload) {
   let lastErr;
+  const startedAt = Date.now();
+  const budget = (payload && payload._budgetMs) || EMAIL_BUDGET_MS;
   for (let attempt = 1; attempt <= MAX_FAST_ATTEMPTS; attempt++) {
+    const left = budget - (Date.now() - startedAt);
+    if (attempt > 1 && left < 600) break; // not enough time for a meaningful retry
     try {
-      const data = await attemptSend(payload);
+      const data = await attemptSend(payload, left);
       return { ok: true, attempts: attempt, messageId: data && data.messageId };
     } catch (e) {
       lastErr = e;
       if (e.permanent) break; // misconfiguration — retrying won't help
     }
   }
-  return { ok: false, error: lastErr ? lastErr.message : 'Unknown email failure' };
+  const error = lastErr ? lastErr.message : 'Unknown email failure';
+  // Never fail silently: this line is how "no email arrived" gets diagnosed in the Render logs.
+  console.error(`email-shared: SEND FAILED template=${payload && payload.templateKey} reason=${error}`);
+  return { ok: false, error };
 }
 
 async function enqueueForRetry(payload, reason) {
@@ -124,16 +136,32 @@ async function enqueueForRetry(payload, reason) {
   if (!database) { console.error('email-shared: could not queue failed email (Firebase Admin not configured):', reason); return; }
   try {
     await database.collection('emailQueue').add({
-      payload,
+      payload: JSON.parse(JSON.stringify(payload)), // drops undefined fields (e.g. replyTo) that Firestore rejects
       lastError: String(reason || '').slice(0, 300),
       attempts: 1,
       status: 'pending',
       createdAt: Date.now(),
-      nextAttemptAt: Date.now() + 60 * 1000, // first retry in 1 minute
+      nextAttemptAt: Date.now() + 15 * 1000, // first retry in 15 seconds
     });
+    scheduleQueueDrain(20000);
   } catch (e) {
     console.error('email-shared: failed to enqueue email for retry:', e.message);
   }
+}
+
+// A failed email should not wait for the next cron tick (up to 10 min). Drain the queue
+// shortly after, inside this same server process. Safe to call repeatedly: one timer at a time.
+let drainTimer = null;
+function scheduleQueueDrain(delayMs) {
+  if (drainTimer || process.env.NODE_ENV === 'test') return;
+  drainTimer = setTimeout(async () => {
+    drainTimer = null;
+    try {
+      const { callHandler } = require('../mcp/lib/callHandler');
+      await callHandler(require('./process-email-queue'), { method: 'GET' });
+    } catch (e) { console.error('email-shared: queue drain failed:', e.message); }
+  }, delayMs);
+  if (drainTimer.unref) drainTimer.unref();
 }
 
 // The full guaranteed path: fast attempts, then queue on failure. Always
@@ -166,4 +194,4 @@ function queueEmailBackground(payload) {
   }
 }
 
-module.exports = { sendEmailFast, sendEmailGuaranteed, queueEmailBackground, EMAIL_TIMEOUT_MS };
+module.exports = { EMAIL_BUDGET_MS, scheduleQueueDrain, sendEmailFast, sendEmailGuaranteed, queueEmailBackground, attemptSend, EMAIL_TIMEOUT_MS };

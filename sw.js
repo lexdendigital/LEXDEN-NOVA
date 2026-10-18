@@ -1,70 +1,89 @@
 /* LEXDEN NOVA — service worker
-   Two jobs:
-   1. PWA app-shell caching (stale-while-revalidate) — installability +
-      fast repeat loads. Only the shell (this file's own cache) is
-      cached; product/catalog DATA always comes live from Firestore, never
-      from this cache, so shoppers never see stale prices/products.
-   2. Firebase Cloud Messaging background push — shows a system
-      notification when an "Important" feed post triggers a push and the
-      app isn't open/focused.
-
-   *** BUMP CACHE_VERSION EVERY TIME YOU REDEPLOY index.html ***
-   Browsers can hold on to an old cached copy of the app shell otherwise —
-   this is almost always the real cause of "I edited it but my other
-   device doesn't show the change": the DATA (Firestore) synced fine, but
-   the CODE FILE on that other device's browser was still the cached one.
-   Bumping this version forces every device to fetch the new shell on next
-   load. */
-const CACHE_VERSION = 'nova-shell-v2.2.0';
+   Jobs:
+   1. PWA install + OFFLINE FALLBACK for the app shell.
+   2. ALWAYS-LATEST CODE: every page, script and stylesheet is fetched from the
+      network first (revalidated, never served from the browser's 10-minute
+      cache). The cached copy is used ONLY when the person is offline. So a new
+      deploy shows up on the next open — no more "refresh 5 times" — and nobody
+      has to remember to bump a version number any more.
+   3. A new service worker takes over immediately and reloads any open
+      window(s) once, so even an installed PWA that was left open updates itself.
+   4. Firebase Cloud Messaging background push.
+   Catalog DATA always comes live from Firestore; it is never read from here. */
+const CACHE_VERSION = 'nova-shell-v3';
 const SHELL_FILES = [
-  './',
-  './index.html',
-  './manifest.json',
+  './', './index.html', './manifest.json', './css/app.css',
+  './js/firebase.js', './js/data.js', './js/state.js', './js/core.js', './js/support.js',
+  './js/shopper.js', './js/nova-ai.js', './js/update.js', './js/boot.js',
+  // admin portal + creator workspace (their own pages)
+  './admin/', './admin/index.html', './admin/admin.js', './admin/main.js',
+  './creator/', './creator/index.html', './creator/creator.js', './creator/main.js',
 ];
 
 self.addEventListener('install', (event) => {
   self.skipWaiting();
   event.waitUntil(
-    caches.open(CACHE_VERSION).then((cache) => cache.addAll(SHELL_FILES).catch(() => {}))
+    caches.open(CACHE_VERSION).then((cache) =>
+      Promise.all(SHELL_FILES.map((f) => fetch(f, { cache: 'reload' }).then((r) => r.ok && cache.put(f, r)).catch(() => {})))
+    )
   );
 });
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE_VERSION).map((k) => caches.delete(k)))
-    ).then(() => self.clients.claim())
-  );
+  event.waitUntil((async () => {
+    const keys = await caches.keys();
+    const hadOld = keys.some((k) => k !== CACHE_VERSION);
+    await Promise.all(keys.filter((k) => k !== CACHE_VERSION).map((k) => caches.delete(k)));
+    await self.clients.claim();
+    // Upgrading from an older worker: pages already open are still running old code
+    // from the old cache, so reload them once onto the fresh files.
+    if (hadOld) {
+      const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+      wins.forEach((c) => { try { c.navigate(c.url); } catch (e) {} });
+    }
+  })());
+});
+
+self.addEventListener('message', (event) => {
+  if (event.data === 'SKIP_WAITING') self.skipWaiting();
 });
 
 self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
-  // Only cache same-origin app-shell files. Everything else (Firestore,
-  // images, fonts, Paystack SDK, etc.) goes straight to the network.
+  // Only same-origin app files. Firestore, images, fonts, Paystack, the API etc. go straight to the network.
   if (url.origin !== self.location.origin) return;
-
-  event.respondWith(
-    caches.open(CACHE_VERSION).then(async (cache) => {
-      const cached = await cache.match(req);
-      const network = fetch(req).then((res) => {
-        if (res && res.ok) cache.put(req, res.clone());
-        return res;
-      }).catch(() => cached);
-      return cached || network;
-    })
-  );
+  event.respondWith((async () => {
+    const cache = await caches.open(CACHE_VERSION);
+    try {
+      let res;
+      try { res = await fetch(req, { cache: 'no-cache' }); } catch (e) { if (e && e.name === 'TypeError' && req.mode === 'navigate') throw e; res = await fetch(req.url, { cache: 'no-cache' }); }
+      if (res && res.ok) cache.put(req, res.clone());
+      return res;
+    } catch (e) {
+      const hit = await cache.match(req, { ignoreSearch: true });
+      if (hit) return hit;
+      if (req.mode === 'navigate') { const shell = await cache.match('./index.html'); if (shell) return shell; }
+      throw e;
+    }
+  })());
 });
 
 /* ---------------- Firebase Cloud Messaging (background push) ---------------- */
-importScripts('https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js');
-importScripts('https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js');
+// If Google's CDN is blocked/unreachable the worker must still install (offline shell + auto-update
+// matter more than push), so a failed import only disables background push.
+let __fcmLoaded = false;
+try {
+  importScripts('https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js');
+  importScripts('https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js');
+  __fcmLoaded = true;
+} catch (e) { console.warn('FCM scripts unavailable; push disabled for now', e); }
 
 // Same values as firebaseConfig in index.html — messaging needs its own
 // compat-style init inside the service worker (modular SDK can't run
 // here the same way).
-firebase.initializeApp({
+if (__fcmLoaded) firebase.initializeApp({
   apiKey: "AIzaSyBk4WD0D5m6386sb62KC-5KKMpUuOLC9fs",
   authDomain: "lexden-nova.firebaseapp.com",
   projectId: "lexden-nova",

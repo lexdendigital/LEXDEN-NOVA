@@ -5,7 +5,7 @@
 // it. nova-ai.js now requires this file too — same behavior as before,
 // just shared instead of copy-pasted.
 
-const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash"; // legacy default; see modelChain()
 
 /* ============================================================
    MULTI-KEY ROTATION — supports THREE ways of configuring keys:
@@ -37,11 +37,64 @@ const MAX_KEY_ATTEMPTS = 4;
 const PER_ATTEMPT_TIMEOUT_MS = 8000;   // gemini-2.5-flash with images can take >4s; 4s aborted healthy calls
 const OVERALL_DEADLINE_MS = 16000;     // client gives up at 20s (index.html callRealNovaAPI)
 
-// Primary model first, then cheaper/older ones: if a model is retired,
-// renamed or not enabled for a key (404/400 "model not found"), NOVA keeps
-// answering instead of silently falling back to the offline brain.
-function modelChain() {
-  const chain = [GEMINI_MODEL, 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'];
+// Google retires models (gemini-2.0-flash now answers 404 "no longer available"),
+// so a hard-coded list rots. Strategy:
+//   1) GEMINI_MODEL (if you set it) is always tried first.
+//   2) Then the models Google itself says are available RIGHT NOW to this key
+//      (ListModels, cached for an hour), best "flash" version first.
+//   3) Then a static fallback list.
+// A model that answers 404 is remembered as dead for 6 hours so it is not retried on
+// every chat message.
+const STATIC_FALLBACKS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'];
+const MODEL_CACHE_MS = 60 * 60 * 1000;
+const DEAD_MODEL_MS = 6 * 60 * 60 * 1000;
+let modelCache = { at: 0, models: [] };
+const deadModels = new Map();
+
+function markDead(model) { deadModels.set(model, Date.now() + DEAD_MODEL_MS); }
+function isDead(model) { const t = deadModels.get(model); if (!t) return false; if (Date.now() > t) { deadModels.delete(model); return false; } return true; }
+
+// Pure: pick usable chat models from a ListModels payload, newest flash first.
+function pickChatModels(listPayload) {
+  const rows = (listPayload && listPayload.models) || [];
+  const scored = [];
+  for (const m of rows) {
+    const name = String(m.name || '').replace(/^models\//, '');
+    const methods = m.supportedGenerationMethods || [];
+    if (!/^gemini-/.test(name) || !methods.includes('generateContent')) continue;
+    if (!/flash/.test(name)) continue;
+    if (/image|tts|live|audio|embedding|robotics|computer|exp|thinking|learnlm|-latest$/i.test(name)) continue;
+    const ver = /gemini-(\d+(?:\.\d+)?)/.exec(name);
+    const v = ver ? parseFloat(ver[1]) : 0;
+    const lite = /lite/.test(name) ? 1 : 0;
+    const preview = /preview/.test(name) ? 1 : 0;
+    scored.push({ name, v, lite, preview });
+  }
+  // newest version first; stable before preview; full flash before lite
+  scored.sort((a, b) => b.v - a.v || a.preview - b.preview || a.lite - b.lite || a.name.localeCompare(b.name));
+  return [...new Set(scored.map(x => x.name))].slice(0, 5);
+}
+
+async function discoverModels(keys, doFetch) {
+  if (Date.now() - modelCache.at < MODEL_CACHE_MS && modelCache.models.length) return modelCache.models;
+  if (Date.now() - modelCache.at < 2 * 60 * 1000 && modelCache.at) return modelCache.models; // recent failure: don't hammer
+  for (const key of keys.slice(0, 2)) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 3000);
+    try {
+      const res = await doFetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=200', { headers: { 'x-goog-api-key': key }, signal: controller.signal });
+      clearTimeout(timer);
+      if (!res.ok) continue;
+      const picked = pickChatModels(await res.json());
+      if (picked.length) { modelCache = { at: Date.now(), models: picked }; return picked; }
+    } catch { clearTimeout(timer); }
+  }
+  modelCache = { at: Date.now(), models: modelCache.models }; // remember the failure briefly
+  return modelCache.models;
+}
+
+function modelChain(discovered = []) {
+  const chain = [process.env.GEMINI_MODEL, ...discovered, GEMINI_MODEL, ...STATIC_FALLBACKS];
   return [...new Set(chain.filter(Boolean))];
 }
 
@@ -81,7 +134,8 @@ async function callGeminiWithRotation(keys, requestBody, opts = {}) {
     return { ok: false, status: 500, error: "no_keys" };
   }
   const doFetch = opts.fetchImpl || fetch;
-  const models = opts.models || modelChain();
+  const models = (opts.models || modelChain(opts.skipDiscovery ? [] : await discoverModels(keys, doFetch))).filter(m => !isDead(m) || opts.models);
+  if (!models.length) models.push(...modelChain());
   const startIdx = rotateCursor % keys.length;
   rotateCursor = (rotateCursor + 1) % keys.length;
   const deadlineAt = Date.now() + (opts.deadlineMs || OVERALL_DEADLINE_MS);
@@ -119,23 +173,18 @@ async function callGeminiWithRotation(keys, requestBody, opts = {}) {
           const body = await res.text().catch(() => "");
           lastErr = { status: res.status, model, body: body.slice(0, 300) };
           verdict = classify(res.status, body);
-          // Logged per-attempt (not just the final swallowed error) so a
-          // failure chain is diagnosable from Render logs instead of only
-          // showing whichever model/key happened to fail last.
-          console.error(`Gemini attempt failed [model=${model} keyIdx=${(startIdx + i) % keys.length} status=${res.status} verdict=${verdict}]: ${body.slice(0, 200)}`);
         }
       } catch (err) {
         clearTimeout(timer);
         lastErr = { status: 0, model, body: String(err) };
         verdict = 'key';
-        console.error(`Gemini attempt threw [model=${model} keyIdx=${(startIdx + i) % keys.length}]: ${String(err).slice(0, 200)}`);
       }
       if (verdict === 'stop') return { ok: false, status: lastErr.status || 500, error: lastErr };
-      if (verdict === 'model') break; // next model
+      if (verdict === 'model') { if (lastErr && lastErr.status === 404) markDead(model); break; } // next model
       // 'key' -> next key
     }
   }
   return { ok: false, status: (lastErr && lastErr.status) || 500, error: lastErr };
 }
 
-module.exports = { GEMINI_MODEL, getApiKeys, callGeminiWithRotation, modelChain, classify, textOf };
+module.exports = { GEMINI_MODEL, pickChatModels, discoverModels, _resetModelState: () => { modelCache = { at: 0, models: [] }; deadModels.clear(); }, getApiKeys, callGeminiWithRotation, modelChain, classify, textOf };
