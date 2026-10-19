@@ -21,8 +21,8 @@ module.exports = async (req, res) => {
     const product = list.find(p => p && String(p.id) === id);
     if (product) {
       found = true;
-      title = product.name || title;
-      description = firstParagraph(product.description, 200) || description;
+      title = product.seoTitle || product.name || title;
+      description = firstParagraph(product.metaDescription || product.shortDescription || product.description, 200) || description;
       if (product.image) image = ogImage(product.image);
     } else {
       // Not a catalog product: it may be a creator listing (public, sanitised data only).
