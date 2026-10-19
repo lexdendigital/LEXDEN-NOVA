@@ -444,6 +444,41 @@ function openProductForm(id){
     <p class="text-2 small" style="margin-top:6px;">If a product is Free, tapping "Get it free" opens the Delivery link (or the uploaded file, or the Affiliate link) directly — no payment step. If it's paid and an External payment link is set, the buy button sends the shopper there instead of opening Paystack; use the Delivery link if that other site should redirect back with a downloadable file/receipt.</p>
     <div class="divider"></div>
     <div class="form-field"><label>Description</label><textarea id="f_desc">${p?escapeHtml(p.description):''}</textarea></div>
+
+    <div class="divider"></div>
+    <h4 style="font-size:13px;margin-bottom:8px;">Advanced product listing</h4>
+    <p class="text-2 small" style="margin-bottom:10px;">Optional structured fields for courses and other detailed products. They appear on the product page only when filled.</p>
+    <div class="form-grid">
+      <div class="form-field"><label>Short description</label><textarea id="f_shortDescription" maxlength="240" placeholder="Concise summary for cards and search snippets">${p?escapeHtml(p.shortDescription||''):''}</textarea></div>
+      <div class="form-field"><label>Hero copy</label><textarea id="f_heroCopy" maxlength="220" placeholder="One strong product promise, without unsupported claims">${p?escapeHtml(p.heroCopy||''):''}</textarea></div>
+      <div class="form-field"><label>SEO slug</label><input id="f_slug" maxlength="120" placeholder="affiliate-marketing-professional-programme" value="${p?escapeHtml(p.slug||''):''}"><span class="text-2 small">Stored as metadata. Existing Nova product URLs still route by product ID.</span></div>
+      <div class="form-field"><label>SEO title</label><input id="f_seoTitle" maxlength="60" placeholder="Recommended: about 50–60 characters" value="${p?escapeHtml(p.seoTitle||''):''}"></div>
+      <div class="form-field"><label>Meta description</label><textarea id="f_metaDescription" maxlength="160" placeholder="Recommended: up to 160 characters">${p?escapeHtml(p.metaDescription||''):''}</textarea></div>
+      <div class="form-field"><label>Search keywords</label><input id="f_searchKeywords" placeholder="Comma separated" value="${p?escapeHtml((p.searchKeywords||[]).join(', ')):''}"></div>
+    </div>
+    <div class="form-grid">
+      <div class="form-field"><label>Who it is for</label><textarea id="f_audienceFor">${p?escapeHtml(p.audienceFor||''):''}</textarea></div>
+      <div class="form-field"><label>Who it is NOT for</label><textarea id="f_audienceNotFor">${p?escapeHtml(p.audienceNotFor||''):''}</textarea></div>
+      <div class="form-field"><label>Learning outcomes</label><textarea id="f_learningOutcomes" placeholder="One outcome per line">${p?escapeHtml(p.learningOutcomes||''):''}</textarea></div>
+      <div class="form-field"><label>Course / product contents</label><textarea id="f_courseContents" placeholder="Module-by-module or section-by-section contents">${p?escapeHtml(p.courseContents||''):''}</textarea></div>
+      <div class="form-field"><label>Delivery format</label><textarea id="f_deliveryFormat">${p?escapeHtml(p.deliveryFormat||''):''}</textarea></div>
+      <div class="form-field"><label>Duration / pace note</label><textarea id="f_durationNote">${p?escapeHtml(p.durationNote||''):''}</textarea></div>
+      <div class="form-field"><label>Requirements</label><textarea id="f_requirements">${p?escapeHtml(p.requirements||''):''}</textarea></div>
+      <div class="form-field"><label>Tools</label><textarea id="f_tools">${p?escapeHtml(p.tools||''):''}</textarea></div>
+      <div class="form-field"><label>Certificate / completion</label><textarea id="f_certificateDetails">${p?escapeHtml(p.certificateDetails||''):''}</textarea></div>
+      <div class="form-field"><label>Assignments / assessment</label><textarea id="f_assignmentsDetails">${p?escapeHtml(p.assignmentsDetails||''):''}</textarea></div>
+      <div class="form-field"><label>Capstone / final project</label><textarea id="f_capstoneDetails">${p?escapeHtml(p.capstoneDetails||''):''}</textarea></div>
+      <div class="form-field"><label>Access and delivery wording</label><textarea id="f_accessDelivery">${p?escapeHtml(p.accessDelivery||''):''}</textarea></div>
+      <div class="form-field"><label>Support wording</label><textarea id="f_supportWording">${p?escapeHtml(p.supportWording||''):''}</textarea></div>
+      <div class="form-field"><label>Refund policy</label><textarea id="f_refundPolicy" placeholder="Product-specific refund/return policy">${p?escapeHtml(p.refundPolicy||''):''}</textarea></div>
+      <div class="form-field"><label>Compliance disclaimer</label><textarea id="f_complianceDisclaimer">${p?escapeHtml(p.complianceDisclaimer||''):''}</textarea></div>
+      <div class="form-field"><label>Earnings / results disclaimer</label><textarea id="f_earningsDisclaimer">${p?escapeHtml(p.earningsDisclaimer||''):''}</textarea></div>
+    </div>
+    <div class="form-field">
+      <label>Product FAQs</label>
+      <textarea id="f_productFaqs" placeholder="One FAQ per line: Question || Answer">${p?escapeHtml((p.productFaqs||[]).map(f=>`${f.q} || ${f.a}`).join('\n')):''}</textarea>
+      <span class="text-2 small">Use exactly one question and answer per line, separated by ||.</span>
+    </div>
     <div class="flex gap-8">
       <button class="btn btn-primary" id="productSaveBtn" onclick="saveProduct('${p?p.id:''}')">Save</button>
       <button class="btn btn-outline" onclick="$('#productFormWrap').innerHTML=''">Cancel</button>
@@ -704,7 +739,34 @@ async function saveProduct(id){
     deliveryLink: $('#f_deliveryLink')?.value.trim() || '',
     externalPaymentLink: $('#f_externalPaymentLink')?.value.trim() || '',
     status:$('#f_status').value, tags:$('#f_tags').value.split(',').map(t=>t.trim()).filter(Boolean),
-    description:$('#f_desc').value, specs, rating:(id&&findProduct(id)?.rating)||4.5,
+    description:$('#f_desc').value,
+    shortDescription: $('#f_shortDescription')?.value.trim() || '',
+    heroCopy: $('#f_heroCopy')?.value.trim() || '',
+    slug: $('#f_slug')?.value.trim() || '',
+    seoTitle: $('#f_seoTitle')?.value.trim() || '',
+    metaDescription: $('#f_metaDescription')?.value.trim() || '',
+    searchKeywords: ($('#f_searchKeywords')?.value || '').split(',').map(v=>v.trim()).filter(Boolean),
+    audienceFor: $('#f_audienceFor')?.value.trim() || '',
+    audienceNotFor: $('#f_audienceNotFor')?.value.trim() || '',
+    learningOutcomes: $('#f_learningOutcomes')?.value.trim() || '',
+    courseContents: $('#f_courseContents')?.value.trim() || '',
+    deliveryFormat: $('#f_deliveryFormat')?.value.trim() || '',
+    durationNote: $('#f_durationNote')?.value.trim() || '',
+    requirements: $('#f_requirements')?.value.trim() || '',
+    tools: $('#f_tools')?.value.trim() || '',
+    certificateDetails: $('#f_certificateDetails')?.value.trim() || '',
+    assignmentsDetails: $('#f_assignmentsDetails')?.value.trim() || '',
+    capstoneDetails: $('#f_capstoneDetails')?.value.trim() || '',
+    accessDelivery: $('#f_accessDelivery')?.value.trim() || '',
+    supportWording: $('#f_supportWording')?.value.trim() || '',
+    refundPolicy: $('#f_refundPolicy')?.value.trim() || '',
+    complianceDisclaimer: $('#f_complianceDisclaimer')?.value.trim() || '',
+    earningsDisclaimer: $('#f_earningsDisclaimer')?.value.trim() || '',
+    productFaqs: ($('#f_productFaqs')?.value || '').split('\n').map(line=>line.trim()).filter(Boolean).map(line=>{
+      const split=line.indexOf('||');
+      return split<0?{q:line,a:''}:{q:line.slice(0,split).trim(),a:line.slice(split+2).trim()};
+    }).filter(f=>f.q&&f.a),
+    specs, rating:(id&&findProduct(id)?.rating)||4.5,
     reviewCount:(id&&findProduct(id)?.reviewCount)||0, featured:(id&&findProduct(id)?.featured)||false, trending:(id&&findProduct(id)?.trending)||false,
     productType: $('#f_productType')?.value || 'DIGITAL',
     affiliateEnabled: $('#f_affiliateEnabled')?.checked || false,
