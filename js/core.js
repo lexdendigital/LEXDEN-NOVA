@@ -380,15 +380,16 @@ function updateSeoForRoute(hash){
   if(hash.startsWith('#product/')){
     const p = findProduct(hash.split('/')[1]);
     if(p){
-      const desc = p.description.slice(0,160);
+      const desc = (p.metaDescription || p.shortDescription || p.description || '').slice(0,160);
+      const seoTitle = (p.seoTitle || p.name || '').trim();
       const url = NOVA_LINKS_BASE+'/product/'+p.id;
       const cat = DB.categories.find(x=>x.id===p.category);
-      document.title = `${p.name} — ${appName}`;
+      document.title = seoTitle ? `${seoTitle} — ${appName}` : appName;
       setMeta('description', desc);
-      setMeta('og:title', `${p.name} — ${appName}`, true);
+      setMeta('og:title', seoTitle ? `${seoTitle} — ${appName}` : appName, true);
       setMeta('og:description', desc, true);
       if(p.image) setMeta('og:image', p.image, true);
-      setMeta('twitter:title', `${p.name} — ${appName}`);
+      setMeta('twitter:title', seoTitle ? `${seoTitle} — ${appName}` : appName);
       setMeta('twitter:description', desc);
       if(p.image) setMeta('twitter:image', p.image);
       setCanonical(url);
@@ -399,7 +400,12 @@ function updateSeoForRoute(hash){
         ...(cat?[{name:cat.name, url: SITE_URL+'#products'}]:[]),
         {name:p.name, url},
       ]));
-      setJsonLd('faqSchema', null);
+      if(Array.isArray(p.productFaqs) && p.productFaqs.length){
+        setJsonLd('faqSchema', {
+          '@context':'https://schema.org', '@type':'FAQPage',
+          mainEntity:p.productFaqs.filter(f=>f&&f.q&&f.a).map(f=>({'@type':'Question',name:f.q,acceptedAnswer:{'@type':'Answer',text:f.a}})),
+        });
+      } else setJsonLd('faqSchema', null);
       return;
     }
   }
