@@ -286,7 +286,7 @@ function productSearchText(p){
   const specs=Object.entries(p.specs||{}).flatMap(([key,value])=>[key,value]);
   const options=Array.isArray(p.options)?p.options.flatMap(option=>[option.name,...(option.values||[]) ]):[];
   const variants=Array.isArray(p.variants)?p.variants.flatMap(variant=>[variant.title,variant.sku,variant.name,...Object.values(variant.options||{})]):[];
-  return [p.name,p.description,p.categoryName,p.format,p.level,p.productType,category&&category.name,productKind(p),...(p.tags||[]),...specs,...options,...variants].filter(Boolean).join(' ').toLowerCase();
+  return [p.name,p.shortDescription,p.description,p.heroCopy,p.categoryName,p.format,p.level,p.productType,category&&category.name,productKind(p),...(p.tags||[]),...(p.searchKeywords||[]),...specs,...options,...variants].filter(Boolean).join(' ').toLowerCase();
 }
 function setDiscoveryKind(kind){appState.productFilters.kind=kind;rerenderProductList();}
 function screenProducts(){
@@ -485,6 +485,41 @@ function physicalStockBlock(p){
     ${ph.deliveryEstimate ? `<span>🚚 Estimated delivery: ${escapeHtml(ph.deliveryEstimate)}</span>` : ''}
   </div>`;
 }
+function formatStructuredProductText(text){
+  const raw=String(text||'').trim();
+  if(!raw)return '';
+  return raw.split(/\n\s*\n/).map(paragraph=>{
+    const lines=paragraph.split('\n').map(line=>line.trim()).filter(Boolean);
+    if(lines.length>1 && lines.every(line=>/^[-•*]|^\d+[.)]/.test(line))){
+      return '<ul style="margin:6px 0 0 18px;">'+lines.map(line=>'<li>'+escapeHtml(line.replace(/^[-•*]\s*|^\d+[.)]\s*/,''))+'</li>').join('')+'</ul>';
+    }
+    return '<p class="text-2" style="font-size:13.5px;line-height:1.7;margin:0 0 10px;">'+lines.map(escapeHtml).join('<br>')+'</p>';
+  }).join('');
+}
+function structuredProductSections(p){
+  const sections=[
+    ['Who this is for',p.audienceFor],
+    ['Who this is not for',p.audienceNotFor],
+    ['What you will learn',p.learningOutcomes],
+    ['Course contents',p.courseContents],
+    ['Delivery format',p.deliveryFormat],
+    ['Duration and pace',p.durationNote],
+    ['Requirements',p.requirements],
+    ['Tools',p.tools],
+    ['Assignments and assessment',p.assignmentsDetails],
+    ['Capstone / final project',p.capstoneDetails],
+    ['Certificate and completion',p.certificateDetails],
+    ['Access and delivery',p.accessDelivery],
+    ['Support',p.supportWording],
+    ['Refund policy',p.refundPolicy],
+    ['Compliance disclaimer',p.complianceDisclaimer],
+    ['Earnings / results disclaimer',p.earningsDisclaimer],
+  ].filter(([,value])=>String(value||'').trim());
+  const body=sections.map(([title,value])=>`<div class="detail-block"><h3>${escapeHtml(title)}</h3>${formatStructuredProductText(value)}</div>`).join('');
+  const faqs=Array.isArray(p.productFaqs)?p.productFaqs.filter(f=>f&&f.q&&f.a):[];
+  const faqHtml=faqs.length?`<div class="detail-block"><h3>Frequently asked questions</h3>${faqs.map((f,i)=>`<details style="border-top:1px solid var(--border);padding:10px 0;" ${i===0?'open':''}><summary style="cursor:pointer;font-weight:650;font-size:13.5px;">${escapeHtml(f.q)}</summary><div style="margin-top:7px;">${formatStructuredProductText(f.a)}</div></details>`).join('')}</div>`:'';
+  return body+faqHtml;
+}
 function screenProductDetail(id){
   const p = findProduct(id);
   if(!p){
@@ -536,6 +571,8 @@ function screenProductDetail(id){
           : `<span class="text-2 small">No reviews yet — be the first!</span>`}
       </div>
       <h2 style="font-size:19px;margin-top:10px;">${escapeHtml(p.name)}</h2>
+      ${p.heroCopy?`<p style="font-size:14.5px;font-weight:650;line-height:1.55;margin-top:6px;">${escapeHtml(p.heroCopy)}</p>`:''}
+      ${p.shortDescription?`<p class="text-2" style="font-size:13px;line-height:1.6;margin-top:6px;">${escapeHtml(p.shortDescription)}</p>`:''}
       <p class="text-2 ${descLong?'pd-desc-clamped':''}" id="pdDesc" style="font-size:13.5px;margin-top:6px;">${escapeHtml(p.description)}</p>
       ${descLong?`<button class="btn-sm btn-ghost" id="pdDescToggle" style="padding:2px 0;color:var(--accent);" onclick="toggleDescExpand()">See more</button>`:''}
       <div class="chip-row mt-8">${(p.tags||[]).map(t=>`<span class="chip">${escapeHtml(t)}</span>`).join('')}</div>
@@ -559,6 +596,9 @@ function screenProductDetail(id){
         ${(p.physical.shippingCountries||[]).length?`<div class="spec-row"><span>Ships to</span><span>${escapeHtml((p.physical.shippingCountries||[]).join(', '))}</span></div>`:''}
       `:''}
     </div>
+
+    ${structuredProductSections(p)}
+
     <div class="detail-block">
       <h3>About the seller</h3>
       <div class="flex gap-8" style="align-items:center;">
