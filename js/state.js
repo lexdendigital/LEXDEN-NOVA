@@ -894,7 +894,6 @@ function showPaymentResultModal(opts){
       <div style="font-size:36px;margin-bottom:6px;">${isSuccess?'✅':'⏳'}</div>
       <h2 class="font-display" style="margin-bottom:6px;">${isSuccess?'Payment confirmed':'Payment received — confirming…'}</h2>
       <p class="text-2 small" style="margin-bottom:16px;">${escapeHtml(opts.message||'')}</p>
-      ${opts.accessUrl?`<a class="btn btn-primary btn-block" style="margin-bottom:10px;" href="${escapeHtml(opts.accessUrl)}" target="_blank" rel="noopener">🎓 Open your course access</a>`:''}
       ${opts.downloadLink?`<button type="button" class="btn btn-primary btn-block" style="margin-bottom:10px;" onclick="forceDownloadFile('${jsStr(opts.downloadLink)}','${jsStr(opts.filename||'')}')">⬇️ Download your file</button>`:''}
       <p class="text-2 small mono" style="margin-bottom:14px;">Ref: ${escapeHtml(opts.reference||'')}</p>
       <div class="flex gap-8">
@@ -1208,6 +1207,20 @@ async function verifyPaystackPayment(reference, product, email, showResult, deli
   }
 }
 
+
+/* One-time access links: asks the server for a personal link for a paid order. */
+async function claimSecureAccess(reference){
+  try{
+    const r = await authedApi('/api/secure-access', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({reference})}, 25000, 'Creating your access link timed out.');
+    const d = await r.json();
+    if(d && d.ok && d.data && d.data.url) return {url:d.data.url};
+    return {error: d && d.error && d.error.message};
+  }catch(e){ return {error: (e&&e.message)||'Could not create your access link.'}; }
+}
+async function openSecureAccess(reference){
+  const a = await claimSecureAccess(reference);
+  if(a.url) window.open(a.url,'_blank','noopener'); else showPaymentResultModal({status:'success', reference, message:a.error||'Could not create your access link.'});
+}
 
 /* ---------------- CREATOR PURCHASES: delivery + My Library ---------------- */
 async function fetchCreatorDownload(productId){
