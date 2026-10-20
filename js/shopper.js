@@ -2392,6 +2392,7 @@ function orderDownloadHtml(o){
   if(o.status!=='success') return '';
   const pid = orderProductId(o);
   const prod = pid ? findProduct(pid) : null;
+  if(prod && prod.secureDelivery && (o.paystackReference||o.reference)) return `<div style="margin-top:10px;"><button type="button" class="btn btn-primary btn-sm" onclick="openSecureAccess('${jsStr(o.paystackReference||o.reference)}')">🎓 Get course access</button></div>`;
   const link = prod && (prod.deliveryLink || prod.fileUrl);
   if(!link) return '';
   return `<div style="margin-top:10px;"><button type="button" class="btn btn-primary btn-sm" onclick="forceDownloadFile('${jsStr(link)}','${jsStr(downloadFilenameFor(prod))}')">⬇️ Download</button></div>`;
