@@ -1175,6 +1175,16 @@ async function verifyPaystackPayment(reference, product, email, showResult, deli
         // Physical orders have nothing to download — a shipping-specific
         // confirmation instead of the digital "here's your file" modal.
         showPaymentResultModal({ status:'success', reference, message:'Payment confirmed! Your order will be shipped to the address you provided. You can track its status any time in Order History.' });
+      } else if(product.secureDelivery){
+        // One-time access link (Classroom etc.): the real URL is never in the
+        // catalog; the server issues a personal link after confirming the order.
+        const access = await claimSecureAccess(reference);
+        showPaymentResultModal({
+          status:'success', reference, accessUrl: access.url,
+          message: access.url
+            ? 'Your personal access link is ready. It works once, so open it on the device and Google account you will use for the course. Do not share it.'
+            : (access.error || 'Payment confirmed. We could not create your access link just now — find it in Order History, or contact support with your order reference.'),
+        });
       } else if(openOnDelivery){
         // Triple-checked delivery: fetch the file to a blob and force a
         // real save-to-device (see forceDownloadFile above) — never just
