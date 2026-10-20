@@ -134,6 +134,7 @@ const ENDPOINTS = [
   'feed',
   'product',
   'admin-payment-mode',
+  'secure-access',
 ];
 
 for (const name of ENDPOINTS) {
