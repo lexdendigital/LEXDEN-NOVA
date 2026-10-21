@@ -894,7 +894,6 @@ function showPaymentResultModal(opts){
       <div style="font-size:36px;margin-bottom:6px;">${isSuccess?'✅':'⏳'}</div>
       <h2 class="font-display" style="margin-bottom:6px;">${isSuccess?'Payment confirmed':'Payment received — confirming…'}</h2>
       <p class="text-2 small" style="margin-bottom:16px;">${escapeHtml(opts.message||'')}</p>
-      ${opts.accessUrl?`<a class="btn btn-primary btn-block" style="margin-bottom:10px;" href="${escapeHtml(opts.accessUrl)}" target="_blank" rel="noopener">🎓 Open your course access</a>`:''}
       ${opts.downloadLink?`<button type="button" class="btn btn-primary btn-block" style="margin-bottom:10px;" onclick="forceDownloadFile('${jsStr(opts.downloadLink)}','${jsStr(opts.filename||'')}')">⬇️ Download your file</button>`:''}
       <p class="text-2 small mono" style="margin-bottom:14px;">Ref: ${escapeHtml(opts.reference||'')}</p>
       <div class="flex gap-8">
@@ -1176,6 +1175,24 @@ async function verifyPaystackPayment(reference, product, email, showResult, deli
         // Physical orders have nothing to download — a shipping-specific
         // confirmation instead of the digital "here's your file" modal.
         showPaymentResultModal({ status:'success', reference, message:'Payment confirmed! Your order will be shipped to the address you provided. You can track its status any time in Order History.' });
+      } else if(product.secureDelivery){
+        // One-time access link (Classroom etc.): the real URL is never in the
+        // catalog; the server issues a personal link after confirming the order.
+        const access = await claimSecureAccess(reference);
+        showPaymentResultModal({
+          status:'success', reference,
+          message: access.url
+            ? 'Your personal access link is ready. It works once, so open it on the device and Google account you will use for the course. Do not share it.'
+            : (access.error || 'Payment confirmed. We could not create your access link just now — find it in Order History, or contact support with your order reference.'),
+        });
+        const ov = $('#paymentResultOverlay'), anchor = ov && ov.querySelector('p.mono');
+        if(access.url && anchor){
+          const a = document.createElement('a');
+          a.className = 'btn btn-primary btn-block'; a.style.marginBottom = '10px';
+          a.href = access.url; a.target = '_blank'; a.rel = 'noopener';
+          a.textContent = '🎓 Open your course access';
+          anchor.parentNode.insertBefore(a, anchor);
+        }
       } else if(openOnDelivery){
         // Triple-checked delivery: fetch the file to a blob and force a
         // real save-to-device (see forceDownloadFile above) — never just
