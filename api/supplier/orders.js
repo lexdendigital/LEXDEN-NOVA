@@ -116,6 +116,13 @@ async function createCjOrderForFulfillment(db, orderId, deps = {}) {
     return { ok: false, status: status || 'NEEDS_ATTENTION', code, message };
   };
 
+  // FUNDING GATE: decided BEFORE any CJ call. See api/supplier/funding.js.
+  const funding = require('./funding').evaluateFunding(deps.env || process.env, fulfillment);
+  if (!funding.allowed) {
+    await require('./funding').holdUnfundedOrder(db, { orderId, creatorId, productId: fulfillment.productId, buyerUid: fulfillment.buyerUid, funding, nowMs });
+    return await fail(funding.code, funding.message, 'FUNDING_BLOCKED');
+  }
+
   try {
     const mapping = await store.getMapping(db, versionId);
     if (!mapping || mapping.status !== 'VALID') return await fail('MAPPING_INVALID', 'This listing has no valid CJ mapping.');
@@ -179,6 +186,7 @@ async function createCjOrderForFulfillment(db, orderId, deps = {}) {
     await store.saveSupplierOrder(db, orderId, {
       creatorId, versionId, provider: 'CJ', status: 'ORDERED', cjOrderId, cjOrderNumber: data.orderNumber || orderNumber,
       cjStatus: data.orderStatus || 'CREATED', payType, paidFromCjBalance: payType === 2, logisticName,
+      fundingMode: funding.mode, paymentState: funding.mode === 'NOVA_FUNDED' ? 'NOVA_FUNDING_ATTESTED_BY_ADMIN' : (payType === 2 ? 'AUTO_PAY_REQUESTED' : 'AWAITING_CREATOR_PAYMENT_IN_CJ'),
       error: null, claimedAtMs: null, createdAtMs: nowMs,
     });
     await store.writeSupplierLog(db, { creatorId, event: 'order.create', objectId: orderId, success: true, message: `CJ order ${cjOrderId}` });
@@ -234,6 +242,11 @@ async function syncCjFulfillment(db, orderId, deps = {}) {
     applied.push(step.to);
   }
 
+  // The carrier says delivered: record it as its OWN evidence source (separate from the
+  // buyer's confirmation) with the CJ order as the provider reference. Idempotent.
+  if (plan.supplierPatch.carrierDelivered) {
+    await require('../creator/fulfillment').recordDeliveryEvidence(db, orderId, { source: 'CARRIER', atMs: (deps.now || Date.now)(), reference: so.cjOrderId });
+  }
   await store.saveSupplierOrder(db, orderId, { ...plan.supplierPatch, lastSyncAtMs: (deps.now || Date.now)() });
   await store.patchConnection(db, so.creatorId, { lastSyncAtMs: (deps.now || Date.now)() });
   return { cjStatus: plan.supplierPatch.cjStatus, supplierStatus: plan.supplierPatch.status || so.status, fulfillmentStatus: current, applied, note: plan.supplierPatch.note || null };

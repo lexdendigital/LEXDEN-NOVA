@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow"><meta name="referrer" content="no-referrer">
+<title>Delivery check · LEXDEN NOVA</title>
+<style>
+:root{--bg:#fff;--fg:#14181d;--mut:#5b6572;--line:#d9dee5;--acc:#0b5cff;--ok:#0a7a3d;--bad:#b3261e}
+@media (prefers-color-scheme:dark){:root{--bg:#10141a;--fg:#e8ecf1;--mut:#9aa6b4;--line:#2a323d;--acc:#7aa7ff;--ok:#4fd18b;--bad:#ff8a80}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:17px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+main{max-width:420px;margin:0 auto;padding:24px 16px}h1{font-size:1.3rem;margin:0 0 4px}p{color:var(--mut);margin:6px 0 16px}
+input{width:100%;font:700 2rem/1.2 ui-monospace,Menlo,monospace;letter-spacing:.35em;text-align:center;text-transform:uppercase;padding:14px;border:2px solid var(--line);border-radius:12px;background:transparent;color:var(--fg)}
+button{width:100%;margin-top:14px;padding:16px;font-size:1.05rem;font-weight:700;border:0;border-radius:12px;background:var(--acc);color:#fff}
+button:disabled{opacity:.5}.msg{margin-top:16px;padding:14px;border-radius:12px;border:1px solid var(--line);display:none}
+.ok{border-color:var(--ok);color:var(--ok)}.bad{border-color:var(--bad);color:var(--bad)}
+label{display:flex;gap:8px;align-items:center;margin-top:14px;color:var(--mut);font-size:.95rem}label input{width:auto;letter-spacing:0;font-size:1rem;padding:0}
+</style></head><body><main>
+<h1>Delivery check</h1>
+<p id="intro">Ask the buyer for their 6-character delivery code and type it below. Only enter it once the parcel is in their hands.</p>
+<div id="form" style="display:none">
+  <input id="code" maxlength="6" autocomplete="off" autocapitalize="characters" spellcheck="false" inputmode="text" aria-label="Delivery code">
+  <label><input type="checkbox" id="rec"> The person collecting is the named authorised recipient, not the buyer</label>
+  <button id="go">Confirm delivery</button>
+</div>
+<div class="msg" id="msg" role="status"></div>
+</main>
+<script>
+(function(){
+  var API = window.API_BASE || 'https://lexden-nova.onrender.com';
+  var h = new URLSearchParams((location.hash||'').replace(/^#/,''));
+  var orderId = h.get('o'), taskId = h.get('t'), token = h.get('k');
+  // Remove the secret from the address bar / history right away.
+  try { history.replaceState(null, '', location.pathname); } catch(e){}
+  var msg = document.getElementById('msg'), form = document.getElementById('form'), go = document.getElementById('go'), code = document.getElementById('code');
+  function show(t, cls){ msg.className = 'msg ' + (cls||''); msg.textContent = t; msg.style.display = 'block'; }
+  if(!orderId || !taskId || !token){ document.getElementById('intro').textContent = ''; show('This link is incomplete or has expired. Ask NOVA support for a new delivery link.', 'bad'); return; }
+  form.style.display = 'block';
+  go.onclick = function(){
+    var c = code.value.trim();
+    if(c.length !== 6){ show('Enter all 6 characters of the code.', 'bad'); return; }
+    go.disabled = true; show('Checking…');
+    fetch(API + '/api/delivery-proof', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'rider_verify', orderId:orderId, taskId:taskId, taskToken:token, code:c, asRecipient: document.getElementById('rec').checked }) })
+      .then(function(r){ return r.json().then(function(d){ return { s:r.status, d:d }; }); })
+      .then(function(x){
+        if(x.d && x.d.ok && x.d.data && x.d.data.verified){ form.style.display = 'none'; show('✓ Delivery confirmed. Thank you.', 'ok'); return; }
+        var reason = x.d && x.d.data && x.d.data.reason, left = x.d && x.d.data && x.d.data.attemptsLeft;
+        var text = x.s === 429 ? 'Too many attempts. Wait a minute and try again.'
+          : reason === 'LOCKED' ? 'Too many wrong codes. This delivery is locked. Contact NOVA support.'
+          : reason === 'EXPIRED' ? 'The code has expired. Ask the buyer to show a new one.'
+          : reason === 'ALREADY_USED' ? 'This delivery was already confirmed.'
+          : reason === 'NO_ACTIVE_CODE' ? 'The buyer has not shown a code yet. Ask them to open their order and tap "Get delivery code".'
+          : reason === 'RECIPIENT_NOT_AUTHORISED' ? 'The buyer has not named an authorised recipient. Ask the buyer to give you their own code.'
+          : reason === 'ORDER_NOT_IN_TRANSIT' ? 'This order is not out for delivery. Contact NOVA support.'
+          : reason === 'WRONG_CODE' ? 'That code is not right.' + (typeof left === 'number' ? ' Attempts left: ' + left + '.' : '')
+          : (x.d && x.d.error && x.d.error.message) || 'Could not confirm. Check the code and try again.';
+        show(text, 'bad'); go.disabled = false;
+      })
+      .catch(function(){ show('Could not reach the server. Check your connection and try again.', 'bad'); go.disabled = false; });
+  };
+})();
+</script></body></html>

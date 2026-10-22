@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const { splitByFeePct, DEFAULT_PLATFORM_FEE_PCT, attributeCreatorEarning } = require('../api/creator/ledger');
 const { csvEscape } = require('../api/creator-admin-finance');
 
-test('splitByFeePct splits 15% of 1000 into 150 fee / 850 net', () => {
+test('splitByFeePct splits 15% of 1000 into 150 fee / 850 net (generic helper, rate passed in)', () => {
   assert.deepEqual(splitByFeePct(1000, 15), { feeAmount: 150, netAmount: 850 });
 });
 
@@ -19,8 +19,8 @@ test('splitByFeePct at 0% gives no fee and at 100% gives no net', () => {
   assert.deepEqual(splitByFeePct(500, 100), { feeAmount: 500, netAmount: 0 });
 });
 
-test('the default platform fee is 15%', () => {
-  assert.equal(DEFAULT_PLATFORM_FEE_PCT, 15);
+test('the default platform fee is the approved 10%', () => {
+  assert.equal(DEFAULT_PLATFORM_FEE_PCT, 10);
 });
 
 // A tiny in-memory Firestore double — enough to prove the ledger credit is
@@ -66,13 +66,13 @@ test.after(() => { FieldValue.increment = origIncrement; });
 
 const sale = { reference: 'ref_1', creatorId: 'c1', productId: 'p1', productTitle: 'T', offeringType: 'EBOOK', amountMajor: 1000, currency: 'NGN' };
 
-test('crediting a sale writes a ledger row and credits 85% to the creator', async () => {
+test('crediting a sale writes a ledger row and credits 90% to the creator (10% commission)', async () => {
   const db = fakeDb();
   const r = await attributeCreatorEarning(db, sale);
   assert.equal(r.credited, true);
-  assert.equal(db.store.get('creatorSales/ref_1').creatorEarning, 850);
-  assert.equal(db.store.get('creatorPrivate/c1').balanceAvailable, 850);
-  assert.equal(db.store.get('creatorPrivate/c1').totalEarned, 850);
+  assert.equal(db.store.get('creatorSales/ref_1').creatorEarning, 900);
+  assert.equal(db.store.get('creatorPrivate/c1').balanceAvailable, 900);
+  assert.equal(db.store.get('creatorPrivate/c1').totalEarned, 900);
 });
 
 test('crediting the same reference twice NEVER double-credits', async () => {
@@ -80,13 +80,17 @@ test('crediting the same reference twice NEVER double-credits', async () => {
   await attributeCreatorEarning(db, sale);
   const second = await attributeCreatorEarning(db, sale);
   assert.equal(second.credited, false);
-  assert.equal(db.store.get('creatorPrivate/c1').balanceAvailable, 850);
+  assert.equal(db.store.get('creatorPrivate/c1').balanceAvailable, 900);
 });
 
-test('a configured creatorPlatformFeePct overrides the default', async () => {
-  const db = fakeDb({ creatorPlatformFeePct: 10 });
-  await attributeCreatorEarning(db, sale);
-  assert.equal(db.store.get('creatorSales/ref_1').creatorEarning, 900);
+test('a stale legacy creatorPlatformFeePct is IGNORED; only creatorCommissionBps overrides the default', async () => {
+  const stale = fakeDb({ creatorPlatformFeePct: 15 });
+  await attributeCreatorEarning(stale, sale);
+  assert.equal(stale.store.get('creatorSales/ref_1').creatorEarning, 900);
+  const explicit = fakeDb({ creatorCommissionBps: 500 });
+  await attributeCreatorEarning(explicit, sale);
+  assert.equal(explicit.store.get('creatorSales/ref_1').creatorEarning, 950);
+  assert.equal(explicit.store.get('creatorSales/ref_1').feeSnapshot.commissionBps, 500);
 });
 
 test('free sales and non-creator sales credit nothing', async () => {

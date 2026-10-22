@@ -1,0 +1,37 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Fees, Ledger &amp; Payout Policy · LEXDEN NOVA</title><meta name="robots" content="noindex"><style>:root{--bg:#fff;--fg:#1b1f24;--mut:#5b6572;--line:#d9dee5;--acc:#0b5cff;--warn-bg:#fff4d6;--warn-fg:#6a4a00}
+@media (prefers-color-scheme:dark){:root{--bg:#10141a;--fg:#e8ecf1;--mut:#9aa6b4;--line:#2a323d;--acc:#7aa7ff;--warn-bg:#3a2f0b;--warn-fg:#ffd98a}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.65 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+main{max-width:760px;margin:0 auto;padding:16px 16px 64px}a{color:var(--acc)}h1{font-size:1.6rem;line-height:1.25}h2{font-size:1.2rem;margin-top:2rem}
+.nav{display:flex;gap:12px;flex-wrap:wrap;padding:12px 16px;border-bottom:1px solid var(--line);font-size:.9rem}
+.banner{background:var(--warn-bg);color:var(--warn-fg);border:1px solid var(--warn-fg);border-radius:8px;padding:12px 14px;margin:16px 0;font-size:.95rem}
+.meta{color:var(--mut);font-size:.9rem}.ph{background:#ffe08a;color:#3a2a00;padding:0 3px;border-radius:3px}
+.tw{overflow-x:auto}table{border-collapse:collapse;width:100%}th,td{border:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}
+pre{overflow-x:auto;background:rgba(127,127,127,.12);padding:10px;border-radius:6px}code{font-size:.92em}ul.docs{padding-left:18px}</style></head><body><nav class="nav"><a href="../index.html">LEXDEN NOVA</a><a href="index.html">Documents &amp; Policies</a></nav><main><div class="banner" role="note"><strong>DRAFT — REVIEW REQUIRED.</strong> This document has not been approved for publication. It may be incomplete or change, and highlighted items are details LEXDEN has not supplied yet. It is shown so you can see how NOVA works; it is not final legal advice or a final contract.</div><p class="meta">Version 1.0-draft · Effective date: 2026-10-22 · Status: Draft · Content ID 286826d663b6</p><h1 id="lexden-nova-creator-fees-ledger-payout-policy">LEXDEN NOVA CREATOR — FEES, LEDGER &amp; PAYOUT POLICY</h1>
+<p><strong>Version:</strong> 1.0-draft <strong>Effective date:</strong> 2026-10-22</p>
+<h2 id="1-financial-truth">1. Financial truth</h2>
+<p>The server-side financial ledger is authoritative. Browser-submitted balances, commission figures and payment messages are not authoritative.</p>
+<h2 id="2-fees">2. Fees</h2>
+<p>NOVA may impose configurable Creator, Affiliate, transaction, withdrawal, payment-processing or other applicable fees.</p>
+<p><strong>Current configured fees</strong> (values are generated from NOVA's server configuration when this page is built, so they cannot drift from what the system actually charges):</p>
+<ul>
+<li><strong>Creator commission: 10%</strong> of the eligible sale subtotal (the price of the item after any item discount, excluding delivery and tax). It is calculated in whole kobo and the rate used is stored with each sale.</li>
+<li><strong>Affiliate withdrawal fee: 5%</strong> of the gross amount an affiliate asks to withdraw. It applies to affiliate withdrawals only and is shown before the request is submitted.</li>
+<li><strong>Creator withdrawals</strong> do not carry the affiliate withdrawal fee. Any creator withdrawal fee is shown on the withdrawal screen before the request is submitted.</li>
+</ul>
+<p>These rates may change for legitimate commercial, provider, tax, operational or risk reasons. A change applies to future sales and withdrawals only; the rate used is stored on each historical record.</p>
+<h2 id="3-payment-provider">3. Payment provider</h2>
+<p>NOVA may use Paystack or another approved provider. Paystack's current documentation supports subaccounts and transaction splits, including marketplace/vendor settlement patterns. The precise settlement structure must follow the provider's current agreement and capabilities.</p>
+<h2 id="4-ledger">4. Ledger</h2>
+<p>The ledger may record sales, refunds, platform fees, affiliate commissions, payment fees, reserve holds/releases, adjustments, payout requests, completions, chargebacks and reversals.</p>
+<h2 id="5-balance-states">5. Balance states</h2>
+<p>Example operational states:</p>
+<p><code>PENDING</code> → <code>AVAILABLE</code> → <code>WITHDRAWAL_REQUESTED</code> → <code>UNDER_REVIEW</code> → <code>PROCESSING</code> → <code>PAID</code></p>
+<p>Other outcomes may include <code>FAILED</code>, <code>CANCELLED</code> and <code>REVERSED</code>.</p>
+<h2 id="6-release-controls">6. Release controls</h2>
+<p>Funds may remain pending where there is a buyer-protection period, open dispute, incomplete fulfilment, likely refund exposure, chargeback or reserve requirement.</p>
+<h2 id="7-withdrawal">7. Withdrawal</h2>
+<p>A withdrawal request is a request for settlement, not a guarantee of immediate payment. NOVA may verify identity, payout ownership, account status, reserve exposure and unresolved disputes.</p>
+<h2 id="8-reversals-and-negative-balances">8. Reversals and negative balances</h2>
+<p>Refunds, chargebacks and payout reversals may reduce amounts previously released. To the extent permitted by law and the Creator agreement, NOVA may offset valid amounts owed against future settlements or request repayment.</p>
+<h2 id="9-no-guaranteed-settlement-rail">9. No guaranteed settlement rail</h2>
+<p>NOVA will not promise a specific payout rail until the provider, contract and operational flow have been confirmed.</p></main></body></html>

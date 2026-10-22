@@ -4,6 +4,8 @@ const { makeDb } = require('./helpers/fake-firestore');
 const { makeFakeCj } = require('./helpers/fake-cj');
 
 process.env.SUPPLIER_CREDENTIALS_KEY = 'd4'.repeat(32);
+// Legacy tests exercise the explicit creator-account funding opt-in; the gate has its own tests below.
+process.env.CJ_FUNDING_MODE = 'CREATOR_ACCOUNT';
 const service = require('../api/supplier/service');
 const orders = require('../api/supplier/orders');
 
@@ -172,4 +174,28 @@ test('no secrets in supplier order records or logs', async () => {
   await orders.createCjOrderForFulfillment(db, 'o1', cj.deps);
   const dump = JSON.stringify([db._store.supplierOrders, db._store.supplierSyncLogs, db._store.supplierProducts]);
   for (const s of ['good-api-key', 'AT1', 'RT1', 'jane@example.com']) assert.ok(!dump.includes(s), s);
+});
+
+test('FUNDING GATE: default (DISABLED) makes NO CJ order call, opens an exception, never falls back to payType 3', async () => {
+  const { cj, db } = await setup();
+  const before = cj.st.calls.length;
+  for (const mode of [undefined, 'DISABLED', 'NOVA_FUNDED', 'garbage']) {
+    const env = { ...process.env, CJ_FUNDING_MODE: mode }; if (mode === undefined) delete env.CJ_FUNDING_MODE;
+    const r = await orders.createCjOrderForFulfillment(db, 'o1', { ...cj.deps, env });
+    assert.equal(r.ok, false); assert.equal(r.status, 'FUNDING_BLOCKED');
+    assert.match(r.code, /CJ_FUNDING_DISABLED|NOVA_FUNDING_PENDING/);
+  }
+  assert.equal(cj.st.calls.some((c) => /createOrder/.test(c.path)), false);
+  assert.equal(cj.st.calls.length, before);
+  assert.equal(db._store.fulfillments.o1.exceptionOpen, true);
+  const ex = Object.values(db._store.orderExceptions || {});
+  assert.equal(ex.length, 1); assert.equal(ex[0].code, 'SUPPLIER_FUNDING_UNAVAILABLE'); assert.equal(ex[0].state, 'OPEN');
+  assert.equal(db._store.supplierOrders.o1.status, 'FUNDING_BLOCKED');
+});
+test('FUNDING GATE: CREATOR_ACCOUNT records an honest payment state', async () => {
+  const { cj, db } = await setup();
+  const r = await orders.createCjOrderForFulfillment(db, 'o1', cj.deps);
+  assert.equal(r.ok, true);
+  assert.equal(db._store.supplierOrders.o1.paymentState, 'AWAITING_CREATOR_PAYMENT_IN_CJ');
+  assert.equal(db._store.supplierOrders.o1.fundingMode, 'CREATOR_ACCOUNT');
 });

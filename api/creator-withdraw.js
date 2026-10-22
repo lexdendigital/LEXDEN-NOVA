@@ -11,6 +11,7 @@
 // Operates on creatorPrivate/{uid} and requires an active creator.
 const { requireActiveCreator, getDb, FieldValue, ok, fail, setCors } = require('./creator/shared');
 const { addNonSundayDays } = require('./affiliate/shared');
+const M = require('./core/money');
 
 module.exports = async function handler(req, res) {
   setCors(res);
@@ -69,8 +70,13 @@ module.exports = async function handler(req, res) {
       if (amount < minWithdrawal) throw Object.assign(new Error(`Minimum withdrawal is ₦${minWithdrawal.toLocaleString()}.`), { status: 400, code: 'BELOW_MINIMUM' });
       if (amount > balanceAvailable) throw Object.assign(new Error('Amount exceeds your available balance.'), { status: 400, code: 'INSUFFICIENT_BALANCE' });
 
-      const feeAmount = Math.round(amount * feePct) / 100;
-      const amountPayable = Math.round((amount - feeAmount) * 100) / 100;
+      // The creator withdrawal fee is its OWN setting (creatorWithdrawalFeePct). It is NOT the
+      // 5% affiliate withdrawal fee and the 10% creator COMMISSION is charged on sales, not here.
+      let calc;
+      try { calc = M.computeWithdrawal({ grossMinor: M.toMinor(amount), feeBps: Math.round(Number(feePct) * 100), feeType: 'CREATOR_WITHDRAWAL' }); }
+      catch (e) { throw Object.assign(new Error(e.message), { status: 400, code: 'INVALID_AMOUNT' }); }
+      const feeAmount = M.toMajor(calc.feeMinor);
+      const amountPayable = M.toMajor(calc.netPayableMinor);
 
       const wdRef = db.collection('creatorWithdrawals').doc();
       tx.set(wdRef, {
@@ -78,6 +84,8 @@ module.exports = async function handler(req, res) {
         amountRequested: amount,
         feeAmount,
         amountPayable,
+        feePct: calc.feeBps / 100,
+        feeSnapshot: { ...calc },
         currency: 'NGN',
         status: 'pending',
         payoutAccount: priv.payoutAccount,

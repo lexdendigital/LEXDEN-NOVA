@@ -88,8 +88,8 @@ const DEFAULT_TESTIMONIALS = [
 
 const DEFAULT_FAQS = [
   {id:'f1', q:'How do I purchase a product?', a:'Tap any product to open its detail page, then tap the Buy Now button at the bottom. What happens next depends on the product: most pay in-app through Paystack (card, bank transfer or USSD, no new tab), free items just open a direct access link, and a smaller number send you to that seller\'s own external checkout page in a new tab instead.'},
-  {id:'f2', q:'Are these products sold by LEXDEN NOVA?', a:'No — we showcase and review digital products from partner companies. When you buy through our links we may earn a commission at no extra cost to you.'},
-  {id:'f3', q:'Can I get a refund?', a:'Refund policies are set by each partner/seller, not by LEXDEN NOVA. Check the seller info on the product page or contact them directly.'},
+  {id:'f2', q:'Are these products sold by LEXDEN NOVA?', a:'It depends on the item. Some products are from partner companies we review (we may earn a commission when you buy through our links, at no extra cost to you). Others are sold by independent creators through LEXDEN NOVA checkout; the seller is shown on the product page.'},
+  {id:'f3', q:'Can I get a refund?', a:'For items you pay for through LEXDEN NOVA checkout you can open a dispute from your order, and a refund is shown as completed only after the payment provider confirms it. For partner items bought on another site, that partner\'s policy applies. See Documents & Policies → Refunds, Returns & Disputes (currently a draft pending review).'},
   {id:'f4', q:'Is my wishlist saved if I close the app?', a:'Yes — your wishlist is saved on this device automatically. You can also export it as a file from the Wishlist screen.'},
   {id:'f5', q:'How do I contact support?', a:'Use the WhatsApp or email links in the Menu screen, or ask NOVA AI right here in the chat.'},
 ];

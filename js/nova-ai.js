@@ -609,9 +609,9 @@ function generateNovaResponse(raw){
   const faqHit = DB.faqs.find(f=> text.split(/\s+/).some(w=>w.length>3 && f.q.toLowerCase().includes(w)) );
   if(faqHit || /(refund|policy|guarantee|cancel)/.test(text)){
     const f = faqHit || DB.faqs.find(f=>/refund/i.test(f.q));
-    const p1 = f ? `Good question — here's the honest answer: ${escapeHtml(f.a)}` : `Refund and cancellation terms are set individually by each partner seller, since LEXDEN NOVA is a showcase and affiliate platform rather than the merchant of record.`;
-    const p2 = `Because every product comes from a different partner, policies can vary — some offer 7 or 14-day guarantees, others are final-sale for instant-download items. The safest move is to check the "About the seller" section on the product page before buying, or ask me about a specific product and I'll tell you what's listed.`;
-    const p3 = `If a purchase ever goes wrong, reach out on WhatsApp (${escapeHtml(c.whatsappDisplay)}) with the item code and we'll help you get in touch with the right seller.`;
+    const p1 = f ? `Good question — here's the honest answer: ${escapeHtml(f.a)}` : `For items paid for through LEXDEN NOVA checkout you can open a dispute from your order. For partner items bought on another site, that partner's own policy applies. The full wording is under Documents & Policies → Refunds, Returns & Disputes (currently a draft pending review).`;
+    const p2 = `Each listing shows its seller and what is included. I can't decide or promise a refund myself; I can only point you to the process and the listed policy.`;
+    const p3 = `If a purchase goes wrong, open a dispute from your order, or reach out on WhatsApp (${escapeHtml(c.whatsappDisplay)}) with your order reference.`;
     return [p1,p2,p3].map(t=>`<p style="margin:0 0 8px;">${t}</p>`).join('');
   }
 
@@ -826,7 +826,7 @@ function generateNovaResponse(raw){
 
   // 21) Becoming a seller / listing a product
   if(/(sell (my|on)|list my (product|course)|become a (seller|partner|vendor)|partner with (you|lexden)|feature my product)/.test(text)){
-    const p1 = `LEXDEN NOVA is currently a curated showcase, not an open marketplace — products are added by the team after review rather than through open seller sign-up.`;
+    const p1 = `Creators can apply to sell on LEXDEN NOVA through the Creator program. Applications are reviewed by the team before anything can be listed.`;
     const p2 = `If you've got something you think fits, the way in is a direct pitch: email ${escapeHtml(c.contactEmail)} or WhatsApp ${escapeHtml(c.whatsappDisplay)} with what it is, and the team can look at whether it's a fit.`;
     return [p1,p2].map(t=>`<p style="margin:0 0 8px;">${t}</p>`).join('');
   }

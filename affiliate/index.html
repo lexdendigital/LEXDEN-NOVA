@@ -487,7 +487,7 @@ async function loadDashboardData(){
   const content = (settingsSnap.exists && settingsSnap.data().content) || {};
   state.settings = {
     commissionDefaultPct: content.affiliateCommissionDefaultPct ?? 10,
-    withdrawalFeePct: content.affiliateWithdrawalFeePct ?? 2.5,
+    withdrawalFeePct: (typeof content.affiliateWithdrawalFeeBps === 'number' ? content.affiliateWithdrawalFeeBps : 500) / 100, // display only; the server decides the real fee
     minWithdrawalNGN: content.affiliateMinWithdrawalNGN ?? 5000,
     whatsappCommunityUrl: content.affiliateWhatsappUrl || '',
     telegramCommunityUrl: content.affiliateTelegramUrl || '',
@@ -987,12 +987,26 @@ function wireScreenEvents(){
   });
   const wdAmount = document.getElementById('wdAmount');
   if(wdAmount){
+    let wdTimer = null;
     wdAmount.oninput = ()=>{
       const amt = parseFloat(wdAmount.value||'0');
-      const fee = state.settings.withdrawalFeePct;
-      const feeAmt = amt*fee/100;
-      document.getElementById('wdPreview').textContent =
-        amt>0 ? `You'll receive ${money(amt-feeAmt)} after the ${fee}% fee (${money(feeAmt)}).` : '';
+      const box = document.getElementById('wdPreview');
+      clearTimeout(wdTimer);
+      if(!(amt>0)){ box.textContent=''; return; }
+      // Local estimate first (instant), then the SERVER's exact figure replaces it.
+      const fee = state.settings.withdrawalFeePct; const feeAmt = Math.round(amt*fee)/100;
+      box.textContent = `Estimate: you'll receive ${money(amt-feeAmt)} after the ${fee}% fee (${money(feeAmt)}).`;
+      wdTimer = setTimeout(async ()=>{
+        try{
+          const idToken = await state.user.getIdToken();
+          const r = await withTimeout(fetch(`${API_BASE}/api/affiliate-withdraw?amount=${encodeURIComponent(amt)}`, { headers:{'Authorization':'Bearer '+idToken} }), 8000, 'timeout');
+          const d = await r.json();
+          if(d && d.ok && d.preview && parseFloat(wdAmount.value||'0')===amt){
+            const p = d.preview;
+            box.textContent = `You request ${money(p.grossAmount)}. Fee ${p.feePct}%: ${money(p.feeAmount)}. You receive ${money(p.netPayable)}.`;
+          }
+        }catch(e){ /* keep the estimate */ }
+      }, 350);
     };
   }
   const wdSubmit = document.getElementById('wdSubmit');

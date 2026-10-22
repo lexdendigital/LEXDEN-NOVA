@@ -17,6 +17,40 @@ function cxCopyLink(){
   if(!u) return;
   try{ navigator.clipboard.writeText(u); toast('Link copied', 'success'); }catch(e){ toast(u, 'info'); }
 }
+/* ---- Updates feed: short posts shown on your public seller page ---- */
+let cu = { list:null, text:'', busy:false, err:'', loading:false };
+async function cuLoad(){
+  if(cu.loading) return; cu.loading = true;
+  try{ const r = await authedApi('/api/creator-updates?mine=1', {}, 15000, 'Loading timed out.'); const d = await r.json(); cu.list = (d && d.ok) ? d.data.updates : []; }
+  catch(e){ cu.list = []; cu.err = e.message || ''; }
+  cu.loading = false; if(creatorTab==='store') render();
+}
+async function cuPost(){
+  if(cu.busy) return; cu.busy = true; cu.err = ''; render();
+  try{
+    const r = await authedApi('/api/creator-updates', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'post', text: cu.text }) }, 20000, 'Posting timed out.');
+    const d = await r.json();
+    if(d && d.ok){ cu.text = ''; cu.list = null; } else cu.err = (d && d.error && d.error.message) || 'Could not post.';
+  }catch(e){ cu.err = e.message || 'Could not reach the server.'; }
+  cu.busy = false; render();
+}
+async function cuDelete(id){
+  if(!confirm('Delete this update?')) return;
+  try{ await authedApi('/api/creator-updates', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'delete', id }) }, 15000, 'Timed out.'); }catch(e){}
+  cu.list = null; render();
+}
+function cuCardHtml(){
+  if(cu.list===null && !cu.loading) cuLoad();
+  const list = cu.list || [];
+  return `<div class="card" style="padding:16px;margin-bottom:14px;">
+    <h3 style="font-size:15px;margin-bottom:6px;">Updates</h3>
+    <div class="text-2 small" style="margin-bottom:8px;">Short news for buyers, shown on your public page. Up to 3 a day, 500 characters, no links.</div>
+    <textarea class="input" rows="3" maxlength="500" placeholder="e.g. New batch arrives Friday" oninput="cu.text=this.value">${escapeHtml(cu.text)}</textarea>
+    ${cu.err?`<div class="small" style="color:var(--error);margin-top:6px;">⚠️ ${escapeHtml(cu.err)}</div>`:''}
+    <button class="btn btn-primary btn-sm" style="margin-top:8px;" ${cu.busy?'disabled':''} onclick="cuPost()">${cu.busy?'Posting…':'Post update'}</button>
+    ${list.filter(u=>u.state!=='DELETED').map(u=>`<div style="padding:8px 0;border-top:1px solid var(--border);margin-top:8px;"><div style="white-space:pre-wrap;">${escapeHtml(u.text)}</div><div class="text-2 small">${escapeHtml(new Date(u.createdAtMs).toLocaleDateString())}${u.state==='HIDDEN'?' · hidden by NOVA':''} · <a href="#" onclick="cuDelete('${escapeHtml(u.id)}');return false;">Delete</a></div></div>`).join('')}
+  </div>`;
+}
 function creatorMoreTab(){
   if(!cx.profile && !cx.error){ cxLoad(); return '<div class="text-2 small" style="padding:20px;text-align:center;">Loading…</div>'; }
   if(cx.error && !cx.profile) return `<div class="card" style="padding:16px;"><p class="text-2 small" style="color:var(--error);">⚠️ ${escapeHtml(cx.error)}</p><button class="btn btn-outline" onclick="cx.error='';cxLoad(true);render();">Retry</button></div>`;
@@ -25,7 +59,7 @@ function creatorMoreTab(){
   const unread = cx.notes ? cx.notes.unreadCount : 0;
   const open = (cx.disputes||[]).filter(d=>d.status==='OPEN').length;
   const aoDt = v => { try{ return v ? new Date(v).toLocaleString() : ''; }catch(e){ return ''; } };
-  return `
+  return cuCardHtml() + `
   <div class="card" style="padding:16px;margin-bottom:14px;">
     <h3 style="font-size:15px;margin-bottom:8px;">Public profile</h3>
     <div class="text-2 small" style="margin-bottom:8px;">${escapeHtml(p.displayName)}${p.verified?' · verified':''}. Your name and status come from your approved application.</div>
@@ -49,10 +83,12 @@ function creatorMoreTab(){
 
   <div class="card" style="padding:16px;">
     <h3 style="font-size:15px;margin-bottom:8px;">Selling policies</h3>
+    <div class="small" style="margin-bottom:8px;"><a href="../legal/creator-terms.html">Creator terms</a> · <a href="../legal/creator-payouts.html">Fees &amp; payouts</a> · <a href="../legal/refunds.html">Refunds &amp; disputes</a> <span class="text-2">(drafts pending review)</span></div>
     <div class="text-2 small" style="line-height:1.7;">
-      • Platform fee: <b>${escapeHtml(String(pol.platformFeePct))}%</b> of each sale.<br>
+      • NOVA fee: <b>${escapeHtml(String(pol.platformFeePct))}%</b> of the item price (after item discounts, excluding delivery and tax). The rate used is saved with every sale.<br>
       • Payouts: minimum <b>${cwNaira(pol.minWithdrawalNGN)}</b>, withdrawal fee <b>${escapeHtml(String(pol.withdrawalFeePct))}%</b>, one request every <b>${escapeHtml(String(pol.withdrawalCooldownDays))}</b> days (Sundays not counted). Every payout is approved by our team.<br>
-      • Earnings hold: ${pol.holdDays ? `new sales are held for <b>${escapeHtml(String(pol.holdDays))} day(s)</b> before you can withdraw them.` : 'new sales are withdrawable immediately.'}<br>
+      • Physical orders: earnings stay pending until delivery is confirmed, then through the ${escapeHtml(String(pol.protectionDaysAfterDelivery==null?pol.disputeWindowDays:pol.protectionDaysAfterDelivery))}-day buyer-protection period.<br>
+      • Other earnings hold: ${pol.holdDays ? `new sales are held for <b>${escapeHtml(String(pol.holdDays))} day(s)</b> before you can withdraw them.` : 'new sales are withdrawable immediately.'}<br>
       • Buyers can open a dispute within <b>${escapeHtml(String(pol.disputeWindowDays))} days</b>. The earning for that order is frozen until our team decides. If a refund is approved, that earning is reversed.<br>
       • Digital items must match their description; physical orders need tracking and are delivered within your stated processing time.<br>
       • Suspended or restricted sellers' listings are hidden from the store.
@@ -159,10 +195,10 @@ function creatorScreenTitle(){
 function setCreatorTab(t){ creatorTab = t; render(); try{ window.scrollTo(0,0); }catch(e){} }
 const cwStatusColor = s => ({PUBLISHED:'#2ee6a6',APPROVED:'#2ee6a6',SUBMITTED:'var(--warn,#d4af37)',IN_REVIEW:'var(--warn,#d4af37)',CHANGES_REQUESTED:'var(--warn,#d4af37)',PAUSED:'#999',DRAFT:'#999',REJECTED:'var(--error)',SUSPENDED:'var(--error)',ARCHIVED:'#999'}[s]||'#999');
 
-window.__resetCreatorWorkspace = function(){ cp = { list:null, loading:false, error:'', form:null, busy:false, formError:'', info:'' }; co = { list:null, loading:false, error:'', shipFor:null, busy:false }; cm = { payout:undefined, wds:null, banks:null, loading:false, error:'', busy:false, cj:undefined, resolved:null }; creatorHome = { data:null, summary:'', loading:false, error:null, aiText:'', aiNote:'', aiBusy:false, aiError:'', question:'', checklist:null, uid:null }; window.__libraryCache = null; window.__myShipments = null; window.__myDisputes = null; cx = { profile:null, policies:null, notes:null, disputes:null, loading:false, error:'', info:'', busy:false, form:null }; creatorTab = 'home'; };
+window.__resetCreatorWorkspace = function(){ cp = { list:null, loading:false, error:'', form:null, busy:false, formError:'', info:'' }; co = { list:null, loading:false, error:'', shipFor:null, busy:false }; cm = { payout:undefined, wds:null, banks:null, loading:false, error:'', busy:false, cj:undefined, resolved:null }; creatorHome = { data:null, summary:'', loading:false, error:null, aiText:'', aiNote:'', aiBusy:false, aiError:'', question:'', checklist:null, uid:null }; window.__libraryCache = null; window.__myShipments = null; window.__myDisputes = null; cx = { profile:null, policies:null, notes:null, disputes:null, loading:false, error:'', info:'', busy:false, form:null }; ce = { data:null, loading:false, error:'' }; ci = { items:null, loading:false, error:'', busy:false, view:'items', history:null, historyFor:null, preview:null, channels:null, info:'' }; cu = { list:null, text:'', busy:false, err:'', loading:false }; cpView = 'listings'; creatorTab = 'home'; };
 function creatorTabBar(){
   const t = (id,label)=>`<button class="chip ${creatorTab===id?'active':''}" style="flex:1;justify-content:center;" onclick="setCreatorTab('${id}')">${label}</button>`;
-  return `<div style="display:flex;gap:6px;margin-bottom:14px;">${t('home','🏠 Home')}${t('products','📦 Products')}${t('orders','🚚 Orders')}${t('money','💰 Money')}${t('more','⚙️ More')}</div>`;
+  return `<div style="display:flex;gap:6px;margin-bottom:14px;">${t('home','🏠 Home')}${t('products','📦 Products')}${t('orders','🚚 Orders')}${t('store','🏪 Store')}${t('earnings','💰 Earnings')}</div>`;
 }
 
 /* ---------------- PRODUCTS ---------------- */
@@ -316,6 +352,11 @@ function creatorProductForm(){
   </div>`;
 }
 function creatorProductsTab(){
+  const sub = `<div style="display:flex;gap:6px;margin-bottom:12px;"><button class="chip ${cpView==='listings'?'active':''}" style="flex:1;justify-content:center;" onclick="cpView='listings';render();">Listings</button><button class="chip ${cpView==='inventory'?'active':''}" style="flex:1;justify-content:center;" onclick="cpView='inventory';render();">Inventory</button></div>`;
+  if(cpView==='inventory' && !cp.form) return sub + creatorInventoryHub();
+  return (cp.form ? '' : sub) + creatorListingsTab();
+}
+function creatorListingsTab(){
   if(!cp.list && !cp.error){ cpLoad(); return '<div class="text-2 small" style="padding:20px;text-align:center;">Loading your listings…</div>'; }
   if(cp.error && !cp.list) return `<div class="card" style="padding:16px;"><p class="text-2 small" style="color:var(--error);">⚠️ ${escapeHtml(cp.error)}</p><button class="btn btn-outline" onclick="cp.error='';cpLoad(true);render();">Retry</button></div>`;
   if(cp.form) return creatorProductForm();
@@ -337,6 +378,93 @@ function creatorProductsTab(){
   return `<button class="btn btn-primary btn-block" style="margin-bottom:12px;" onclick="cpNew()">+ Add a listing</button>
     ${rows || '<div class="card" style="padding:18px;text-align:center;"><div class="text-2 small">No listings yet. Add your first one — every listing is reviewed before buyers see it.</div></div>'}
     <div class="text-2 small" style="margin-top:8px;">Listings are reviewed by LEXDEN NOVA before they go live.</div>`;
+}
+
+
+/* ---------------- INVENTORY HUB ----------------
+   Stock numbers come from the server ledger (api/creator-inventory). The browser never computes
+   availability. Every change sends a fresh idempotency key so a double tap cannot apply twice. */
+let cpView = 'listings';
+let ci = { items:null, loading:false, error:'', busy:false, view:'items', history:null, historyFor:null, preview:null, channels:null, info:'' };
+const ciKey = ()=> 'ui_'+Date.now().toString(36)+Math.random().toString(36).slice(2,10);
+async function ciLoad(force){
+  if(ci.loading || (ci.items && !force)) return;
+  ci.loading = true; ci.error = '';
+  try{ ci.items = (await capi('/api/creator-inventory')).items || []; }catch(e){ ci.error = creatorErrText(e); }
+  ci.loading = false; render();
+}
+async function ciAct(itemId, type, extra){
+  if(ci.busy) return; ci.busy = true; ci.error = ''; ci.info = ''; render();
+  try{ await capi('/api/creator-inventory', { action:'adjust', itemId, type, idempotencyKey: ciKey(), ...extra }); ci.info = 'Saved.'; ci.items = null; ci.history = null; }
+  catch(e){ ci.error = creatorErrText(e); }
+  ci.busy = false; ciLoad(true); render();
+}
+function ciPrompt(itemId, type){
+  const labels = { EXTERNAL_SALE:'How many did you sell elsewhere (market, Instagram, WhatsApp)?', RESTOCK:'How many units did you add?', COUNT_CORRECTION:'What is the real number you counted on the shelf?', MARK_UNAVAILABLE:'How many are damaged or lost?', RESTORE_AVAILABLE:'How many are usable again?', RETURN_TO_STOCK:'How many returned items are in resellable condition?' };
+  const v = prompt(labels[type] || 'Quantity'); if(v===null) return;
+  const n = Number(v); if(!Number.isInteger(n) || n < 0 || (type!=='COUNT_CORRECTION' && n < 1)){ toast('Enter a whole number','error'); return; }
+  if(type==='COUNT_CORRECTION') return ciAct(itemId, type, { countedOnHand:n, channel:'MANUAL' });
+  if(type==='MARK_UNAVAILABLE'){ const r = (prompt('Reason: DAMAGED, LOST, QUARANTINED, EXPIRED or OTHER','DAMAGED')||'').toUpperCase(); return ciAct(itemId, type, { quantity:n, reason:r }); }
+  if(type==='RETURN_TO_STOCK'){ if(!confirm('Confirm these items are in resellable condition and can go back on sale.')) return; return ciAct(itemId, type, { quantity:n, resellableConfirmed:true }); }
+  if(type==='EXTERNAL_SALE'){ const ch = (prompt('Where? MARKET_STALL, INSTAGRAM, WHATSAPP or OTHER','MARKET_STALL')||'OTHER').toUpperCase(); return ciAct(itemId, type, { quantity:n, channel:ch }); }
+  return ciAct(itemId, type, { quantity:n });
+}
+function ciSafety(itemId){
+  const v = prompt('Safety stock: how many units should NOT be sold (a buffer)?'); if(v===null) return;
+  const n = Number(v); if(!Number.isInteger(n) || n < 0){ toast('Enter a whole number','error'); return; }
+  ciAct(itemId, 'SAFETY_STOCK_CHANGE', { safetyStock:n });
+}
+async function ciShowHistory(itemId){
+  ci.historyFor = itemId; ci.history = null; render();
+  try{ ci.history = (await capi('/api/creator-inventory?history=1&itemId='+encodeURIComponent(itemId))).movements || []; }catch(e){ ci.error = creatorErrText(e); }
+  render();
+}
+async function ciPreviewCsv(){
+  const csv = (document.getElementById('ciCsv')||{}).value || '';
+  ci.busy = true; render();
+  try{ ci.preview = await capi('/api/creator-inventory', { action:'import_preview', csv }); ci.csv = csv; }catch(e){ ci.error = creatorErrText(e); }
+  ci.busy = false; render();
+}
+async function ciCommitCsv(skip){
+  ci.busy = true; render();
+  try{ const r = await capi('/api/creator-inventory', { action:'import_commit', csv:ci.csv, importId:ciKey(), skipInvalid:!!skip }); ci.info = r.refused ? 'Nothing was changed. Fix the rows marked in red, or choose to skip them.' : `Applied ${r.applied} row(s).`; if(!r.refused){ ci.preview = null; ci.items = null; } }
+  catch(e){ ci.error = creatorErrText(e); }
+  ci.busy = false; ciLoad(true); render();
+}
+async function ciLoadChannels(){
+  if(ci.channels) return;
+  try{ ci.channels = (await capi('/api/creator-inventory?channels=1')).listings || []; }catch(e){ ci.channels = []; }
+  render();
+}
+function creatorInventoryHub(){
+  if(!ci.items && !ci.error){ ciLoad(); return '<div class="text-2 small" style="padding:20px;text-align:center;">Loading your stock…</div>'; }
+  const tabs = ['items','import','channels'].map(v=>`<button class="chip ${ci.view===v?'active':''}" onclick="ci.view='${v}';${v==='channels'?'ciLoadChannels();':''}render();">${{items:'Stock',import:'Import CSV',channels:'Other channels'}[v]}</button>`).join(' ');
+  const msg = (ci.error?`<div class="small" style="color:var(--error);margin-bottom:8px;">⚠️ ${escapeHtml(ci.error)}</div>`:'') + (ci.info?`<div class="small" style="color:#2ee6a6;margin-bottom:8px;">✓ ${escapeHtml(ci.info)}</div>`:'');
+  let body = '';
+  if(ci.view==='items'){
+    const chip = st => ({OK:['In stock','#2ee6a6'],LOW:['Low','var(--warn,#d4af37)'],OUT_OF_STOCK:['Out of stock','var(--error)']}[st]||['',''] );
+    body = (ci.items||[]).map(it=>{ const c = chip(it.status); const b = (t,l)=>`<button class="btn btn-outline btn-sm" ${ci.busy?'disabled':''} onclick="ciPrompt('${escapeHtml(it.id)}','${t}')">${l}</button>`;
+      return `<div class="card" style="padding:12px;margin-bottom:8px;">
+      <div style="display:flex;justify-content:space-between;gap:8px;"><strong>${escapeHtml(it.productTitle||it.productId)}</strong><span class="chip" style="font-size:10px;background:${c[1]};color:#111;">${c[0]}</span></div>
+      <div class="text-2 small">${escapeHtml(it.variantKey==='default'?'':it.variantKey+' · ')}${escapeHtml(it.locationId==='main'?'Main stock':it.locationId)}${it.sku?' · SKU '+escapeHtml(it.sku):''}</div>
+      <div style="display:flex;gap:14px;margin:8px 0;flex-wrap:wrap;"><div><div style="font-size:22px;font-weight:800;">${it.availableToSell}</div><div class="text-2 small">available to sell</div></div><div><div style="font-size:16px;">${it.onHand}</div><div class="text-2 small">on hand</div></div><div><div style="font-size:16px;">${it.reserved}</div><div class="text-2 small">reserved</div></div>${it.unavailable?`<div><div style="font-size:16px;">${it.unavailable}</div><div class="text-2 small">unavailable</div></div>`:''}${it.safetyStock?`<div><div style="font-size:16px;">${it.safetyStock}</div><div class="text-2 small">safety stock</div></div>`:''}</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">${b('EXTERNAL_SALE','Sold elsewhere')}${b('RESTOCK','Add stock')}${b('COUNT_CORRECTION','Recount')}${b('MARK_UNAVAILABLE','Damaged / lost')}${it.unavailable?b('RESTORE_AVAILABLE','Usable again'):''}${b('RETURN_TO_STOCK','Returned item')}<button class="btn btn-outline btn-sm" onclick="ciSafety('${escapeHtml(it.id)}')">Safety stock</button><button class="btn btn-outline btn-sm" onclick="ciShowHistory('${escapeHtml(it.id)}')">History</button></div>
+      ${ci.historyFor===it.id ? (ci.history ? (ci.history.length ? `<div style="margin-top:8px;border-top:1px solid var(--border,#2a2a2a);padding-top:6px;">${ci.history.slice(0,15).map(m=>`<div class="text-2 small">${escapeHtml(new Date(m.atMs).toLocaleString())} · ${escapeHtml(m.type)}${m.quantity!=null?' '+m.quantity:''} · ${m.before.availableToSell}→${m.after.availableToSell} · ${escapeHtml(m.channel||'')}</div>`).join('')}</div>` : '<div class="text-2 small" style="margin-top:6px;">No changes yet.</div>') : '<div class="text-2 small">Loading…</div>') : ''}
+    </div>`; }).join('') || '<div class="card" style="padding:18px;text-align:center;"><div class="text-2 small">No stock-tracked listings yet. Published physical listings you ship yourself appear here. Listings from CJ, digital files and services do not use unit stock.</div></div>';
+    body += '<div class="text-2 small" style="margin-top:8px;">These numbers are the single source of truth for what buyers can order. Changing stock never needs a new review.</div>';
+  } else if(ci.view==='import'){
+    const pv = ci.preview;
+    body = `<div class="card" style="padding:14px;"><div class="text-2 small" style="margin-bottom:6px;">Paste a CSV with the columns <b>sku,quantity,mode</b>. mode is SET (what you counted) or ADD (new stock received). SKUs must match exactly; similar names are never guessed. Nothing changes until you confirm.</div>
+      <textarea id="ciCsv" rows="6" style="width:100%;" placeholder="sku,quantity,mode&#10;SHOE-RED-42,12,SET">${escapeHtml(ci.csv||'')}</textarea>
+      <button class="btn btn-outline btn-sm" style="margin-top:8px;" ${ci.busy?'disabled':''} onclick="ciPreviewCsv()">Check file</button>
+      ${pv ? (pv.ok ? `<div style="margin-top:10px;">${pv.rows.map(r=>`<div class="small" style="color:${r.valid?'inherit':'var(--error)'};">Line ${r.line}: ${escapeHtml(r.sku||'(empty)')} → ${r.valid?`${escapeHtml(r.mode)} ${r.quantity} ✓`:escapeHtml(r.errors.join(' '))}</div>`).join('')}
+        <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap;">${pv.invalidCount===0?`<button class="btn btn-primary btn-sm" ${ci.busy?'disabled':''} onclick="ciCommitCsv(false)">Apply ${pv.validCount} row(s)</button>`:`<button class="btn btn-outline btn-sm" ${ci.busy||!pv.validCount?'disabled':''} onclick="ciCommitCsv(true)">Apply ${pv.validCount} good row(s), skip ${pv.invalidCount} bad</button>`}</div></div>` : `<div class="small" style="color:var(--error);margin-top:8px;">${escapeHtml((pv.fileProblems||[]).join(' '))}</div>`) : ''}</div>`;
+  } else {
+    const ch = ci.channels;
+    body = `<div class="card" style="padding:14px;margin-bottom:8px;"><div class="small" style="line-height:1.6;">LEXDEN NOVA does <b>not</b> automatically sync with Instagram, WhatsApp, marketplaces or market stalls. When you sell elsewhere, tap <b>Sold elsewhere</b> on the stock card or import a CSV so NOVA never sells something you no longer have. Mapping a listing below only records which of your products it is; it does not sync anything.</div></div>
+      ${ch===null?'<div class="text-2 small">Loading…</div>':(ch.length?ch.map(l=>`<div class="card" style="padding:10px;margin-bottom:6px;"><strong>${escapeHtml(l.channel)} · ${escapeHtml(l.title||l.externalId)}</strong><div class="text-2 small">${escapeHtml(l.mappingStatus)} · ${escapeHtml((l.health||{}).message||'')}</div></div>`).join(''):'<div class="text-2 small">No other channels recorded.</div>')}`;
+  }
+  return `<div style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap;">${tabs}</div>${msg}${body}`;
 }
 
 /* ---------------- ORDERS ---------------- */
@@ -420,9 +548,11 @@ async function cmSavePayout(){
 async function cmWithdraw(){
   const amt = Number((document.getElementById('cmAmt')||{}).value);
   if(!(amt>0)){ toast('Enter an amount','error'); return; }
-  if(!confirm('Request a withdrawal of '+cwNaira(amt)+'? A small fee applies and it is paid after review.')) return;
+  const fp = cx.policies && cx.policies.withdrawalFeePct!=null ? Number(cx.policies.withdrawalFeePct) : null;
+  const fee = fp==null ? null : Math.round(amt*fp)/100;
+  if(!confirm('Request a withdrawal of '+cwNaira(amt)+'?'+(fee==null?' A fee applies.':' Fee '+cwNaira(fee)+' → you receive about '+cwNaira(amt-fee)+'.')+' It is paid after review.')) return;
   cm.busy = true; render();
-  try{ const r = await capi('/api/creator-withdraw', { amount: amt }); toast('Requested — you will receive '+cwNaira(r.amountPayable),'success'); cm.wds = null; creatorHome.data = null; cmLoad(true); }
+  try{ const r = await capi('/api/creator-withdraw', { amount: amt }); toast('Requested — you will receive '+cwNaira(r.amountPayable),'success'); cm.wds = null; creatorHome.data = null; ce.data = null; cmLoad(true); }
   catch(e){ toast(creatorErrText(e),'error'); }
   cm.busy = false; render();
 }
@@ -440,9 +570,32 @@ async function cmDisconnectCj(){
   try{ await capi('/api/creator-supplier-connection', { action:'disconnect' }); toast('Disconnected','success'); cm.cj = null; cm.wds = null; cmLoad(true); }
   catch(e){ toast(creatorErrText(e),'error'); }
 }
+
+let ce = { data:null, loading:false, error:'' };
+async function ceLoad(force){
+  if(ce.loading || (ce.data && !force)) return;
+  ce.loading = true; ce.error = '';
+  try{ ce.data = await capi('/api/creator-earnings'); }catch(e){ ce.error = creatorErrText(e); }
+  ce.loading = false; render();
+}
+function creatorEarningsBreakdown(){
+  if(!ce.data && !ce.error){ ceLoad(); return '<div class="text-2 small" style="padding:10px;text-align:center;">Loading your earnings…</div>'; }
+  if(ce.error) return `<div class="small" style="color:var(--error);margin-bottom:8px;">⚠️ ${escapeHtml(ce.error)}</div>`;
+  const s = ce.data.summary, pol = ce.data.policy;
+  const cell = (label, v, hint) => `<div class="card" style="padding:10px;"><div class="text-2 small">${label}</div><div style="font-size:18px;font-weight:800;">${cwNaira(v)}</div><div class="text-2 small" style="font-size:11px;">${hint}</div></div>`;
+  const rows = (ce.data.recent||[]).map(x=>`<div class="list-row" style="align-items:flex-start;"><span class="left" style="flex-direction:column;align-items:flex-start;"><span>${escapeHtml(x.productTitle||x.orderId)}</span><span class="text-2 small">Sale ${cwNaira(x.saleAmount)} − ${escapeHtml(String(x.feePct))}% NOVA fee ${cwNaira(x.feeAmount)} = <b>${cwNaira(x.creatorEarning)}</b></span>${x.whyPending?`<span class="small" style="color:var(--warn,#d4af37);">${escapeHtml(x.whyPending)}</span>`:''}</span><span class="chip" style="font-size:10px;">${escapeHtml(x.onHold?'ON HOLD':x.status)}</span></div>`).join('');
+  return `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">
+    ${cell('Pending', s.pending, 'Not released yet')}${cell('Available', s.available, 'You can withdraw this')}
+    ${cell('Reserved', s.reserved, 'In a withdrawal request')}${cell('Paid', s.paid, 'Sent to your bank')}
+    ${cell('Disputed', s.disputed, 'Frozen during a dispute')}${cell('Reversed', s.reversed, 'Refunded to buyers')}</div>
+    ${s.recoveryDue>0?`<div class="card" style="padding:10px;margin-bottom:10px;"><b>${cwNaira(s.recoveryDue)}</b> is owed back because a refund covered money you already withdrew. Our team will contact you.</div>`:''}
+    <div class="text-2 small" style="margin-bottom:8px;">For physical orders, earnings stay pending until delivery is confirmed (by the carrier, by your buyer, or by their delivery code) and the ${pol.disputeWindowDays}-day buyer-protection period ends. NOVA's fee is ${pol.commissionPct}% of the item price (after item discounts, excluding delivery and tax).</div>
+    <h2 style="font-size:16px;margin:6px 0;">Recent sales</h2><div class="card" style="padding:4px 16px;margin-bottom:12px;">${rows||'<div class="text-2 small" style="padding:10px 0;">No sales yet.</div>'}</div>`;
+}
 function creatorMoneyTab(){
   if(!cm.wds && !cm.error){ cmLoad(); return '<div class="text-2 small" style="padding:20px;text-align:center;">Loading…</div>'; }
   if(cm.error && !cm.wds) return `<div class="card" style="padding:16px;"><p class="text-2 small" style="color:var(--error);">⚠️ ${escapeHtml(cm.error)}</p><button class="btn btn-outline" onclick="cm.error='';cmLoad(true);render();">Retry</button></div>`;
+  if(!cx.profile && !cx.error) cxLoad();
   const h = creatorHome.data; const bal = h ? h.money.balanceAvailable : null;
   if(!h) loadCreatorHome();
   const editing = !cm.payout || cm.editPayout;
@@ -455,7 +608,7 @@ function creatorMoneyTab(){
     : `<div class="card" style="padding:14px;margin-bottom:12px;"><div style="display:flex;justify-content:space-between;"><strong>Payout account</strong><a href="#" onclick="event.preventDefault();cm.editPayout=true;render();" style="color:var(--accent);font-size:13px;">Change</a></div>
       <div style="margin-top:6px;">${escapeHtml(cm.payout.accountName||'')}</div><div class="text-2 small">${escapeHtml(cm.payout.bankName||'')} · ****${escapeHtml(String(cm.payout.accountNumber||'').slice(-4))}</div></div>`;
   const wd = cm.payout ? `<div class="card" style="padding:14px;margin-bottom:12px;"><strong>Withdraw</strong>
-      <div class="text-2 small" style="margin:4px 0 8px;">Available: ${bal==null?'…':cwNaira(bal)} · minimum ₦5,000 · one request per 7 days · 2.5% fee</div>
+      <div class="text-2 small" style="margin:4px 0 8px;">Available: ${bal==null?'…':cwNaira(bal)} · minimum ₦5,000 · one request per 7 days · ${cx.policies && cx.policies.withdrawalFeePct!=null ? 'withdrawal fee '+escapeHtml(String(cx.policies.withdrawalFeePct))+'% (shown again before you confirm)' : 'withdrawal fee shown before you confirm'}</div>
       <div style="display:flex;gap:6px;"><input id="cmAmt" type="number" inputmode="decimal" placeholder="Amount in ₦" style="flex:1;"><button class="btn btn-primary" ${cm.busy?'disabled':''} onclick="cmWithdraw()">Request</button></div></div>` : '<div class="text-2 small" style="margin-bottom:12px;">Add a payout account to withdraw your earnings.</div>';
   const history = cm.wds.length ? cm.wds.map(w=>`<div class="list-row"><span class="left">${cwNaira(w.amountRequested)} <span class="text-2 small" style="margin-left:6px;">pay ${cwNaira(w.amountPayable)}</span></span><span class="chip" style="font-size:10px;">${escapeHtml(w.status)}</span></div>`).join('') : '<div class="text-2 small" style="padding:10px 0;">No withdrawals yet.</div>';
   const cj = cm.cj;
@@ -464,7 +617,7 @@ function creatorMoneyTab(){
       <div class="text-2 small" style="margin-top:8px;">Map your listings to CJ products from the Claude connector (see Home).</div>`
     : `<div class="text-2 small" style="margin:4px 0 8px;">Connect your own CJ account so paid orders are placed in it. Your key is stored encrypted and never shown again.</div>
       <input id="cjEmail" type="email" placeholder="CJ account email" style="width:100%;margin-bottom:6px;"><input id="cjKey" type="password" autocomplete="off" placeholder="CJ API key" style="width:100%;margin-bottom:6px;"><button class="btn btn-primary btn-sm" ${cm.busy?'disabled':''} onclick="cmConnectCj()">Connect</button>`}</div>`;
-  return `<div class="card" style="padding:14px;margin-bottom:12px;text-align:center;"><div class="text-2 small">Available balance</div><div style="font-size:26px;font-weight:800;">${bal==null?'…':cwNaira(bal)}</div></div>
+  return `${creatorEarningsBreakdown()}
     ${payoutBox}${wd}
     <h2 style="font-size:16px;margin:6px 0;">Withdrawal history</h2><div class="card" style="padding:4px 16px;">${history}</div>${cjBox}`;
 }
@@ -519,7 +672,7 @@ function screenCreatorHome(){
   const bar = creatorTabBar();
   const H1 = '<h1 class="screen-title">My Creator Account</h1>';
   if(creatorTab === 'home') return creatorHomeTab().replace(H1, H1 + bar);
-  const body = creatorTab==='products' ? creatorProductsTab() : creatorTab==='orders' ? creatorOrdersTab() : creatorTab==='more' ? creatorMoreTab() : creatorMoneyTab();
+  const body = creatorTab==='products' ? creatorProductsTab() : creatorTab==='orders' ? creatorOrdersTab() : creatorTab==='store' ? creatorMoreTab() : creatorMoneyTab();
   return `<div class="screen">${H1}${bar}${body}</div>`;
 }
 function creatorHomeTab(){

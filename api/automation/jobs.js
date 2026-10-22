@@ -292,6 +292,18 @@ async function holdsJob(db, ctx) {
 }
 
 // ------------------------------------------------------------- email queue
+// Releases checkout holds whose payment window passed so abandoned checkouts never lock stock.
+async function reservationsJob(db, ctx) {
+  const inv = require('../inventory/service');
+  const r = await inv.sweepExpired(db, { nowMs: ctx.nowMs, limit: ctx.limit || 200 });
+  if (r.released) {
+    const snap = await db.collection('inventoryReservations').where('state', '==', 'EXPIRED').limit(50).get();
+    const pids = [...new Set(snap.docs.map((d) => d.data().productId))];
+    for (const pid of pids) await inv.refreshStockSummary(db, pid).catch(() => {});
+  }
+  return r;
+}
+
 async function emailQueueJob(db, ctx) {
   const { callHandler } = require('../../mcp/lib/callHandler');
   const handler = ctx.deps && ctx.deps.emailQueueHandler ? ctx.deps.emailQueueHandler : require('../process-email-queue');
@@ -306,7 +318,8 @@ const JOBS = {
   sla: { run: slaJob, minIntervalMs: 30 * 60 * 1000 },
   reconcile: { run: reconciliationJob, minIntervalMs: 22 * 60 * 60 * 1000 },
   holds: { run: holdsJob, minIntervalMs: 15 * 60 * 1000 },
+  reservations: { run: reservationsJob, minIntervalMs: 5 * 60 * 1000 },
   emailQueue: { run: emailQueueJob, minIntervalMs: 5 * 60 * 1000 },
 };
 
-module.exports = { JOBS, supplierHealthJob, cjOrderJob, linkHealthJob, slaJob, reconciliationJob, holdsJob, emailQueueJob, checkProductLink, pauseProduct };
+module.exports = { JOBS, supplierHealthJob, cjOrderJob, linkHealthJob, slaJob, reconciliationJob, holdsJob, reservationsJob, emailQueueJob, checkProductLink, pauseProduct };

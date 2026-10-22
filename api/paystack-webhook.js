@@ -67,6 +67,39 @@ function bodyFromEvent(evt) {
   };
 }
 
+// Maps a refund.* event onto OUR refund record(s) for that transaction. Replays and
+// out-of-order events are safe (api/core/refunds.js ignores a stale/earlier status).
+async function handleRefundEvent(evt, deps = {}) {
+  const d = (evt && evt.data) || {};
+  const txRef = d.transaction_reference || (d.transaction && d.transaction.reference) || null;
+  const status = d.status || String(evt.event).slice('refund.'.length);
+  if (!txRef) return { handled: false, reason: 'NO_TRANSACTION_REFERENCE' };
+  const R = require('./core/refunds');
+  const db = deps.db || require('./creator/shared').getDb();
+  const snap = await db.collection('refunds').where('paymentReference', '==', String(txRef)).limit(20).get();
+  let applied = 0;
+  // Only refunds NOVA has actually SENT to the provider can be advanced by a provider event (never
+  // APPROVED / AWAITING_MANUAL_STEP / COMPLETED), and the event must be matched to ONE refund:
+  // by the provider's refund id when we hold it, otherwise by exact amount. Ambiguous => do nothing.
+  const sent = snap.docs.filter((d) => [R.STATES.PROVIDER_INITIATED, R.STATES.PROCESSING, R.STATES.REQUIRES_REVIEW, R.STATES.FAILED].includes(d.data().state));
+  const evtIds = [d.id, d.refund_reference, d.reference].filter((x) => x != null).map(String);
+  let matched = sent.filter((x) => x.data().providerRefundId && evtIds.includes(String(x.data().providerRefundId)));
+  if (!matched.length && Number.isFinite(Number(d.amount))) matched = sent.filter((x) => x.data().amountMinor === Number(d.amount));
+  // An event that identifies nothing (no id, no amount) can only be applied when exactly one refund is in flight.
+  if (!matched.length && !evtIds.length && !Number.isFinite(Number(d.amount)) && sent.length === 1) matched = sent;
+  if (matched.length !== 1) { console.warn(`paystack refund event for ${txRef} matched ${matched.length} refund(s); ignored`); return { handled: false, reason: matched.length ? 'AMBIGUOUS_MATCH' : 'NO_MATCHING_REFUND' }; }
+  for (const doc of matched) {
+    const out = await R.applyProviderStatus(db, doc.id, status, { by: 'paystack-webhook' });
+    if (out.changed) applied += 1;
+    if (out.refund && out.refund.disputeId) {
+      const patch = { refundState: out.refund.state };
+      if (out.refund.state === R.STATES.COMPLETED) { patch.buyerRefundPaid = true; patch.refundCompletedAtMs = out.refund.providerConfirmedAtMs; }
+      await db.collection('creatorDisputes').doc(out.refund.disputeId).set(patch, { merge: true }).catch(() => {});
+    }
+  }
+  return { handled: true, applied };
+}
+
 async function handler(req, res, deps = {}) {
   if (req.method !== 'POST') return res.status(405).json({ ok: false });
   let raw;
@@ -80,6 +113,11 @@ async function handler(req, res, deps = {}) {
 
   // Acknowledge FAST (Paystack retries on slow/non-2xx), then work.
   res.status(200).json({ ok: true });
+  // Refund lifecycle events (refund.pending | processing | needs-attention | failed | processed).
+  if (evt && typeof evt.event === 'string' && evt.event.startsWith('refund.')) {
+    try { await handleRefundEvent(evt, deps); } catch (e) { console.error('paystack-webhook refund event failed:', e.message); }
+    return;
+  }
   if (!evt || evt.event !== 'charge.success') return;
   const body = bodyFromEvent(evt);
   if (!body) return;
@@ -95,3 +133,4 @@ async function handler(req, res, deps = {}) {
 module.exports = handler;
 module.exports.signatureValid = signatureValid;
 module.exports.bodyFromEvent = bodyFromEvent;
+module.exports.handleRefundEvent = handleRefundEvent;
