@@ -2205,7 +2205,7 @@ function pickWizardOption(field, value){
   rerenderSignup();
 }
 document.addEventListener('click', function(e){
-  if(!e.target.closest('.csel')) $all('.csel.open').forEach(o=>o.classList.remove('open'));
+  if(!e.target.closest('.csel')) closeAllCustomSelects();
 });
 function afterAuthRender(){
   window.scrollTo({top:0, behavior:'auto'});

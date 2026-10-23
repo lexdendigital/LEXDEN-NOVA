@@ -368,12 +368,26 @@ function customSelect(id, value, options, placeholder, onPick, sm){
     </div>
   </div>`;
 }
+function closeAllCustomSelects(){
+  $all('.csel.open').forEach(o=>o.classList.remove('open'));
+  $all('.csel-host').forEach(h=>h.classList.remove('csel-host'));
+}
 function toggleCustomSelect(id){
   const el = $('#csel_'+id);
   if(!el) return;
   const wasOpen = el.classList.contains('open');
-  $all('.csel.open').forEach(o=>o.classList.remove('open'));
-  if(!wasOpen) el.classList.add('open');
+  closeAllCustomSelects();
+  if(wasOpen) return;
+  // Let the list escape the rounded card around it, open upward when there is no room below,
+  // and align to the right edge when it would run off the screen.
+  const host = el.closest('.card,.section'); if(host) host.classList.add('csel-host');
+  el.classList.remove('up','right'); el.classList.add('open');
+  const panel = el.querySelector('.csel-panel'); const r = el.getBoundingClientRect();
+  const ph = Math.min(panel.scrollHeight, 260), pw = Math.max(panel.offsetWidth, 150);
+  const below = window.innerHeight - r.bottom, above = r.top;
+  if(below < ph + 12 && above > below) el.classList.add('up');
+  if(r.left + pw > window.innerWidth - 8) el.classList.add('right');
+  const act = panel.querySelector('.csel-opt.active'); if(act) panel.scrollTop = Math.max(0, act.offsetTop - 40);
 }
 function pickCustomSelect(id, value, optEl){
   const hidden = $('#'+id);
@@ -386,7 +400,7 @@ function pickCustomSelect(id, value, optEl){
     if(btnEl) btnEl.classList.remove('placeholder');
     wrap.querySelectorAll('.csel-opt').forEach(o=>o.classList.remove('active'));
     if(optEl) optEl.classList.add('active');
-    wrap.classList.remove('open');
+    closeAllCustomSelects();
   }
   const entry = cselRegistry[id];
   if(entry && entry.onPick) entry.onPick(value);
