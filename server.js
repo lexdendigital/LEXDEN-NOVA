@@ -212,7 +212,7 @@ const CREATOR_ENDPOINTS = [
   'creator-admin-risk',
   // Upgrade: refunds lifecycle, inventory hub, pre-payment stock reservation, order exceptions
   'creator-admin-refunds', 'creator-inventory', 'creator-checkout', 'creator-admin-exceptions', 'delivery-proof', 'policy-accept', 'policy-internal', 'creator-earnings',
-  'creator-admin-funding', 'pickup-stations', 'creator-updates',
+  'creator-admin-funding', 'pickup-stations', 'creator-updates', 'creator-channel-shopify',
 ];
 for (const name of CREATOR_ENDPOINTS) {
   app.all(`/api/${name}`, require(`./api/${name}`));

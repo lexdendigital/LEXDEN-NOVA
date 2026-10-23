@@ -431,10 +431,76 @@ async function ciCommitCsv(skip){
   catch(e){ ci.error = creatorErrText(e); }
   ci.busy = false; ciLoad(true); render();
 }
-async function ciLoadChannels(){
-  if(ci.channels) return;
+async function ciLoadChannels(force){
+  cshLoad();
+  if(ci.channels && !force) return;
   try{ ci.channels = (await capi('/api/creator-inventory?channels=1')).listings || []; }catch(e){ ci.channels = []; }
   render();
+}
+/* ---- Shopify connection (one store, stock only; the access token never reaches this page) ---- */
+let csh = { status:null, locations:null, busy:false, error:'', info:'', importReport:null, loaded:false };
+(function(){ try{ const p = new URLSearchParams(location.search); const s = p.get('shopify'); if(!s) return;
+  csh.info = s==='connected' ? 'Shopify connected. Now choose your store location.' : ''; csh.error = s==='connected' ? '' : ({BAD_STATE:'That connection attempt expired. Start again.',BAD_HMAC:'Shopify could not be verified. Start again.',MISSING_SCOPE:'Please accept all the permissions Shopify asks for.'}[p.get('reason')] || 'Shopify did not connect. Start again.');
+  cpView='inventory'; ci.view='channels'; history.replaceState(null,'',location.pathname); }catch(e){} })();
+async function cshCall(body, okMsg){
+  if(csh.busy) return null; csh.busy = true; csh.error = ''; csh.info = ''; render();
+  let r = null;
+  try{ r = await capi('/api/creator-channel-shopify', body); if(okMsg) csh.info = okMsg; }catch(e){ csh.error = creatorErrText(e); }
+  csh.busy = false; render(); return r;
+}
+async function cshLoad(force){
+  if(csh.loaded && !force) return;
+  try{ csh.status = await capi('/api/creator-channel-shopify'); csh.loaded = true; if(csh.status.connection && csh.status.connection.connected && !csh.locations) cshLocations(); }catch(e){ csh.error = creatorErrText(e); csh.loaded = true; }
+  render();
+}
+async function cshLocations(){ const r = await cshCall({ action:'locations' }); if(r) csh.locations = r.locations || []; }
+async function cshBegin(){
+  const shop = (document.getElementById('cshShop')||{}).value || '';
+  const r = await cshCall({ action:'begin_install', shop }); if(r && r.url) location.href = r.url;
+}
+async function cshToken(){
+  const shop = (document.getElementById('cshShop')||{}).value || ''; const tk = (document.getElementById('cshTok')||{}).value || '';
+  const r = await cshCall({ action:'connect_token', shop, accessToken:tk }, 'Shopify connected.');
+  if(r){ csh.locations = r.locations || null; await cshLoad(true); }
+}
+async function cshSetLocation(id){ if(!id) return; if(await cshCall({ action:'set_location', locationId:id }, 'Location saved.')) await cshLoad(true); }
+async function cshImport(){
+  const r = await cshCall({ action:'import_items' }); if(!r) return;
+  csh.importReport = r; csh.info = `Checked ${r.scanned} item(s): ${r.matched} matched by SKU${r.needsReview?`, ${r.needsReview} need review`:''}${r.noMatch?`, ${r.noMatch} not in NOVA`:''}${r.noSku?`, ${r.noSku} without SKU`:''}.${r.next?' More items exist; tap again for the next page.':''}`;
+  ci.channels = null; ciLoadChannels(true);
+}
+async function cshEnable(listingId, who){
+  const msg = who==='NOVA' ? 'NOVA will become the master: Shopify stock will be overwritten with the NOVA number for this item, and kept equal afterwards. Continue?' : 'Shopify will become the master for the starting number: NOVA stock for this item will be set from Shopify (reserved units stay on top). Continue?';
+  if(!confirm(msg)) return;
+  if(csh.busy) return; csh.busy = true; csh.error=''; csh.info=''; render();
+  try{ await capi('/api/creator-inventory', { action:'enable_sync', listingId, authoritative: who==='NOVA'?'NOVA':'CHANNEL', acknowledgedPreview:true }); csh.info='Sync switched on for this item.'; ci.channels=null; ci.items=null; }
+  catch(e){ csh.error = creatorErrText(e); }
+  csh.busy = false; ciLoadChannels(true); render();
+}
+async function cshSync(){ const r = await cshCall({ action:'sync_now' }, 'Sync finished.'); if(r){ ci.channels=null; ci.items=null; ciLoadChannels(true); } }
+async function cshDisconnect(){ if(!confirm('Disconnect Shopify? Automatic sync stops for all items.')) return; const r = await cshCall({ action:'disconnect' }, 'Disconnected. Also uninstall the app in your Shopify admin to remove access fully.'); if(r){ csh.locations=null; await cshLoad(true); ci.channels=null; ciLoadChannels(true); } }
+function cshCardHtml(){
+  const s = csh.status; const c = s && s.connection; const dis = csh.busy ? 'disabled' : '';
+  const flash = (csh.error?`<div class="small" style="color:var(--error);margin:6px 0;">⚠️ ${escapeHtml(csh.error)}</div>`:'') + (csh.info?`<div class="small" style="color:#2ee6a6;margin:6px 0;">✓ ${escapeHtml(csh.info)}</div>`:'');
+  let inner;
+  if(!s) inner = '<div class="text-2 small">Loading…</div>';
+  else if(!c || !c.connected){
+    inner = `<div class="text-2 small" style="margin-bottom:8px;">Connect your Shopify store so NOVA and Shopify never sell the same unit twice. Only stock numbers are read and changed; NOVA never touches your products, prices or orders.${c && c.status==='NEEDS_RECONNECT' ? ' <b>Your connection expired. Connect again.</b>' : ''}</div>
+      <input id="cshShop" type="text" placeholder="your-store.myshopify.com" style="width:100%;margin-bottom:6px;" autocomplete="off">
+      ${s.oauthAvailable ? `<button class="btn btn-primary btn-sm" ${dis} onclick="cshBegin()">Connect Shopify</button>` : '<div class="text-2 small">One-tap connect is not switched on yet.</div>'}
+      <details style="margin-top:8px;"><summary class="small">I already have an Admin API token</summary><input id="cshTok" type="password" placeholder="shpat_…" style="width:100%;margin:6px 0;" autocomplete="off"><button class="btn btn-outline btn-sm" ${dis} onclick="cshToken()">Connect with token</button></details>`;
+  } else {
+    const locs = csh.locations || [];
+    const mine = (ci.channels||[]).filter(l=>l.channel==='SHOPIFY');
+    inner = `<div class="small"><b>${escapeHtml(c.shopName||c.shop)}</b> <span class="text-2">· ${escapeHtml(c.shop)}</span></div>
+      <div style="margin:8px 0;"><label class="text-2 small">Location whose stock to keep equal</label><select style="width:100%;" onchange="cshSetLocation(this.value)" ${dis}><option value="">${c.locationName?escapeHtml(c.locationName):'Choose a location…'}</option>${locs.map(l=>`<option value="${escapeHtml(l.id)}">${escapeHtml(l.name)}</option>`).join('')}</select></div>
+      ${c.lastError?`<div class="small" style="color:var(--error);">Last problem: ${escapeHtml(c.lastError)}</div>`:''}
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0;"><button class="btn btn-outline btn-sm" ${dis||!c.locationId?'disabled':''} onclick="cshImport()">Find my Shopify items</button>${s.syncAvailable?`<button class="btn btn-outline btn-sm" ${dis||!c.locationId?'disabled':''} onclick="cshSync()">Sync now</button>`:''}<button class="btn btn-outline btn-sm" ${dis} onclick="cshDisconnect()">Disconnect</button></div>
+      ${s.syncAvailable?'':'<div class="text-2 small">Automatic sync is not switched on yet. You can connect and match items now.</div>'}
+      ${mine.map(l=>{ const att = l.attention==='NEEDS_RECOUNT'?'Needs a recount: count the real stock, then switch sync on again.':l.attention==='OVERSOLD'?`Oversold by ${l.oversoldBy||'?'} unit(s): Shopify sold more than NOVA had.`:'';
+        return `<div class="card" style="padding:10px;margin-top:6px;"><strong>${escapeHtml(l.title||l.externalId)}</strong><div class="text-2 small">${escapeHtml(l.mappingStatus)}${l.syncEnabled?' · syncing':''}</div>${att?`<div class="small" style="color:var(--error);">${escapeHtml(att)}</div>`:''}${l.mappingStatus==='MAPPED' && s.syncAvailable && (!l.syncEnabled || att) ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;"><button class="btn btn-outline btn-sm" ${dis} onclick="cshEnable('${escapeHtml(l.id)}','NOVA')">Start: NOVA number wins</button><button class="btn btn-outline btn-sm" ${dis} onclick="cshEnable('${escapeHtml(l.id)}','CHANNEL')">Start: Shopify number wins</button></div>`:''}</div>`; }).join('')}`;
+  }
+  return `<div class="card" style="padding:14px;margin-bottom:8px;"><strong>Shopify</strong>${flash}<div style="margin-top:6px;">${inner}</div></div>`;
 }
 function creatorInventoryHub(){
   if(!ci.items && !ci.error){ ciLoad(); return '<div class="text-2 small" style="padding:20px;text-align:center;">Loading your stock…</div>'; }
@@ -461,7 +527,7 @@ function creatorInventoryHub(){
         <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap;">${pv.invalidCount===0?`<button class="btn btn-primary btn-sm" ${ci.busy?'disabled':''} onclick="ciCommitCsv(false)">Apply ${pv.validCount} row(s)</button>`:`<button class="btn btn-outline btn-sm" ${ci.busy||!pv.validCount?'disabled':''} onclick="ciCommitCsv(true)">Apply ${pv.validCount} good row(s), skip ${pv.invalidCount} bad</button>`}</div></div>` : `<div class="small" style="color:var(--error);margin-top:8px;">${escapeHtml((pv.fileProblems||[]).join(' '))}</div>`) : ''}</div>`;
   } else {
     const ch = ci.channels;
-    body = `<div class="card" style="padding:14px;margin-bottom:8px;"><div class="small" style="line-height:1.6;">LEXDEN NOVA does <b>not</b> automatically sync with Instagram, WhatsApp, marketplaces or market stalls. When you sell elsewhere, tap <b>Sold elsewhere</b> on the stock card or import a CSV so NOVA never sells something you no longer have. Mapping a listing below only records which of your products it is; it does not sync anything.</div></div>
+    body = `<div class="card" style="padding:14px;margin-bottom:8px;"><div class="small" style="line-height:1.6;">Only <b>Shopify</b> can sync automatically. For Instagram, WhatsApp, marketplaces and market stalls, tap <b>Sold elsewhere</b> on the stock card or import a CSV so NOVA never sells something you no longer have.</div></div>${cshCardHtml()}
       ${ch===null?'<div class="text-2 small">Loading…</div>':(ch.length?ch.map(l=>`<div class="card" style="padding:10px;margin-bottom:6px;"><strong>${escapeHtml(l.channel)} · ${escapeHtml(l.title||l.externalId)}</strong><div class="text-2 small">${escapeHtml(l.mappingStatus)} · ${escapeHtml((l.health||{}).message||'')}</div></div>`).join(''):'<div class="text-2 small">No other channels recorded.</div>')}`;
   }
   return `<div style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap;">${tabs}</div>${msg}${body}`;

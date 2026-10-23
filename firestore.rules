@@ -558,6 +558,9 @@ service cloud.firestore {
     match /riderTasks/{id}          { allow read, write: if false; }
     match /pickupStations/{id}      { allow read: if isAdmin(); allow write: if false; }
     match /creatorUpdates/{id}      { allow read: if isAdmin(); allow write: if false; }
+    // Shopify connections hold an ENCRYPTED token: nobody can read or write them from a browser, not even the owner or an admin.
+    match /shopifyConnections/{id}  { allow read, write: if false; }
+    match /shopifyInstallStates/{id} { allow read, write: if false; }
     match /policyAcceptances/{id}   { allow read: if request.auth != null && (resource.data.uid == request.auth.uid || isAdmin()); allow write: if false; }
 
     // Anything not explicitly matched above is denied by default —

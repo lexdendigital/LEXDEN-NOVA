@@ -11,6 +11,7 @@
 const { getDb, requireActiveCreator, ok, fail, setCors, writeCreatorAuditLog } = require('./creator/shared');
 const inv = require('./inventory/service');
 const D = require('./inventory/domain');
+require('./inventory/channel-sync'); // registers the Shopify adapter with the inventory service
 
 const E = (status, code, message) => Object.assign(new Error(message), { status, code });
 

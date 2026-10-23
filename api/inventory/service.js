@@ -188,7 +188,7 @@ async function consumeForOrder(db, { orderRef, productId, reservationId = null, 
 
 // ------------------------------------------------------------------ quick actions
 const CREATOR_ACTIONS = Object.freeze([T.RESTOCK, T.EXTERNAL_SALE, T.COUNT_CORRECTION, T.MARK_UNAVAILABLE, T.RESTORE_AVAILABLE, T.RETURN_TO_STOCK, T.SAFETY_STOCK_CHANGE]);
-const CHANNELS = Object.freeze(['NOVA', 'MANUAL', 'CSV_IMPORT', 'MARKET_STALL', 'INSTAGRAM', 'WHATSAPP', 'OTHER']);
+const CHANNELS = Object.freeze(['NOVA', 'MANUAL', 'CSV_IMPORT', 'SHOPIFY', 'MARKET_STALL', 'INSTAGRAM', 'WHATSAPP', 'OTHER']);
 
 async function adjust(db, { creatorId, itemId, type, quantity = null, countedOnHand, safetyStock, reason = null, note = null, channel = 'MANUAL', actor, idempotencyKey, relatedRef = null, resellableConfirmed = false, nowMs = Date.now() }) {
   if (!CREATOR_ACTIONS.includes(type)) throw err(422, 'ACTION_NOT_ALLOWED', 'That stock action is not available here.');
@@ -314,8 +314,8 @@ async function commitImport(db, { creatorId, csvText, importId, skipInvalid = fa
 }
 
 // ------------------------------------------------------------------ channel listings
-// There is NO connected-channel adapter in this codebase yet, so automatic sync can never be
-// switched on. Mapping, conflict review and manual/batch recording are fully supported.
+// Connected sync exists only for channels that register an adapter here (Shopify: inventory/channel-sync.js)
+// AND only while INVENTORY_CHANNEL_SYNC_ENABLED=true. Mapping and manual/batch recording always work.
 const ADAPTERS = Object.create(null);
 
 async function mapChannelListing(db, { creatorId, channel, externalId, sku = null, gtin = null, confirmedItemId = null, title = null, nowMs = Date.now() }) {
@@ -341,7 +341,8 @@ async function enableChannelSync(db, { creatorId, listingId, authoritative, ackn
   if (!cfg.flags().connectedChannelSync || !adapter) throw err(409, 'CONNECTED_SYNC_UNAVAILABLE', 'Automatic sync is not available for this channel. Record external sales or import them instead.');
   if (l.mappingStatus !== 'MAPPED') throw err(409, 'MAPPING_NOT_CONFIRMED', 'Confirm the product mapping before turning sync on.');
   if (!acknowledgedPreview || !['NOVA', 'CHANNEL'].includes(authoritative)) throw err(422, 'CONSENT_REQUIRED', 'Review the conflict preview and choose which system is authoritative before enabling sync.');
-  await ref.set({ syncEnabled: true, syncMode: D.SYNC_MODES.CONNECTED, authoritative }, { merge: true });
+  const extra = typeof adapter.onEnable === 'function' ? adapter.onEnable(l) : {}; // may refuse (409) or reset sync state
+  await ref.set({ syncEnabled: true, syncMode: D.SYNC_MODES.CONNECTED, authoritative, ...extra }, { merge: true });
   return { enabled: true };
 }
 
