@@ -18,6 +18,7 @@ const { toNodeHandler } = require('@modelcontextprotocol/node');
 const oauth = require('./oauth');
 const { bearerAuthMiddleware } = require('./lib/authMiddleware');
 const { writeAuditEntry } = require('./lib/audit');
+const { blockedReason } = require('./lib/risk');
 const { recordServerError } = require('./tools/diagnostics');
 const creatorOauth = require('./creatorOauth');
 const creatorTools = require('./creatorTools');
@@ -62,6 +63,8 @@ function buildServer(authInfo) {
   mcpServer.registerTool = (name, config, handler) => {
     const wrapped = async (args, extra) => {
       const started = Date.now();
+      const blocked = blockedReason(name, args);
+      if (blocked) { writeAuditEntry({ email, tool: name, args, ok: false, error: 'BLOCKED_HUMAN_ONLY', tookMs: 0 }).catch(() => {}); return { content: [{ type: 'text', text: `Error: ${blocked}` }], isError: true }; }
       try {
         const result = await handler(args, extra);
         writeAuditEntry({ email, tool: name, args, ok: true, tookMs: Date.now() - started }).catch(() => {});
@@ -90,6 +93,8 @@ function buildCreatorServer(authInfo, deps) {
   mcpServer.registerTool = (name, config, handler) => {
     const wrapped = async (args, extra) => {
       const started = Date.now();
+      const blocked = blockedReason(name, args);
+      if (blocked) { writeAuditEntry({ email, uid, realm: 'creator', tool: name, args, ok: false, error: 'BLOCKED_HUMAN_ONLY', tookMs: 0 }).catch(() => {}); return { content: [{ type: 'text', text: `Error: ${blocked}` }], isError: true }; }
       try {
         const result = await handler(args, extra);
         writeAuditEntry({ email, uid, realm: 'creator', tool: name, args, ok: !(result && result.isError), tookMs: Date.now() - started }).catch(() => {});
@@ -118,6 +123,8 @@ function collectTools(kind, authInfo, deps) {
         name, config,
         async run(args) {
           const started = Date.now();
+          const blocked = blockedReason(name, args);
+          if (blocked) { writeAuditEntry({ email, uid, realm: kind, tool: name, args, ok: false, error: 'BLOCKED_HUMAN_ONLY', tookMs: 0 }).catch(() => {}); return { content: [{ type: 'text', text: `Error: ${blocked}` }], isError: true }; }
           try {
             const result = await handler(args, {});
             writeAuditEntry({ email, uid, realm: kind, tool: name, args, ok: !(result && result.isError), tookMs: Date.now() - started }).catch(() => {});

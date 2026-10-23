@@ -9,16 +9,26 @@
 // RULES
 //  * Only the buyer of a PAID creator order can open a dispute (proved through the
 //    buyer's entitlement or the physical fulfilment, both stamped with buyerUid),
-//    once per order, within DISPUTE_WINDOW_DAYS of the sale.
-//  * Opening a dispute FREEZES the creator's earning for that order (it stops being
-//    withdrawable). The admin then decides in /api/creator-admin-risk; nothing is
+//    once per order. PHYSICAL orders: the 14-day window runs from CONFIRMED DELIVERY
+//    (never from the purchase date); before delivery is confirmed no countdown has
+//    started, so a buyer can still report non-delivery. DIGITAL/SERVICE orders use
+//    their own policy (api/core/config.js DISPUTE_POLICIES), snapshotted on the sale
+//    and on the dispute. The window is an operational baseline: it never removes
+//    statutory or payment-network rights.
+//  * Opening a dispute and FREEZING the creator's earning happen in ONE transaction
+//    (api/creator/ledger.js planFreeze): if the earning cannot be frozen the dispute is
+//    NOT opened half-way. If the money was already withdrawn the earning is not
+//    double-deducted; a recovery exception is raised for an admin instead.
+//    The admin then decides in /api/creator-admin-risk; nothing is
 //    decided or paid automatically, and AI is never involved.
 //  * The creator never sees the buyer's email.
 const { getDb, requireAuth, FieldValue, ok, fail, setCors, writeCreatorAuditLog } = require('./creator/shared');
-const { freezeSale } = require('./creator/ledger');
+const { planFreeze } = require('./creator/ledger');
+const cfg = require('./core/config');
+const refunds = require('./core/refunds');
 const { getEntitlement } = require('./creator/entitlements');
 
-const DISPUTE_WINDOW_DAYS = 14;
+const DISPUTE_WINDOW_DAYS = cfg.DISPUTE_POLICIES.PHYSICAL.windowDays; // kept for callers that display it
 const DAY_MS = 24 * 60 * 60 * 1000;
 const REASONS = ['NOT_AS_DESCRIBED', 'NOT_RECEIVED', 'FILE_PROBLEM', 'OTHER'];
 const MAX_MESSAGES = 50;
@@ -64,28 +74,57 @@ async function openDispute(db, uid, email, body) {
   }
   if (!mine) throw err(403, 'NOT_YOUR_ORDER', 'This order does not belong to your account.');
 
-  const soldAt = typeof sale.createdAtMs === 'number' ? sale.createdAtMs : toMs(sale.createdAt);
-  if (soldAt && Date.now() - soldAt > DISPUTE_WINDOW_DAYS * DAY_MS) throw err(400, 'WINDOW_CLOSED', `Disputes must be opened within ${DISPUTE_WINDOW_DAYS} days of the purchase.`);
+  // ---- Window: anchored on the policy snapshot taken at sale time ----
+  const policy = sale.disputePolicy || cfg.disputePolicySnapshot(sale.offeringType);
+  const windowMs = policy.windowDays * DAY_MS;
+  let anchorMs = null;
+  if (policy.anchor === 'CONFIRMED_DELIVERY') {
+    const f = await db.collection('fulfillments').doc(orderId).get();
+    const ful = f.exists ? f.data() : null;
+    // Only AUTHORITATIVE confirmed delivery starts the countdown. No reliable event => no countdown.
+    anchorMs = ful && ful.deliveredAtMs && cfg.isAuthoritativeEvidence(ful.deliveryEvidenceSource)
+      ? ful.deliveredAtMs
+      : (sale.deliveredAtMs && cfg.isAuthoritativeEvidence(sale.deliveryEvidenceSource) ? sale.deliveredAtMs : null);
+  } else {
+    anchorMs = typeof sale.createdAtMs === 'number' ? sale.createdAtMs : toMs(sale.createdAt);
+  }
+  if (anchorMs && Date.now() - anchorMs > windowMs) {
+    throw err(400, 'WINDOW_CLOSED', policy.anchor === 'CONFIRMED_DELIVERY'
+      ? `The ${policy.windowDays}-day window after confirmed delivery has passed. If you believe you have a legal right to a remedy, contact support.`
+      : `The ${policy.windowDays}-day window after purchase has passed. If you believe you have a legal right to a remedy, contact support.`);
+  }
 
+  // ---- ONE transaction: open the dispute AND freeze the earning together ----
   const ref = db.collection('creatorDisputes').doc(orderId);
+  const saleRef = db.collection('creatorSales').doc(orderId);
   const now = Date.now();
-  try {
-    await ref.create({
-      orderId, creatorId: sale.creatorId, buyerUid: uid, buyerEmail: email || null,
-      productId: sale.productId || null, productTitle: sale.productTitle || null,
-      amount: sale.saleAmount, currency: sale.currency || null,
+  const outcome = await db.runTransaction(async (tx) => {
+    const saleNow = await tx.get(saleRef);
+    const disputeNow = await tx.get(ref);
+    if (disputeNow.exists) throw err(409, 'DISPUTE_EXISTS', 'A dispute is already open for this order.');
+    const s = saleNow.exists ? saleNow.data() : null;
+    if (!s || s.status === 'refunded') throw err(409, 'ALREADY_REFUNDED', 'This order has already been refunded.');
+    const privRef = db.collection('creatorPrivate').doc(s.creatorId);
+    const priv = (await tx.get(privRef)).data() || {};
+    const plan = planFreeze(s, priv, { disputeId: orderId, nowMs: now });
+    if (!plan.ok) throw err(409, 'CANNOT_OPEN_DISPUTE', 'This order cannot be disputed in its current state. Contact support.');
+    tx.create(ref, {
+      orderId, creatorId: s.creatorId, buyerUid: uid, buyerEmail: email || null,
+      productId: s.productId || null, productTitle: s.productTitle || null,
+      amount: s.saleAmount, currency: s.currency || null,
       reason, details, status: 'OPEN',
+      policy, deliveryConfirmedAtMs: policy.anchor === 'CONFIRMED_DELIVERY' ? anchorMs : null,
       messages: [{ by: 'buyer', text: details, atMs: now }],
       openedAtMs: now, openedAt: FieldValue.serverTimestamp(),
     });
-  } catch (e) {
-    if (e && (e.code === 6 || /ALREADY_EXISTS/i.test(String(e.message)))) throw err(409, 'DISPUTE_EXISTS', 'A dispute is already open for this order.');
-    throw e;
-  }
-  const frozen = await freezeSale(db, orderId, orderId);
-  await notifyCreator(db, sale.creatorId, `dispute_${orderId}`, 'A buyer opened a dispute', `${sale.productTitle || 'An order'}: ${reason.replace(/_/g, ' ').toLowerCase()}. Please reply in Creator → More → Disputes. The earning for this order is on hold until it is resolved.`);
-  writeCreatorAuditLog({ actorUid: uid, actorRole: 'buyer', action: 'dispute.opened', targetType: 'dispute', targetId: orderId, metadata: { reason, frozen: !!frozen.frozen } }).catch(() => {});
-  return { disputeId: orderId, status: 'OPEN', earningFrozen: !!frozen.frozen };
+    if (plan.saleUpdate) tx.set(saleRef, plan.saleUpdate, { merge: true });
+    if (plan.privUpdate) tx.set(privRef, plan.privUpdate, { merge: true });
+    if (plan.exception) tx.set(db.collection('ledgerExceptions').doc(`dispute_${orderId}`), { ...plan.exception, status: 'OPEN', createdAtMs: now }, { merge: true });
+    return { fundsAlreadyWithdrawn: !!(plan.saleUpdate && plan.saleUpdate.fundsAlreadyWithdrawn), creatorId: s.creatorId, productTitle: s.productTitle };
+  });
+  await notifyCreator(db, outcome.creatorId, `dispute_${orderId}`, 'A buyer opened a dispute', `${outcome.productTitle || 'An order'}: ${reason.replace(/_/g, ' ').toLowerCase()}. Please reply in Creator → Store → Disputes. The earning for this order is on hold until it is resolved.`);
+  writeCreatorAuditLog({ actorUid: uid, actorRole: 'buyer', action: 'dispute.opened', targetType: 'dispute', targetId: orderId, metadata: { reason, fundsAlreadyWithdrawn: outcome.fundsAlreadyWithdrawn, policyVersion: policy.version } }).catch(() => {});
+  return { disputeId: orderId, status: 'OPEN', earningFrozen: true, windowStartedAt: anchorMs, needsAdminRecovery: outcome.fundsAlreadyWithdrawn };
 }
 
 async function addMessage(db, uid, body) {
@@ -106,7 +145,7 @@ async function addMessage(db, uid, body) {
     tx.set(ref, { messages, lastMessageAtMs: Date.now(), ...(by === 'creator' ? { creatorResponded: true } : {}) }, { merge: true });
     return { by, creatorId: d.creatorId, title: d.productTitle };
   });
-  if (out.by === 'buyer') await notifyCreator(db, out.creatorId, `dispute_msg_${id}`, 'The buyer replied to a dispute', `${out.title || 'Order'}: open Creator → More → Disputes to respond.`);
+  if (out.by === 'buyer') await notifyCreator(db, out.creatorId, `dispute_msg_${id}`, 'The buyer replied to a dispute', `${out.title || 'Order'}: open Creator → Store → Disputes to respond.`);
   return { ok: true };
 }
 
@@ -122,6 +161,13 @@ module.exports = async function handler(req, res) {
       const role = req.query && req.query.role === 'creator' ? 'creator' : 'buyer';
       const snap = await db.collection('creatorDisputes').where(role === 'creator' ? 'creatorId' : 'buyerUid', '==', decoded.uid).limit(200).get();
       const list = snap.docs.map((x) => publicView({ id: x.id, ...x.data() })).sort((a, b) => (b.openedAtMs || 0) - (a.openedAtMs || 0));
+      // The refund line comes from the refund record itself, so "completed" is only ever
+      // shown after provider confirmation (api/core/refunds.js userFacingStatus).
+      for (const d of list) {
+        if (!d.refundId) continue;
+        const r = await db.collection('refunds').doc(d.refundId).get();
+        if (r.exists) d.refundStatus = refunds.userFacingStatus(r.data());
+      }
       return ok(res, { disputes: list });
     }
     if (req.method !== 'POST') return res.status(405).json({ ok: false, error: { code: 'METHOD_NOT_ALLOWED', message: 'Use GET or POST.' } });
@@ -134,6 +180,7 @@ module.exports = async function handler(req, res) {
   }
 };
 module.exports.REASONS = REASONS;
+module.exports.openDispute = openDispute;
 module.exports.addMessage = addMessage;
 module.exports.DISPUTE_WINDOW_DAYS = DISPUTE_WINDOW_DAYS;
 module.exports.publicView = publicView;

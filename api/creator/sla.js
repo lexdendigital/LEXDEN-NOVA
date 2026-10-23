@@ -11,7 +11,7 @@
 //   add shipping + tracking ........... 48 h   (longer when the listing
 //                                              declares a processing time)
 //   delivery after shipping ........... 14 days (a flag for support only)
-//   buyer dispute window after delivery 72 h   (used by Stage I auto-release)
+//   buyer dispute window after delivery: derived from api/core/config.js (14 days for physical orders)
 //
 // An overdue order is a WARNING and a trust signal. This file never cancels,
 // refunds or restricts anything by itself; enforcement is Stage I's job and
@@ -23,7 +23,7 @@ const SLA_DEFAULTS = Object.freeze({
   ackHours: 24,
   shipHours: 48,
   deliveryDays: 14,
-  disputeWindowHours: 72,
+  disputeWindowHours: require('../core/config').DISPUTE_POLICIES.PHYSICAL.windowDays * 24,
   dueSoonFraction: 0.25, // "due soon" once <=25% of a window remains
   maxProcessingDays: 30,
 });

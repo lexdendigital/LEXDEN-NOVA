@@ -10,7 +10,7 @@ const { slaPolicyFor, computeDeadlines } = require('./sla');
 
 // Idempotent: a retried verify-paystack.js call never clobbers whatever
 // state a creator/admin has since moved the record to.
-async function createFulfillment(db, { orderId, productId, versionId, creatorId, buyerUid, buyerEmail, delivery, productTitle, fulfillmentMode, processingDays, nowMs }) {
+async function createFulfillment(db, { orderId, productId, versionId, creatorId, buyerUid, buyerEmail, delivery, productTitle, fulfillmentMode, processingDays, nowMs, exceptionOpen }) {
   const ref = db.collection('fulfillments').doc(orderId);
   const existing = await ref.get();
   if (existing.exists) return { id: orderId, created: false };
@@ -32,6 +32,7 @@ async function createFulfillment(db, { orderId, productId, versionId, creatorId,
       proofPhotoStoragePath: null, deliveryConfirmedBy: null,
       cancelReason: null, returnReason: null,
       fulfillmentMode: mode, slaPolicy, createdAtMs, ...deadlines, acknowledgedAtMs: null,
+      ...(exceptionOpen ? { exceptionOpen: true } : {}),
       createdAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
     });
@@ -39,26 +40,9 @@ async function createFulfillment(db, { orderId, productId, versionId, creatorId,
     if (e && (e.code === 6 || /ALREADY_EXISTS/i.test(String(e.message)))) return { id: orderId, created: false };
     throw e;
   }
-  // Own-stock listings: one unit leaves stock per paid order, exactly once
-  // (only the call that actually created the fulfillment reaches this line).
-  if (mode === 'SELLER_STOCK' && productId) await decrementStock(db, productId);
+  // Stock is NOT touched here any more: the inventory service consumes the checkout
+  // reservation exactly once (api/creator/checkout.js settleStock), keyed on the order.
   return { id: orderId, created: true };
-}
-
-// Never throws and never goes below zero: a stock hiccup must not undo a paid order.
-async function decrementStock(db, productId) {
-  try {
-    const ref = db.collection('products').doc(productId);
-    await db.runTransaction(async (tx) => {
-      const snap = await tx.get(ref);
-      if (!snap.exists) return;
-      const snapshot = (snap.data() || {}).publishedSnapshot;
-      if (!snapshot || typeof snapshot.stock !== 'number') return;
-      tx.set(ref, { publishedSnapshot: { ...snapshot, stock: Math.max(0, snapshot.stock - 1) } }, { merge: true });
-    });
-  } catch (e) {
-    console.error('stock decrement failed:', e && e.message);
-  }
 }
 
 async function getFulfillment(db, orderId) {
@@ -74,12 +58,58 @@ const STATE_TIMESTAMP_FIELD = Object.freeze({
   [FULFILLMENT_STATES.CANCELLED]: 'cancelledAt',
 });
 
+// Which evidence source a DELIVERED transition represents. Sources stay DISTINCT
+// (carrier / buyer / code / admin / creator) so a creator's own claim is never
+// mistaken for buyer or carrier proof, and only authoritative ones start the
+// creator-earning release clock (api/core/config.js AUTHORITATIVE_EVIDENCE).
+const CONFIRMED_BY_TO_SOURCE = Object.freeze({ buyer: 'BUYER_CONFIRMED', admin: 'ADMIN_VERIFIED', creator: 'CREATOR_REPORTED', system: 'CARRIER', carrier: 'CARRIER' });
+
 async function applyFulfillmentPatch(db, orderId, to, extraFields) {
   const patch = { status: to, updatedAt: FieldValue.serverTimestamp(), ...(extraFields || {}) };
   const tsField = STATE_TIMESTAMP_FIELD[to];
   if (tsField) patch[tsField] = FieldValue.serverTimestamp();
+  let evidence = null;
+  if (to === FULFILLMENT_STATES.DELIVERED) {
+    const atMs = Date.now();
+    const source = (extraFields && extraFields.deliveryEvidenceSource) || CONFIRMED_BY_TO_SOURCE[extraFields && extraFields.deliveryConfirmedBy] || 'CREATOR_REPORTED'; // unknown => NOT authoritative
+    evidence = { source, atMs };
+    patch.deliveredAtMs = atMs;
+    patch.deliveryEvidenceSource = source;
+  }
   await db.collection('fulfillments').doc(orderId).set(patch, { merge: true });
+  if (evidence) await syncLedgerDelivery(db, orderId, evidence);
   await notifyBuyerOfStatus(db, orderId, to, extraFields);
+}
+
+// Starts the earning release clock on the matching sale. If the ledger write fails the
+// fulfilment is flagged (ledgerSyncPending) and the `holds` job retries from the
+// fulfilment record, so a delivered order can never silently stay locked or be released early.
+async function syncLedgerDelivery(db, orderId, evidence) {
+  try {
+    await require('./ledger').markDelivered(db, orderId, evidence);
+  } catch (e) {
+    console.error('ledger delivery sync failed (will be retried by the holds job):', e && e.message);
+    await db.collection('fulfillments').doc(orderId).set({ ledgerSyncPending: true }, { merge: true }).catch(() => {});
+  }
+}
+
+/**
+ * Records delivery evidence WITHOUT changing the fulfilment status (e.g. the
+ * carrier/CJ says "delivered" while the buyer has not pressed "I received it").
+ * Authoritative evidence starts the earning release clock; the evidence trail keeps
+ * every source separately with its provider reference.
+ */
+async function recordDeliveryEvidence(db, orderId, { source, atMs = Date.now(), reference = null }) {
+  const ref = db.collection('fulfillments').doc(orderId);
+  const snap = await ref.get();
+  if (!snap.exists) return { recorded: false, reason: 'NOT_FOUND' };
+  const f = snap.data();
+  const trail = Array.isArray(f.evidenceTrail) ? f.evidenceTrail.slice(-19) : [];
+  if (trail.some((e) => e.source === source && e.reference === reference && reference)) return { recorded: false, reason: 'DUPLICATE' };
+  trail.push({ source, atMs, reference });
+  await ref.set({ evidenceTrail: trail }, { merge: true });
+  await syncLedgerDelivery(db, orderId, { source, atMs });
+  return { recorded: true };
 }
 
 // Buyer email for SHIPPED / DELIVERED / CANCELLED (template key
@@ -138,4 +168,4 @@ async function saveProofPhoto(orderId, fileBase64, mimeType) {
   return storagePath;
 }
 
-module.exports = { createFulfillment, getFulfillment, applyFulfillmentPatch, saveProofPhoto, getDb: sharedGetDb };
+module.exports = { createFulfillment, getFulfillment, applyFulfillmentPatch, recordDeliveryEvidence, syncLedgerDelivery, saveProofPhoto, getDb: sharedGetDb };

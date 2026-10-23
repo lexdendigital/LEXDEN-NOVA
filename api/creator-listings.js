@@ -50,7 +50,13 @@ function toPublicListing(product, creator) {
     currency: s.currency || null,
     refundPolicy: String(s.refundPolicy || '').slice(0, 2000),
     physical,
-    inStock: ownStock ? (typeof s.stock === 'number' ? s.stock > 0 : true) : true,
+    // Inventory ledger is the authority (product.stockSummary is its derived display copy). A listing with
+    // NO numeric stock is OUT of stock, never "unlimited".
+    inStock: ownStock
+      ? (product.stockSummary && typeof product.stockSummary.availableToSell === 'number'
+        ? product.stockSummary.availableToSell > 0
+        : (typeof s.stock === 'number' ? s.stock > 0 : false))
+      : true,
     processingDays: physical && Number.isInteger(s.processingDays) ? s.processingDays : null,
     shippingOrigin: physical && s.shippingOrigin ? String(s.shippingOrigin).slice(0, 200) : null,
     // Display-only, type-specific facts.

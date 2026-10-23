@@ -1,0 +1,317 @@
+{
+ "schema": 1,
+ "documents": [
+  {
+   "id": "terms",
+   "title": "Platform Terms of Use",
+   "audience": "public",
+   "source": "public/01_PLATFORM_TERMS_OF_USE.md",
+   "route": "legal/terms.html",
+   "version": "1.0-draft",
+   "effectiveDate": null,
+   "status": "DRAFT",
+   "reviewRequired": true,
+   "acceptanceRequiredFor": [
+    "ACCOUNT_SIGNUP"
+   ]
+  },
+  {
+   "id": "privacy",
+   "title": "Privacy Notice",
+   "audience": "public",
+   "source": "public/02_PRIVACY_NOTICE.md",
+   "route": "legal/privacy.html",
+   "version": "1.0-draft",
+   "effectiveDate": null,
+   "status": "DRAFT",
+   "reviewRequired": true,
+   "acceptanceRequiredFor": []
+  },
+  {
+   "id": "cookies",
+   "title": "Cookies & Similar Technologies Notice",
+   "audience": "public",
+   "source": "public/03_COOKIES_AND_TRACKING_NOTICE.md",
+   "route": "legal/cookies.html",
+   "version": "1.0-draft",
+   "effectiveDate": null,
+   "status": "DRAFT",
+   "reviewRequired": true,
+   "acceptanceRequiredFor": []
+  },
+  {
+   "id": "marketplace",
+   "title": "Marketplace & Seller Disclosure",
+   "audience": "public",
+   "source": "public/04_MARKETPLACE_DISCLOSURE.md",
+   "route": "legal/marketplace.html",
+   "version": "1.0-draft",
+   "effectiveDate": null,
+   "status": "DRAFT",
+   "reviewRequired": true,
+   "acceptanceRequiredFor": []
+  },
+  {
+   "id": "refunds",
+   "title": "Refunds, Returns, Cancellations & Disputes Policy",
+   "audience": "public",
+   "source": "public/05_REFUNDS_RETURNS_CANCELLATIONS_DISPUTES.md",
+   "route": "legal/refunds.html",
+   "version": "1.0-draft",
+   "effectiveDate": null,
+   "status": "DRAFT",
+   "reviewRequired": true,
+   "acceptanceRequiredFor": []
+  },
+  {
+   "id": "acceptable-use",
+   "title": "Marketplace Rules & Acceptable Use Policy",
+   "audience": "public",
+   "source": "public/06_MARKETPLACE_RULES_ACCEPTABLE_USE.md",
+   "route": "legal/acceptable-use.html",
+   "version": "1.0-draft",
+   "effectiveDate": null,
+   "status": "DRAFT",
+   "reviewRequired": true,
+   "acceptanceRequiredFor": []
+  },
+  {
+   "id": "youth",
+   "title": "Youth Access & Minor Safety Policy",
+   "audience": "public",
+   "source": "public/07_YOUTH_ACCESS_MINOR_SAFETY_POLICY.md",
+   "route": "legal/youth.html",
+   "version": "1.0-draft",
+   "effectiveDate": null,
+   "status": "DRAFT",
+   "reviewRequired": true,
+   "acceptanceRequiredFor": []
+  },
+  {
+   "id": "ip",
+   "title": "Intellectual Property, Copyright & Takedown Policy",
+   "audience": "public",
+   "source": "public/08_IP_COPYRIGHT_TAKEDOWN_POLICY.md",
+   "route": "legal/ip.html",
+   "version": "1.0-draft",
+   "effectiveDate": null,
+   "status": "DRAFT",
+   "reviewRequired": true,
+   "acceptanceRequiredFor": []
+  },
+  {
+   "id": "affiliate",
+   "title": "Affiliate Program Terms",
+   "audience": "public",
+   "source": "public/09_AFFILIATE_TERMS.md",
+   "route": "legal/affiliate.html",
+   "version": "1.0-draft",
+   "effectiveDate": null,
+   "status": "DRAFT",
+   "reviewRequired": true,
+   "acceptanceRequiredFor": [
+    "AFFILIATE_SIGNUP"
+   ]
+  },
+  {
+   "id": "ai",
+   "title": "AI Assistant Terms",
+   "audience": "public",
+   "source": "public/10_NOVA_AI_TERMS.md",
+   "route": "legal/ai.html",
+   "version": "1.0-draft",
+   "effectiveDate": null,
+   "status": "DRAFT",
+   "reviewRequired": true,
+   "acceptanceRequiredFor": []
+  },
+  {
+   "id": "accessibility",
+   "title": "Accessibility Statement",
+   "audience": "public",
+   "source": "public/11_ACCESSIBILITY_STATEMENT.md",
+   "route": "legal/accessibility.html",
+   "version": "1.0-draft",
+   "effectiveDate": null,
+   "status": "DRAFT",
+   "reviewRequired": true,
+   "acceptanceRequiredFor": []
+  },
+  {
+   "id": "complaints",
+   "title": "Complaints & Consumer Redress Procedure",
+   "audience": "public",
+   "source": "public/12_COMPLAINTS_AND_REDRESS.md",
+   "route": "legal/complaints.html",
+   "version": "1.0-draft",
+   "effectiveDate": null,
+   "status": "DRAFT",
+   "reviewRequired": true,
+   "acceptanceRequiredFor": []
+  },
+  {
+   "id": "creator-terms",
+   "title": "Creator Terms & Seller Agreement",
+   "audience": "creator",
+   "source": "creator/13_CREATOR_TERMS_SELLER_AGREEMENT.md",
+   "route": "legal/creator-terms.html",
+   "version": "1.0-draft",
+   "effectiveDate": null,
+   "status": "DRAFT",
+   "reviewRequired": true,
+   "acceptanceRequiredFor": [
+    "CREATOR_ACTIVATION"
+   ]
+  },
+  {
+   "id": "creator-marketplace-rules",
+   "title": "Marketplace & Product Rules",
+   "audience": "creator",
+   "source": "creator/14_CREATOR_MARKETPLACE_AND_PRODUCT_RULES.md",
+   "route": "legal/creator-marketplace-rules.html",
+   "version": "1.0-draft",
+   "effectiveDate": null,
+   "status": "DRAFT",
+   "reviewRequired": true,
+   "acceptanceRequiredFor": [
+    "CREATOR_ACTIVATION"
+   ]
+  },
+  {
+   "id": "creator-product-policy",
+   "title": "Product Policy Template",
+   "audience": "creator",
+   "source": "creator/15_CREATOR_PRODUCT_POLICY_TEMPLATE.md",
+   "route": "legal/creator-product-policy.html",
+   "version": "1.0-draft",
+   "effectiveDate": null,
+   "status": "DRAFT",
+   "reviewRequired": true,
+   "acceptanceRequiredFor": []
+  },
+  {
+   "id": "creator-payouts",
+   "title": "Fees, Ledger & Payout Policy",
+   "audience": "creator",
+   "source": "creator/16_CREATOR_FEES_LEDGER_PAYOUT_POLICY.md",
+   "route": "legal/creator-payouts.html",
+   "version": "1.0-draft",
+   "effectiveDate": null,
+   "status": "DRAFT",
+   "reviewRequired": true,
+   "acceptanceRequiredFor": [
+    "CREATOR_ACTIVATION"
+   ]
+  },
+  {
+   "id": "creator-verification",
+   "title": "Verification & KYC Notice",
+   "audience": "creator",
+   "source": "creator/17_CREATOR_VERIFICATION_KYC_NOTICE.md",
+   "route": "legal/creator-verification.html",
+   "version": "1.0-draft",
+   "effectiveDate": null,
+   "status": "DRAFT",
+   "reviewRequired": true,
+   "acceptanceRequiredFor": [
+    "CREATOR_ACTIVATION"
+   ]
+  },
+  {
+   "id": "creator-ip",
+   "title": "Intellectual Property Licence",
+   "audience": "creator",
+   "source": "creator/18_CREATOR_IP_LICENCE.md",
+   "route": "legal/creator-ip.html",
+   "version": "1.0-draft",
+   "effectiveDate": null,
+   "status": "DRAFT",
+   "reviewRequired": true,
+   "acceptanceRequiredFor": []
+  },
+  {
+   "id": "creator-enforcement",
+   "title": "Suspension, Enforcement & Appeals Policy",
+   "audience": "creator",
+   "source": "creator/19_CREATOR_SUSPENSION_ENFORCEMENT_APPEALS.md",
+   "route": "legal/creator-enforcement.html",
+   "version": "1.0-draft",
+   "effectiveDate": null,
+   "status": "DRAFT",
+   "reviewRequired": true,
+   "acceptanceRequiredFor": []
+  },
+  {
+   "id": "creator-privacy",
+   "title": "Privacy & Data-Processing Provisions",
+   "audience": "creator",
+   "source": "creator/20_CREATOR_PRIVACY_DATA_PROCESSING.md",
+   "route": "legal/creator-privacy.html",
+   "version": "1.0-draft",
+   "effectiveDate": null,
+   "status": "DRAFT",
+   "reviewRequired": true,
+   "acceptanceRequiredFor": []
+  },
+  {
+   "id": "retention",
+   "title": "Internal Data Retention Schedule",
+   "audience": "internal",
+   "source": "internal/21_DATA_RETENTION_SCHEDULE.md",
+   "route": null,
+   "version": "1.0-draft",
+   "effectiveDate": null,
+   "status": "DRAFT",
+   "reviewRequired": true,
+   "acceptanceRequiredFor": []
+  },
+  {
+   "id": "breach-response",
+   "title": "Internal Personal-Data Breach Response Procedure",
+   "audience": "internal",
+   "source": "internal/22_DATA_BREACH_RESPONSE_PROCEDURE.md",
+   "route": null,
+   "version": "1.0-draft",
+   "effectiveDate": null,
+   "status": "DRAFT",
+   "reviewRequired": true,
+   "acceptanceRequiredFor": []
+  },
+  {
+   "id": "moderation",
+   "title": "Internal Moderation, Trust & Risk Enforcement Policy",
+   "audience": "internal",
+   "source": "internal/23_MODERATION_TRUST_RISK_ENFORCEMENT.md",
+   "route": null,
+   "version": "1.0-draft",
+   "effectiveDate": null,
+   "status": "DRAFT",
+   "reviewRequired": true,
+   "acceptanceRequiredFor": []
+  },
+  {
+   "id": "refund-dispute-operations",
+   "title": "Internal Refund & Dispute Operations Procedure",
+   "audience": "internal",
+   "source": "internal/24_REFUND_DISPUTE_OPERATIONS.md",
+   "route": null,
+   "version": "1.0-draft",
+   "effectiveDate": null,
+   "status": "DRAFT",
+   "reviewRequired": true,
+   "acceptanceRequiredFor": []
+  },
+  {
+   "id": "ai-governance",
+   "title": "Internal AI Governance & Human-Oversight Policy",
+   "audience": "internal",
+   "source": "internal/25_AI_GOVERNANCE_HUMAN_OVERSIGHT.md",
+   "route": null,
+   "version": "1.0-draft",
+   "effectiveDate": null,
+   "status": "DRAFT",
+   "reviewRequired": true,
+   "acceptanceRequiredFor": []
+  }
+ ]
+}

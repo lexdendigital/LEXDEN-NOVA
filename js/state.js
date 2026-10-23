@@ -615,6 +615,10 @@ function startPaystackCheckout(productId, variantId, deliveryDetails, confirmed)
     if(chargeCode !== selectedCode && !creatorInfo){
       toast(`Checkout isn't set up in ${selectedCode} yet — charging in ${chargeCode} instead.`, 'info');
     }
+    // Creator-held physical stock: hold the unit on the SERVER before Paystack opens, so two buyers
+    // can never both pay for the last one. The hold expires by itself if payment is abandoned.
+    const needsHold = !!creatorInfo && p.productType === 'PHYSICAL';
+    window.__resByRef = window.__resByRef || {};
     const handler = PaystackPop.setup({
       key: activePaystackKey,
       email,
@@ -643,6 +647,7 @@ function startPaystackCheckout(productId, variantId, deliveryDetails, confirmed)
         verifyPaystackPayment(response.reference, p, email, true, deliveryDetails,selectedVariant&&selectedVariant.id);
       },
       onClose: function(){
+        if(needsHold){ try{ fetch(`${API_BASE}/api/creator-checkout`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'release', productId:p.id, checkoutId:reference }), keepalive:true }).catch(()=>{}); }catch(e){} }
         toast('Checkout closed — no charge was made.', 'info');
       }
     });
@@ -651,7 +656,16 @@ function startPaystackCheckout(productId, variantId, deliveryDetails, confirmed)
     // something is happening rather than the popup appearing to stall
     // or (worse) looking like nothing was tapped at all.
     showPaymentPartnerOverlay();
-    setTimeout(()=>{ hidePaymentPartnerOverlay(); handler.openIframe(); }, 3000);
+    const openPay = ()=>{ hidePaymentPartnerOverlay(); handler.openIframe(); };
+    if(!needsHold){ setTimeout(openPay, 3000); return; }
+    fetch(`${API_BASE}/api/creator-checkout`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'reserve', productId:p.id, checkoutId:reference }) })
+      .then(r=>r.json())
+      .then(d=>{
+        if(!d || !d.ok){ hidePaymentPartnerOverlay(); toast((d && d.error && d.error.message) || 'Sorry, this item just sold out.', 'error'); return; }
+        window.__resByRef[reference] = (d.data && d.data.reservation && d.data.reservation.id) || null;
+        setTimeout(openPay, 1500);
+      })
+      .catch(()=>{ hidePaymentPartnerOverlay(); toast('Could not reserve this item. Check your connection and try again.', 'error'); });
   };
   if(shopper && shopper.email){
     proceedWithEmail(shopper.email);
@@ -1137,6 +1151,7 @@ async function verifyPaystackPayment(reference, product, email, showResult, deli
       productId: product.id, productName: product.name,
       ...(variantId?{variantId}:{}),
       ...(delivery ? { delivery } : {}),
+      ...(window.__resByRef && window.__resByRef[reference] ? { reservationId: window.__resByRef[reference] } : {}),
       ...resolveAffiliateAttribution(product.id),
     });
     const RETRYABLE = /not yet successful|could not reach|retry automatically|trouble|could not find/i;
@@ -1292,6 +1307,25 @@ async function confirmShipmentDelivery(orderId, btn){
   }catch(e){ toast(e.message||'Could not reach the server', 'error'); }
   fetchMyShipments(true);
 }
+/* Delivery proof: the 6-character code is shown ONLY here, to the signed-in buyer, and only in this one response. */
+async function deliveryProof(action, orderId){
+  const body = { action, orderId };
+  if(action==='authorise_recipient'){
+    body.name = (prompt('Full name of the person who will collect this order:')||'').trim(); if(!body.name) return;
+    body.phone = (prompt('Their phone number (optional):')||'').trim() || undefined;
+  } else if(action==='report_problem'){
+    body.reason = (prompt('What went wrong with the delivery?')||'').trim(); if(!body.reason) return;
+  } else if(!confirm('Show your delivery code now? Only read it to the rider or pickup person when you have your parcel in hand.')) return;
+  try{
+    const r = await authedApi('/api/delivery-proof', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) }, 25000, 'The server took too long.');
+    const d = await r.json();
+    if(!d.ok){ toast((d.error&&d.error.message)||'Could not complete that', 'error'); return; }
+    if(action==='issue_code'){
+      const c = d.data && d.data.code; const mins = d.data && d.data.expiresAtMs ? Math.max(1, Math.round((d.data.expiresAtMs-Date.now())/60000)) : 10;
+      alert('Your delivery code: '+c+'\n\nIt works once and expires in about '+mins+' minutes. Do not share it before you receive your parcel.');
+    } else toast(action==='report_problem' ? 'Problem reported. Our team will look into it.' : 'Saved. Give that person your code only when they hand you the parcel.', 'success');
+  }catch(e){ toast(e.message||'Could not reach the server', 'error'); }
+}
 async function fetchLibrary(force){
   if(window.__libraryCache && !force) return;
   try{
@@ -1324,7 +1358,8 @@ function screenLibrary(){
   const shipHtml = ships.length ? `<h2 style="font-size:16px;margin:18px 0 8px;">My physical orders</h2>` + ships.map(f=>`<div class="card" style="padding:14px;margin-bottom:10px;">
       <div style="display:flex;justify-content:space-between;gap:8px;"><strong>${escapeHtml(f.productTitle||'Order')}</strong><span class="chip" style="font-size:10px;">${escapeHtml(f.status||'')}</span></div>
       ${f.carrier||f.trackingNumber?`<div class="text-2 small" style="margin-top:6px;">${escapeHtml(f.carrier||'')} ${escapeHtml(f.trackingNumber||'')}${f.trackingUrl&&/^https?:\/\//i.test(f.trackingUrl)?` · <a href="${escapeHtml(f.trackingUrl)}" target="_blank" rel="noopener" style="color:var(--accent);">Track</a>`:''}</div>`:'<div class="text-2 small" style="margin-top:6px;">The seller is preparing your order.</div>'}
-      ${f.status==='SHIPPED'?`<button class="btn btn-primary btn-sm" style="margin-top:8px;" onclick="confirmShipmentDelivery('${escapeHtml(f.id)}', this)">I received it</button>`:''}
+      ${f.status==='SHIPPED'?`<button class="btn btn-primary btn-sm" style="margin-top:8px;" onclick="confirmShipmentDelivery('${escapeHtml(f.id)}', this)">I received it</button>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;"><button class="btn btn-outline btn-sm" onclick="deliveryProof('issue_code','${escapeHtml(f.id)}')">Get delivery code</button><button class="btn btn-outline btn-sm" onclick="deliveryProof('authorise_recipient','${escapeHtml(f.id)}')">Someone else will collect</button><button class="btn btn-outline btn-sm" onclick="deliveryProof('report_problem','${escapeHtml(f.id)}')">Problem with delivery</button></div>`:''}
       <button class="btn btn-outline btn-sm" style="margin-top:8px;" onclick="rpOpen('${escapeHtml(f.id)}','${escapeHtml(String(f.productTitle||'').replace(/'/g,''))}')">Report a problem</button>
       ${rp.orderId && rp.orderId===f.id ? rpForm() : ''}
     </div>`).join('') : '';
@@ -1357,6 +1392,22 @@ async function fetchSeller(key){
   e.loading = false;
   if(location.hash.startsWith('#seller/')) render();
 }
+window.__sellerUpdates = window.__sellerUpdates || {};
+async function fetchSellerUpdates(uid){
+  if(!uid || window.__sellerUpdates[uid]) return;
+  window.__sellerUpdates[uid] = { loading:true, list:[] };
+  try{
+    const r = await withTimeout(fetch(API_BASE+'/api/creator-updates?creatorId='+encodeURIComponent(uid), {cache:'no-store'}), 12000, 'timeout');
+    const d = await r.json(); window.__sellerUpdates[uid] = { loading:false, list:(d && d.ok && d.data.updates) || [] };
+  }catch(e){ window.__sellerUpdates[uid] = { loading:false, list:[] }; }
+  if(location.hash.startsWith('#seller/')) render();
+}
+function sellerUpdatesHtml(uid){
+  fetchSellerUpdates(uid);
+  const u = (window.__sellerUpdates[uid]||{}).list || [];
+  if(!u.length) return '';
+  return `<div class="card" style="padding:14px;margin-bottom:14px;"><h3 style="font-size:14px;margin-bottom:8px;">Latest updates</h3>${u.slice(0,5).map(x=>`<div style="padding:8px 0;border-top:1px solid var(--border);"><div style="white-space:pre-wrap;">${escapeHtml(x.text)}</div><div class="text-2 small">${escapeHtml(new Date(x.createdAtMs).toLocaleDateString())}</div></div>`).join('')}</div>`;
+}
 function screenSeller(rawKey){
   let key = ''; try{ key = decodeURIComponent(rawKey||''); }catch(e){ key = rawKey||''; }
   const e = window.__sellerCache[key];
@@ -1379,6 +1430,7 @@ function screenSeller(rawKey){
       ${s.bio?`<div class="text-2 small" style="margin-top:8px;white-space:pre-wrap;">${escapeHtml(s.bio)}</div>`:''}
       <div class="text-2 small" style="margin-top:8px;">${mapped.length} listing${mapped.length===1?'':'s'}</div>
     </div>
+    ${sellerUpdatesHtml(s.id)}
     ${mapped.length ? `<div class="grid-products">${mapped.map(p=>productCard(p)).join('')}</div>` : '<div class="card" style="padding:18px;text-align:center;"><div class="text-2 small">No listings right now.</div></div>'}
   </div>`;
 }
@@ -1451,7 +1503,7 @@ async function cxLoad(force){
     if(!cx.form) cx.form = { username:p.profile.username||'', tagline:p.profile.tagline||'', bio:p.profile.bio||'' };
   }catch(e){ cx.error = creatorErrText(e); }
   cx.loading = false;
-  if(location.hash==='#creator' && creatorTab==='more') render();
+  if(location.hash==='#creator' && creatorTab==='store') render();
 }
 
 const LEADS_MAX_STORED = 20;
@@ -1595,3 +1647,45 @@ const appState = {
   // any time the feed list screen is opened fresh.
   feedShownCount:12,
 };
+
+
+// ---------- pickup stations (public list + business application) ----------
+// Shown only when the server has PICKUP_STATIONS_ENABLED. Buyers cannot pick a station at checkout yet.
+let ps = { data:null, mine:null, loading:false, err:'', info:'', busy:false, form:{ businessType:'PHARMACY' } };
+async function psLoad(){
+  if(ps.loading) return; ps.loading = true;
+  try{ const r = await withTimeout(fetch(API_BASE+'/api/pickup-stations', {cache:'no-store'}), 12000, 'timeout'); const d = await r.json(); ps.data = (d && d.ok) ? d.data : { enabled:false, stations:[] }; }
+  catch(e){ ps.data = { enabled:false, stations:[] }; }
+  try{ const r2 = await authedApi('/api/pickup-stations?mine=1', {}, 12000, 'timeout'); const d2 = await r2.json(); ps.mine = (d2 && d2.ok) ? d2.data.stations : []; }catch(e){ ps.mine = []; }
+  ps.loading = false; if(location.hash==='#pickup') render();
+}
+async function psSubmit(){
+  if(ps.busy) return; ps.busy = true; ps.err = ''; ps.info = ''; render();
+  try{
+    const r = await authedApi('/api/pickup-stations', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'submit', details: ps.form }) }, 20000, 'Timed out.');
+    const d = await r.json();
+    if(d && d.ok){ ps.info = 'Sent. We will review it and tell you here.'; ps.form = { businessType:'PHARMACY' }; ps.mine = null; psLoad(); } else ps.err = (d && d.error && d.error.message) || 'Could not send.';
+  }catch(e){ ps.err = e.message || 'Could not reach the server. Sign in and try again.'; }
+  ps.busy = false; render();
+}
+function psField(k, v){ ps.form[k] = v; }
+function screenPickup(){
+  if(!ps.data && !ps.loading) psLoad();
+  const d = ps.data;
+  const back = `<div style="margin-bottom:10px;"><button class="btn btn-outline btn-sm" onclick="history.length>1?history.back():navigate('#home')">← Back</button></div>`;
+  if(!d) return `<div class="screen">${back}<div class="text-2 small" style="padding:20px;text-align:center;">Loading…</div></div>`;
+  if(!d.enabled) return `<div class="screen">${back}<h1 class="screen-title">Pickup stations</h1><div class="card" style="padding:18px;text-align:center;"><div class="text-2 small">Pickup stations are not open yet.</div></div></div>`;
+  const F = ps.form, inp = (k,l,ph)=>`<div class="form-field"><label>${l}</label><input class="input" maxlength="200" placeholder="${ph||''}" value="${escapeHtml(F[k]||'')}" oninput="psField('${k}',this.value)"></div>`;
+  const types = ['PHARMACY','SUPERMARKET','RETAIL_SHOP','LOGISTICS_AGENT','MALL_KIOSK','POST_OFFICE_AGENT','OTHER_BUSINESS'];
+  return `<div class="screen">${back}<h1 class="screen-title">Pickup stations</h1>
+    <p class="text-2 small">Collect a parcel from a staffed shop instead of your door. You always need your delivery code to collect.</p>
+    ${d.stations.length ? d.stations.map(s=>`<div class="card" style="padding:12px;margin-bottom:8px;"><div style="font-weight:700;">${escapeHtml(s.name)}</div><div class="text-2 small">${escapeHtml(s.address)}, ${escapeHtml(s.city)}${s.state?', '+escapeHtml(s.state):''}</div><div class="text-2 small">Open: ${escapeHtml(s.openingHours)}</div></div>`).join('') : '<div class="card" style="padding:14px;text-align:center;"><div class="text-2 small">No approved stations yet.</div></div>'}
+    <div class="card" style="padding:16px;margin-top:14px;"><h3 style="font-size:15px;margin-bottom:6px;">Run a shop? Become a pickup station</h3>
+      <div class="text-2 small" style="margin-bottom:8px;">Sign in first. Only staffed businesses with a real premises are accepted, never homes.</div>
+      ${inp('name','Business name')}${inp('address','Street address')}${inp('city','City')}${inp('state','State')}${inp('openingHours','Opening hours','Mon-Sat 9am-6pm')}${inp('managerName','Manager name')}${inp('contactPhone','Contact phone')}
+      <div class="form-field"><label>Type of business</label><select class="input" onchange="psField('businessType',this.value)">${types.map(t=>`<option value="${t}" ${F.businessType===t?'selected':''}>${t.replace(/_/g,' ').toLowerCase()}</option>`).join('')}</select></div>
+      ${ps.err?`<div class="small" style="color:var(--error);">⚠️ ${escapeHtml(ps.err)}</div>`:''}${ps.info?`<div class="small" style="color:#2ee6a6;">✓ ${escapeHtml(ps.info)}</div>`:''}
+      <button class="btn btn-primary" ${ps.busy?'disabled':''} onclick="psSubmit()">${ps.busy?'Sending…':'Send for review'}</button>
+      ${(ps.mine||[]).map(m=>`<div class="text-2 small" style="margin-top:8px;">${escapeHtml(m.name)}: <b>${escapeHtml(m.state.replace(/_/g,' ').toLowerCase())}</b>${m.reviewNote?' · '+escapeHtml(m.reviewNote):''}</div>`).join('')}
+    </div></div>`;
+}

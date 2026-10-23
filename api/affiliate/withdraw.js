@@ -9,12 +9,24 @@
 // panel to approve/reject/pay.
 
 const { getDb, FieldValue, requireAffiliateAuth, setCors, addNonSundayDays } = require('./shared');
+const cfg = require('../core/config');
+const M = require('../core/money');
+
+// FEE: the approved AFFILIATE withdrawal fee (5% of the requested GROSS amount). It is
+// computed server-side in integer kobo, shown to the affiliate BEFORE they submit
+// (GET ?amount=), and its rate + calculation are stored on the withdrawal so a later rate
+// change never rewrites history. It is never applied to creator withdrawals.
+function previewFor(amountMajor, content, providerCostMinor = 0) {
+  const grossMinor = M.toMinor(amountMajor);
+  const calc = M.computeAffiliateWithdrawal({ grossMinor, bps: cfg.resolveAffiliateWithdrawalFeeBps(content), providerCostMinor });
+  return { grossAmount: M.toMajor(calc.grossMinor), feeAmount: M.toMajor(calc.feeMinor), providerCost: M.toMajor(calc.providerCostMinor), netPayable: M.toMajor(calc.netPayableMinor), feePct: calc.feeBps / 100, calc };
+}
 
 module.exports = async (req, res) => {
   setCors(res);
   if (req.method === 'OPTIONS') return res.status(200).end();
-  if (req.method !== 'POST') {
-    return res.status(405).json({ ok: false, error: 'Method not allowed — use POST.' });
+  if (req.method !== 'POST' && req.method !== 'GET') {
+    return res.status(405).json({ ok: false, error: 'Method not allowed — use POST (request) or GET ?amount= (fee preview).' });
   }
 
   let decoded;
@@ -22,6 +34,20 @@ module.exports = async (req, res) => {
     decoded = await requireAffiliateAuth(req);
   } catch (e) {
     return res.status(e.status || 401).json({ ok: false, error: e.message });
+  }
+
+  // GET ?amount=10000 -> the exact breakdown that a POST of the same amount would record.
+  if (req.method === 'GET') {
+    try {
+      const amt = Number(req.query && req.query.amount);
+      if (!amt || amt <= 0) return res.status(400).json({ ok: false, error: 'Invalid amount.' });
+      const snap = await getDb().collection('catalog').doc('settings').get();
+      const content = (snap.exists && snap.data().content) || {};
+      const p = previewFor(amt, content);
+      return res.status(200).json({ ok: true, preview: { grossAmount: p.grossAmount, feePct: p.feePct, feeAmount: p.feeAmount, providerCost: p.providerCost, netPayable: p.netPayable, currency: 'NGN' } });
+    } catch (e) {
+      return res.status(e.status || 400).json({ ok: false, error: e.message || 'Could not calculate the fee.' });
+    }
   }
 
   const amount = Number(req.body && req.body.amount);
@@ -56,7 +82,6 @@ module.exports = async (req, res) => {
       const settingsSnap = await tx.get(db.collection('catalog').doc('settings'));
       const content = (settingsSnap.exists && settingsSnap.data().content) || {};
       const minWithdrawal = content.affiliateMinWithdrawalNGN || 5000;
-      const feePct = content.affiliateWithdrawalFeePct != null ? content.affiliateWithdrawalFeePct : 2.5;
 
       const balanceAvailable = aff.balanceAvailable || 0;
       if (amount < minWithdrawal) {
@@ -66,8 +91,10 @@ module.exports = async (req, res) => {
         throw Object.assign(new Error('Amount exceeds your available balance.'), { status: 400 });
       }
 
-      const feeAmount = Math.round(amount * feePct) / 100;
-      const amountPayable = amount - feeAmount;
+      let p;
+      try { p = previewFor(amount, content); } catch (e) { throw Object.assign(new Error(e.message), { status: 400 }); }
+      const feeAmount = p.feeAmount;
+      const amountPayable = p.netPayable;
 
       const wdRef = db.collection('affiliateWithdrawals').doc();
       tx.set(wdRef, {
@@ -75,6 +102,8 @@ module.exports = async (req, res) => {
         amountRequested: amount,
         feeAmount,
         amountPayable,
+        feePct: p.feePct,
+        feeSnapshot: { ...p.calc },
         currency: 'NGN',
         status: 'pending',
         payoutAccount: aff.payoutAccount || null,
@@ -89,7 +118,7 @@ module.exports = async (req, res) => {
         balanceAvailable: FieldValue.increment(-amount),
         lastWithdrawalAt: FieldValue.serverTimestamp(),
       });
-      return { id: wdRef.id, amountPayable, feeAmount };
+      return { id: wdRef.id, amountRequested: amount, amountPayable, feeAmount, feePct: p.feePct };
     });
 
     return res.status(200).json({ ok: true, ...result });

@@ -542,6 +542,27 @@ service cloud.firestore {
     match /automationLocks/{id} { allow read, write: if false; }
     match /automationSettings/{id} { allow read, write: if false; }
 
+    // ---- Upgrade (2026-10): inventory, refunds, exceptions, delivery proof, policy acceptance ----
+    // ALL writes happen on the server (Admin SDK bypasses rules). Clients can never write these, and the
+    // secret-bearing ones (delivery codes, rider tasks, reservations) cannot even be read by clients.
+    // A creator may read ONLY their own stock rows/history/channel mappings; buyers and other creators see none.
+    match /inventoryItems/{id}      { allow read: if request.auth != null && (resource.data.creatorId == request.auth.uid || isAdmin()); allow write: if false; }
+    match /inventoryMovements/{id}  { allow read: if request.auth != null && (resource.data.creatorId == request.auth.uid || isAdmin()); allow write: if false; }
+    match /channelListings/{id}     { allow read: if request.auth != null && (resource.data.creatorId == request.auth.uid || isAdmin()); allow write: if false; }
+    match /inventoryLocations/{id}  { allow read: if request.auth != null && (resource.data.creatorId == request.auth.uid || isAdmin()); allow write: if false; }
+    match /inventoryReservations/{id} { allow read, write: if false; }
+    match /refunds/{id}             { allow read: if isAdmin(); allow write: if false; }
+    match /ledgerExceptions/{id}    { allow read: if isAdmin(); allow write: if false; }
+    match /orderExceptions/{id}     { allow read: if isAdmin(); allow write: if false; }
+    match /deliveryCodes/{id}       { allow read, write: if false; }
+    match /riderTasks/{id}          { allow read, write: if false; }
+    match /pickupStations/{id}      { allow read: if isAdmin(); allow write: if false; }
+    match /creatorUpdates/{id}      { allow read: if isAdmin(); allow write: if false; }
+    // Shopify connections hold an ENCRYPTED token: nobody can read or write them from a browser, not even the owner or an admin.
+    match /shopifyConnections/{id}  { allow read, write: if false; }
+    match /shopifyInstallStates/{id} { allow read, write: if false; }
+    match /policyAcceptances/{id}   { allow read: if request.auth != null && (resource.data.uid == request.auth.uid || isAdmin()); allow write: if false; }
+
     // Anything not explicitly matched above is denied by default —
     // Firestore's rules are deny-by-default outside matched blocks, so
     // no closing catch-all is needed, but stated here for clarity.

@@ -39,11 +39,14 @@ async function policies(db) {
   const snap = await db.collection('catalog').doc('settings').get();
   const c = (snap.exists && snap.data().content) || {};
   return {
-    platformFeePct: typeof c.creatorPlatformFeePct === 'number' ? c.creatorPlatformFeePct : 15,
+    // Server-owned values (api/core/config.js). The older creatorPlatformFeePct setting is ignored on purpose.
+    platformFeePct: require('./core/config').resolveCreatorCommissionBps(c) / 100,
+    affiliateWithdrawalFeePct: require('./core/config').resolveAffiliateWithdrawalFeeBps(c) / 100,
+    protectionDaysAfterDelivery: require('./core/config').resolveProtectionDays(c),
     withdrawalFeePct: c.creatorWithdrawalFeePct != null ? c.creatorWithdrawalFeePct : 2.5,
     minWithdrawalNGN: c.creatorMinWithdrawalNGN || 5000,
     holdDays: await getHoldDays(db),
-    disputeWindowDays: 14,
+    disputeWindowDays: require('./core/config').DISPUTE_POLICIES.PHYSICAL.windowDays,
     withdrawalCooldownDays: 7,
   };
 }

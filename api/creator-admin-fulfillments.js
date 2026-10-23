@@ -79,7 +79,12 @@ module.exports = async function handler(req, res) {
     }
     if (spec.to === FULFILLMENT_STATES.CANCELLED) extra.cancelReason = reason.trim();
     if (spec.to === FULFILLMENT_STATES.RETURNED) extra.returnReason = reason.trim();
-    if (spec.to === FULFILLMENT_STATES.DELIVERED) extra.deliveryConfirmedBy = 'admin';
+    if (spec.to === FULFILLMENT_STATES.DELIVERED) {
+      // Authorised exception path: never a silent bypass. The evidence must be stated and is audited.
+      if (typeof reason !== 'string' || reason.trim().length < 10) return fail(res, { status: 422, code: 'EVIDENCE_REQUIRED', message: 'Describe the evidence that this order was delivered (at least 10 characters). It is recorded in the audit log.' });
+      extra.deliveryConfirmedBy = 'admin';
+      extra.deliveryEvidenceNote = reason.trim().slice(0, 500);
+    }
 
     await applyFulfillmentPatch(getDb(), orderId, spec.to, extra);
     await writeProductAuditLog({ actorUid: admin.uid, actorRole: 'admin', action: `fulfillment.${action}`, productId: fulfillment.productId, reason: reason || null, metadata: { orderId, to: spec.to } });

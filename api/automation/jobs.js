@@ -292,6 +292,40 @@ async function holdsJob(db, ctx) {
 }
 
 // ------------------------------------------------------------- email queue
+// Releases checkout holds whose payment window passed so abandoned checkouts never lock stock.
+async function reservationsJob(db, ctx) {
+  const inv = require('../inventory/service');
+  const r = await inv.sweepExpired(db, { nowMs: ctx.nowMs, limit: ctx.limit || 200 });
+  if (r.released) {
+    const snap = await db.collection('inventoryReservations').where('state', '==', 'EXPIRED').limit(50).get();
+    const pids = [...new Set(snap.docs.map((d) => d.data().productId))];
+    for (const pid of pids) await inv.refreshStockSummary(db, pid).catch(() => {});
+  }
+  return r;
+}
+
+// Two-way Shopify stock sync for every creator with a live connection. OFF unless INVENTORY_CHANNEL_SYNC_ENABLED=true.
+async function channelSyncJob(db, ctx) {
+  const cfg = require('../core/config');
+  if (!cfg.flags((ctx.deps && ctx.deps.env) || process.env).connectedChannelSync) return { skipped: 'FLAG_OFF' };
+  const sync = require('../inventory/channel-sync'); const C = require('../inventory/shopify-connection');
+  const snap = await db.collection('shopifyConnections').where('status', '==', 'CONNECTED').limit(ctx.limit || 100).get();
+  const out = { creators: 0, listings: 0, problems: 0 };
+  for (const d of snap.docs) {
+    const creatorId = d.id; out.creators += 1;
+    try {
+      const cr = await db.collection('creators').doc(creatorId).get();
+      if (!cr.exists || cr.data().status !== 'ACTIVE') continue; // suspended sellers are not synced
+      const conn = await C.load(db, creatorId, { nowMs: ctx.nowMs, fetchImpl: ctx.deps && ctx.deps.fetchImpl });
+      if (!conn.locationId) continue;
+      const r = await sync.syncCreator(db, creatorId, conn, { nowMs: ctx.nowMs, deps: { fetchImpl: ctx.deps && ctx.deps.fetchImpl } });
+      out.listings += r.checked; if (r.stopped || Object.values(r.results).some((c) => /^ERROR|FAILED|STALE|REJECTED|NEEDS/.test(c))) out.problems += 1;
+      await d.ref.set({ lastSyncAtMs: ctx.nowMs }, { merge: true });
+    } catch (e) { out.problems += 1; await C.recordError(db, creatorId, `${e.code || 'ERROR'}: ${e.message}`); }
+  }
+  return out;
+}
+
 async function emailQueueJob(db, ctx) {
   const { callHandler } = require('../../mcp/lib/callHandler');
   const handler = ctx.deps && ctx.deps.emailQueueHandler ? ctx.deps.emailQueueHandler : require('../process-email-queue');
@@ -306,7 +340,9 @@ const JOBS = {
   sla: { run: slaJob, minIntervalMs: 30 * 60 * 1000 },
   reconcile: { run: reconciliationJob, minIntervalMs: 22 * 60 * 60 * 1000 },
   holds: { run: holdsJob, minIntervalMs: 15 * 60 * 1000 },
+  reservations: { run: reservationsJob, minIntervalMs: 5 * 60 * 1000 },
+  channelSync: { run: channelSyncJob, minIntervalMs: 5 * 60 * 1000 },
   emailQueue: { run: emailQueueJob, minIntervalMs: 5 * 60 * 1000 },
 };
 
-module.exports = { JOBS, supplierHealthJob, cjOrderJob, linkHealthJob, slaJob, reconciliationJob, holdsJob, emailQueueJob, checkProductLink, pauseProduct };
+module.exports = { JOBS, supplierHealthJob, cjOrderJob, linkHealthJob, slaJob, reconciliationJob, holdsJob, reservationsJob, channelSyncJob, emailQueueJob, checkProductLink, pauseProduct };

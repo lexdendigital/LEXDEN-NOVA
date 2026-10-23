@@ -57,18 +57,24 @@ function reconcileCreator({ priv, sales, withdrawals }) {
   // A sale with no status is an old-style, immediately available sale.
   const statusOf = (x) => x.status || 'available';
   const availableEarned = sum(sales.filter((x) => statusOf(x) === 'available'));
-  const pendingEarned = sum(sales.filter((x) => statusOf(x) === 'held' || statusOf(x) === 'disputed'));
-  const earned = round2(availableEarned + pendingEarned); // refunded sales no longer count as earned
+  // A disputed sale whose money was ALREADY withdrawn (fundsAlreadyWithdrawn) never moved
+  // balances, so it is not "pending": it is paid-out-but-disputed.
+  const paidOutDisputed = sum(sales.filter((x) => statusOf(x) === 'disputed' && x.fundsAlreadyWithdrawn === true));
+  const pendingEarned = sum(sales.filter((x) => statusOf(x) === 'held' || (statusOf(x) === 'disputed' && x.fundsAlreadyWithdrawn !== true)));
+  // Recovery that a refund created because the creator had already withdrawn the money.
+  // (Settling it off-platform does not change history, so the total is what balances.)
+  const recoveryTotal = sum(sales.map((x) => ({ creatorEarning: x.recoveryDueAmount })));
+  const earned = round2(availableEarned + pendingEarned + paidOutDisputed); // refunded sales no longer count as earned
   const withdrawn = round2(withdrawals.filter((w) => w.status !== 'rejected').reduce((s, w) => s + (Number(w.amountRequested) || 0), 0));
   const totalEarned = Number((priv && priv.totalEarned) || 0);
   const balance = Number((priv && priv.balanceAvailable) || 0);
   const pending = Number((priv && priv.balancePending) || 0);
-  const expectedBalance = round2(availableEarned - withdrawn);
+  const expectedBalance = round2(availableEarned + paidOutDisputed - withdrawn + recoveryTotal);
   if (Math.abs(totalEarned - earned) > BALANCE_TOLERANCE) issues.push({ code: 'TOTAL_EARNED_MISMATCH', stored: totalEarned, computed: earned });
   if (Math.abs(balance - expectedBalance) > BALANCE_TOLERANCE) issues.push({ code: 'BALANCE_MISMATCH', stored: balance, computed: expectedBalance });
   if (Math.abs(pending - pendingEarned) > BALANCE_TOLERANCE) issues.push({ code: 'PENDING_MISMATCH', stored: pending, computed: pendingEarned });
   if (balance < -BALANCE_TOLERANCE) issues.push({ code: 'NEGATIVE_BALANCE', stored: balance, computed: expectedBalance });
-  return { ok: issues.length === 0, issues, earned, withdrawn, expectedBalance, pendingEarned };
+  return { ok: issues.length === 0, issues, earned, withdrawn, expectedBalance, pendingEarned, paidOutDisputed, recoveryTotal };
 }
 
 /** Order-level ledger/fulfillment completeness. Pure over already-loaded sets. */

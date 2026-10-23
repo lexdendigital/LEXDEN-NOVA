@@ -67,6 +67,7 @@ const { paystackKeyCandidates } = require('./_paystackMode');
 // misses, so the proven legacy checkout path is untouched.
 const { grantEntitlement, resolveCreatorProductPrice } = require('./creator/entitlements');
 const { createFulfillment } = require('./creator/fulfillment');
+const checkout = require('./creator/checkout');
 const { attributeCreatorEarning } = require('./creator/ledger');
 // Stage G: per-creator CJ dropshipping. A paid CJ_DROPSHIP order is placed in
 // the CREATOR'S own CJ account (never NOVA's), idempotently, in the background.
@@ -394,7 +395,8 @@ module.exports = async function handler(req, res) {
     return res.status(405).json({ ok: false, error: 'Method not allowed — use POST.' });
   }
 
-  const { reference, uid, email, productId, productName, variantId, delivery, affiliateRef, affiliateRefSource } = req.body || {};
+  const { reference, uid, email, productId, productName, variantId, delivery, affiliateRef, affiliateRefSource, reservationId } = req.body || {};
+  const safeReservationId = typeof reservationId === 'string' && /^[A-Za-z0-9_\-]{8,200}$/.test(reservationId) ? reservationId : null;
 
   if (!reference || typeof reference !== 'string') {
     return res.status(400).json({ ok: false, error: 'Missing payment reference.' });
@@ -476,17 +478,24 @@ module.exports = async function handler(req, res) {
       if (o.creatorProductId) {
         try {
           if (o.creatorOfferingType === 'PHYSICAL_PRODUCT') {
+            // Idempotent on the order: a retry can never consume a second unit.
+            // A held order (exception open) never consumes stock again; settleStock is idempotent for the rest.
+            if (o.exceptionOpen !== true) {
+              const st = await checkout.settleStock(db, { orderId: reference, selection: { creator: { productId: o.creatorProductId, creatorId: o.creatorSellerId, offeringType: o.creatorOfferingType, fulfillmentMode: o.creatorFulfillmentMode || 'SELLER_STOCK' } }, reservationId: o.reservationId || null });
+              if (!st.ok) o.exceptionOpen = true;
+            }
             await createFulfillment(db, {
               orderId: reference, productId: o.creatorProductId, versionId: o.creatorVersionId || null,
               creatorId: o.creatorSellerId || null, buyerUid: o.uid || null, buyerEmail: o.email || null,
               delivery: o.delivery || null, productTitle: o.productName,
               fulfillmentMode: o.creatorFulfillmentMode || 'SELLER_STOCK', processingDays: o.creatorProcessingDays || null,
+              exceptionOpen: o.exceptionOpen === true,
             });
             // Stage G: idempotent — a retried verify never places a 2nd CJ order.
-            if (o.creatorFulfillmentMode === 'CJ_DROPSHIP') {
+            if (o.creatorFulfillmentMode === 'CJ_DROPSHIP' && o.exceptionOpen !== true) {
               createCjOrderForFulfillment(db, reference).catch(e => console.error('creator CJ order retry failed:', e.message));
             }
-          } else {
+          } else if (o.exceptionOpen !== true) {
             await grantEntitlement(db, {
               orderId: reference, productId: o.creatorProductId, versionId: o.creatorVersionId || null,
               buyerUid: o.uid || null, buyerEmail: o.email || null, assetIds: o.creatorAssetIds || [],
@@ -501,7 +510,7 @@ module.exports = async function handler(req, res) {
           attributeCreatorEarning(db, {
             reference, creatorId: o.creatorSellerId, productId: o.creatorProductId,
             productTitle: o.productName, offeringType: o.creatorOfferingType,
-            amountMajor: o.amount, currency: o.currency,
+            amountMajor: o.amount, currency: o.currency, exceptionOpen: o.exceptionOpen === true,
           }).catch(e => console.error('creator earning retry failed:', e.message));
         }
       }
@@ -547,9 +556,23 @@ module.exports = async function handler(req, res) {
     selection = await getExpectedAmount(productId, paidCurrency, variantId, { fresh: true });
   }
   const expectedAmount = selection && selection.price;
+  // Creator products: the amount must match OUR price EXACTLY (integer minor units). A mismatch is
+  // never fulfilled and never silently accepted; it is recorded so an admin can refund it.
+  if (selection && selection.creator && expectedAmount !== null && expectedAmount !== undefined) {
+    const chk = checkout.checkAmount({ paidMinor: paystackData.amount, expectedMajor: expectedAmount });
+    if (!chk.ok) {
+      console.warn(`Creator amount mismatch: ref=${reference} product=${productId} paid=${paystackData.amount} expected=${chk.expectedMinor}`);
+      await checkout.openException(db, { orderId: reference, code: checkout.EXCEPTION_CODES.AMOUNT_MISMATCH, creatorId: selection.creator.creatorId, productId: selection.creator.productId, buyerUid: uid || null, amountMinor: paystackData.amount, details: { expectedMinor: chk.expectedMinor, direction: chk.direction || null } }).catch(e => console.error('exception write failed:', e.message));
+      return res.status(200).json({
+        ok: false,
+        error: 'The amount paid does not match this product\'s price. The order was not fulfilled and has been flagged for review — contact support with your reference.',
+      });
+    }
+  }
   if (expectedAmount !== null && expectedAmount !== undefined) {
     const tolerance = Math.max(1, Math.ceil(expectedAmount * 0.02)); // 2%, min 1 unit
-    let blocked = amountMajor < expectedAmount - tolerance;
+    // (legacy admin-curated catalogue keeps its existing tolerance; creator products were exact-checked above)
+    let blocked = selection.creator ? false : amountMajor < expectedAmount - tolerance;
     if (blocked && !selection.creator) {
       // Re-read the catalog FRESH before rejecting: the cached price may be
       // up to 20s old (e.g. the admin just lowered it). Never reject on a stale read.
@@ -584,6 +607,17 @@ module.exports = async function handler(req, res) {
 
   const buyerEmail = email || paystackData.customer?.email;
 
+  // Seller/product must be live at the moment of payment. The money is already taken, so the
+  // order is RECORDED but held with an exception (earnings frozen, no shipment) for admin action.
+  let exceptionOpen = false;
+  if (selection.creator) {
+    const sellable = await checkout.checkSellable(db, selection.creator.productId).catch(() => ({ ok: true }));
+    if (!sellable.ok) {
+      exceptionOpen = true;
+      await checkout.openException(db, { orderId: reference, code: sellable.code, creatorId: selection.creator.creatorId, productId: selection.creator.productId, buyerUid: uid || null, amountMinor: paystackData.amount }).catch(e => console.error('exception write failed:', e.message));
+    }
+  }
+
   try {
     // create() (not set()): if the browser's verify call and the Paystack
     // webhook race, exactly ONE wins the write and runs the side effects
@@ -606,6 +640,8 @@ module.exports = async function handler(req, res) {
       affiliateRef: affiliateRef || null,
       // Only present for a creator-product purchase; read back by the
       // idempotency-retry block above.
+      ...(exceptionOpen ? { exceptionOpen: true } : {}),
+      reservationId: safeReservationId,
       ...(selection.creator ? {
         creatorProductId: selection.creator.productId,
         creatorVersionId: selection.creator.versionId,
@@ -632,7 +668,12 @@ module.exports = async function handler(req, res) {
   if (selection.creator) {
     try {
       if (selection.creator.offeringType === 'PHYSICAL_PRODUCT') {
+        if (!exceptionOpen) {
+          const st = await checkout.settleStock(db, { orderId: reference, selection, reservationId: safeReservationId });
+          if (!st.ok) { exceptionOpen = true; await db.collection('orders').doc(reference).set({ exceptionOpen: true }, { merge: true }).catch(() => {}); }
+        }
         await createFulfillment(db, {
+          exceptionOpen,
           orderId: reference, productId: selection.creator.productId, versionId: selection.creator.versionId,
           creatorId: selection.creator.creatorId, buyerUid: uid || null, buyerEmail: buyerEmail || null,
           delivery: deliveryDetails, productTitle: orderProductName,
@@ -641,10 +682,11 @@ module.exports = async function handler(req, res) {
         // Stage G: fire-and-forget like the CJ/email calls below — a supplier
         // problem is recorded for the creator/admin and never affects the
         // already-successful payment response.
-        if (selection.creator.fulfillmentMode === 'CJ_DROPSHIP') {
+        if (selection.creator.fulfillmentMode === 'CJ_DROPSHIP' && !exceptionOpen) {
           createCjOrderForFulfillment(db, reference).catch(e => console.error('creator CJ order failed:', e.message));
         }
-      } else {
+      } else if (!exceptionOpen) {
+        // (a held order gets its entitlement only after an admin resolves the exception)
         await grantEntitlement(db, {
           orderId: reference, productId: selection.creator.productId, versionId: selection.creator.versionId,
           buyerUid: uid || null, buyerEmail: buyerEmail || null, assetIds: selection.creator.assetIds,
@@ -714,7 +756,7 @@ module.exports = async function handler(req, res) {
     attributeCreatorEarning(db, {
       reference, creatorId: selection.creator.creatorId, productId: selection.creator.productId,
       productTitle: orderProductName, offeringType: selection.creator.offeringType,
-      amountMajor, currency: paidCurrency,
+      amountMajor, currency: paidCurrency, exceptionOpen,
     }).catch(e => console.error('creator earning attribution failed:', e.message));
   }
 

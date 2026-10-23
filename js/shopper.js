@@ -1248,6 +1248,7 @@ function screenProfile(){
       <div class="card" style="padding:4px 16px;">
         <div class="list-row" style="cursor:pointer;" onclick="navigate('#wishlist')"><span class="left"><span class="ic">${icon('heart')}</span>My Wishlist</span><span>${icon('chevron')}</span></div>
         <div class="list-row" style="cursor:pointer;" onclick="navigate('#orders')"><span class="left"><span class="ic">${icon('package')}</span>Order History</span><span>${icon('chevron')}</span></div>
+        <div class="list-row" style="cursor:pointer;" onclick="navigate('#pickup')"><span class="left"><span class="ic">${icon('package')}</span>Pickup stations</span><span>${icon('chevron')}</span></div>
         <div class="list-row" style="cursor:pointer;" onclick="navigate('#settings')"><span class="left"><span class="ic">${icon('settings')}</span>Settings</span><span>${icon('chevron')}</span></div>
         <div class="list-row" style="cursor:pointer;" onclick="location.href='affiliate/index.html'"><span class="left"><span class="ic">${icon('target')}</span>Nova Affiliate Program</span><span>${icon('chevron')}</span></div>
         <div class="list-row" style="cursor:pointer;" onclick="navigate('#library')"><span class="left"><span class="ic">${icon('download')}</span>My Library</span><span>${icon('chevron')}</span></div>
@@ -2555,8 +2556,12 @@ function screenMenu(){
     <div class="section">
       <div class="section-head"><h2>Legal</h2></div>
       <div class="card" style="padding:4px 16px;">
-        <a class="list-row" href="https://www.google.com/search?q=lexden+digital+privacy+policy" target="_blank"><span class="left"><span class="ic">📄</span>Privacy Policy</span><span>↗</span></a>
-        <a class="list-row" href="https://www.google.com/search?q=lexden+digital+terms" target="_blank"><span class="left"><span class="ic">📜</span>Terms &amp; Conditions</span><span>↗</span></a>
+        <a class="list-row" href="legal/index.html"><span class="left"><span class="ic">📚</span>Documents &amp; Policies</span><span>›</span></a>
+        <a class="list-row" href="legal/terms.html"><span class="left"><span class="ic">📜</span>Terms of Use</span><span>›</span></a>
+        <a class="list-row" href="legal/privacy.html"><span class="left"><span class="ic">📄</span>Privacy Notice</span><span>›</span></a>
+        <a class="list-row" href="legal/refunds.html"><span class="left"><span class="ic">↩️</span>Refunds, Returns &amp; Disputes</span><span>›</span></a>
+        <a class="list-row" href="legal/marketplace.html"><span class="left"><span class="ic">🛍️</span>Marketplace &amp; Seller Disclosure</span><span>›</span></a>
+        <a class="list-row" href="legal/complaints.html"><span class="left"><span class="ic">💬</span>Complaints &amp; Redress</span><span>›</span></a>
         <div class="list-row"><span class="left"><span class="ic">ℹ️</span>App version</span><span class="text-2 small mono">v2.0.1</span></div>
       </div>
     </div>

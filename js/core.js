@@ -496,7 +496,7 @@ function applyTheme(){
 }
 
 /* ---------------- ROUTER ---------------- */
-const ROUTES = ['#home','#products','#service','#feed','#wishlist','#profile','#menu','#orders'];
+const ROUTES = ['#home','#products','#service','#feed','#wishlist','#profile','#menu','#orders','#pickup'];
 function currentRoute(){ return location.hash || '#home'; }
 
 window.addEventListener('hashchange', render);
@@ -611,6 +611,8 @@ function render(){
     body = screenCreator();
   } else if(hash.startsWith('#seller/')){
     body = screenSeller(hash.slice(8));
+  } else if(hash === '#pickup'){
+    body = screenPickup();
   } else if(hash === '#library'){
     body = screenLibrary();
   } else if(hash === '#wishlist'){

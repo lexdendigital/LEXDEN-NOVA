@@ -2387,7 +2387,8 @@ function adminAffiliateProgram(){
     <h3 style="font-size:14px;margin-bottom:8px;">Program Settings</h3>
     <p class="text-2 small" style="margin-bottom:10px;">These apply site-wide. Set a different commission % on any individual product from Products → edit → "Nova Affiliate commission %".</p>
     <div class="form-field"><label>Default commission %</label><input id="af_commission" type="number" min="0" max="100" step="0.5" value="${c.affiliateCommissionDefaultPct}"></div>
-    <div class="form-field"><label>Withdrawal processing fee %</label><input id="af_fee" type="number" min="0" max="100" step="0.1" value="${c.affiliateWithdrawalFeePct}"></div>
+    <div class="form-field"><label>Creator sale commission % (approved rate: 10, taken from each creator sale; changes apply to new sales only)</label><input id="cr_fee" type="number" min="0" max="50" step="0.1" value="${(typeof c.creatorCommissionBps==='number'?c.creatorCommissionBps:1000)/100}"></div>
+    <div class="form-field"><label>Affiliate withdrawal fee % (approved rate: 5, charged on the gross amount requested; never applied to creators)</label><input id="af_fee" type="number" min="0" max="50" step="0.1" value="${(typeof c.affiliateWithdrawalFeeBps==='number'?c.affiliateWithdrawalFeeBps:500)/100}"></div>
     <div class="form-field"><label>Minimum withdrawal (₦)</label><input id="af_min" type="number" min="0" value="${c.affiliateMinWithdrawalNGN}"></div>
     <div class="form-field"><label>WhatsApp community link</label><input id="af_wa" value="${escapeHtml(c.affiliateWhatsappUrl||'')}" placeholder="https://chat.whatsapp.com/..."></div>
     <div class="form-field"><label>Telegram community link</label><input id="af_tg" value="${escapeHtml(c.affiliateTelegramUrl||'')}" placeholder="https://t.me/..."></div>
@@ -2563,7 +2564,7 @@ function adminCreatorApplications(){
    Uses authedApi directly because some admin endpoints answer {ok,data}
    and the finance one answers {ok,withdrawals}. Every dynamic value is escaped.
    ========================================================= */
-let ao = { sub:'listings', data:{}, loading:false, error:'', busy:false, note:'', filter:{ listings:'SUBMITTED', wds:'pending', orders:'', disputes:'OPEN' }, paystack:false };
+let ao = { sub:'listings', data:{}, loading:false, error:'', busy:false, note:'', filter:{ listings:'SUBMITTED', wds:'pending', orders:'', disputes:'OPEN', refunds:'REQUESTED', stations:'SUBMITTED' }, paystack:false };
 async function aoApi(path, body){
   const init = body ? { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) } : {};
   const r = await authedApi(path, init, 30000, 'The server took too long. Please try again.');
@@ -2599,6 +2600,11 @@ async function aoLoad(force){
       const [rep, st] = await Promise.all([ aoApi('/api/creator-admin-risk?view=reconcile'+(ao.paystack?'&paystack=1':'')), aoApi('/api/creator-admin-risk?view=settings') ]);
       ao.data.reconcile = { report: rep, settings: st };
     }
+    else if(s==='exceptions') ao.data.exceptions = (await aoApi('/api/creator-admin-exceptions?state=OPEN')).exceptions || [];
+    else if(s==='refunds') ao.data.refunds = (await aoApi('/api/creator-admin-refunds'+(ao.filter.refunds?'?state='+encodeURIComponent(ao.filter.refunds):''))).refunds || [];
+    else if(s==='funding') ao.data.funding = await aoApi('/api/creator-admin-funding');
+    else if(s==='stations') ao.data.stations = await aoApi('/api/pickup-stations?admin=1&state='+encodeURIComponent(ao.filter.stations||'SUBMITTED'));
+    else if(s==='riders') ao.data.riders = ao.data.riders || { link:'' };
     else if(s==='alerts'){
       const [a,r,st] = await Promise.all([
         aoApi('/api/creator-admin-automation?view=alerts'),
@@ -2752,12 +2758,123 @@ function aoAlertsHtml(){
     <h3 style="font-size:14px;margin:16px 0 8px;">Run a job now</h3><div style="display:flex;gap:8px;flex-wrap:wrap;">${jobs}</div>
     <h3 style="font-size:14px;margin:16px 0 8px;">Recent runs</h3>${runs}`;
 }
+/* ---- Upgrade screens: order exceptions, refunds, supplier funding, pickup stations, rider links ---- */
+function aoExceptionsHtml(){
+  const list = ao.data.exceptions; if(!list) return '<p class="text-2 small">Loading…</p>';
+  const label = { AMOUNT_MISMATCH:'Paid amount did not match', SELLER_NOT_ACTIVE:'Seller not active', NOT_FOR_SALE:'Listing not for sale', STOCK_UNAVAILABLE_AFTER_PAYMENT:'Out of stock after payment', SUPPLIER_FUNDING_UNAVAILABLE:'Supplier order not funded', DELIVERY_PROOF_PROBLEM:'Delivery problem reported' };
+  return `<p class="text-2 small">Paid orders that could not be honoured automatically. The creator's earning stays on hold until you resolve it. Resolving here does not move money; refund through the Refunds tab.</p>` +
+  (list.length ? list.map(e=>`<div class="card" style="padding:12px;margin-bottom:8px;">
+    <div style="font-weight:700;">${escapeHtml(label[e.code]||e.code)}</div>
+    <div class="text-2 small">Order ${escapeHtml(e.orderId)} · product ${escapeHtml(e.productId||'—')} · ${aoDate(e.createdAtMs)}</div>
+    <div class="text-2 small">${escapeHtml(JSON.stringify(e.details||{}))}</div>
+    <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
+      <button class="btn btn-primary btn-sm" onclick="aoResolveException('${escapeHtml(e.id)}','FULFILLED_ANYWAY')">Order can proceed</button>
+      <button class="btn btn-outline btn-sm" onclick="aoResolveException('${escapeHtml(e.id)}','REFUNDED')">Being refunded</button>
+      <button class="btn btn-outline btn-sm" onclick="aoResolveException('${escapeHtml(e.id)}','CANCELLED')">Not a real problem</button>
+    </div></div>`).join('') : '<p class="text-2 small">Nothing waiting. 🎉</p>');
+}
+function aoResolveException(id, resolution){
+  const note = aoReason('Short note for the record:'); if(!note) return;
+  aoPost('/api/creator-admin-exceptions', { action:'resolve', id, resolution, note }, 'Exception resolved.');
+}
+function aoRefundsHtml(){
+  const list = ao.data.refunds; if(!list) return '<p class="text-2 small">Loading…</p>';
+  const states = [['REQUESTED','Requested'],['AWAITING_MANUAL_STEP','Needs manual step'],['PROCESSING','Processing'],['REQUIRES_REVIEW','Needs review'],['FAILED','Failed'],['COMPLETED','Completed'],['','Everything']];
+  return `<div style="margin-bottom:10px;">${aoSelect('refunds',states)}</div>
+  <p class="text-2 small">A refund only shows "Completed" after the payment provider confirms it. If Paystack refunds are not switched on, approving sends it to "Needs manual step": refund in the Paystack dashboard, then record the reference here.</p>` +
+  (list.length ? list.map(r=>`<div class="card" style="padding:12px;margin-bottom:8px;">
+    <div style="font-weight:700;">₦${Number((r.amountMinor||0)/100).toLocaleString()} <span class="chip" style="font-size:10px;">${escapeHtml(r.state)}</span></div>
+    <div class="text-2 small">Order ${escapeHtml(r.orderId||'—')} · ${escapeHtml(r.reason||'')} · ${aoDate(r.createdAtMs)}</div>
+    ${r.deduction?`<div class="small" style="color:var(--error);">Has a deduction: needs a written review before it can be paid.</div>`:''}
+    <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
+      ${r.state==='REQUESTED'?`<button class="btn btn-primary btn-sm" onclick="aoRefundAct('${escapeHtml(r.id)}','approve')">Approve</button>`:''}
+      ${r.state==='AWAITING_MANUAL_STEP'?`<button class="btn btn-primary btn-sm" onclick="aoRefundManual('${escapeHtml(r.id)}')">I refunded it in Paystack</button>`:''}
+      ${r.deduction&&!r.deduction.reviewedBy?`<button class="btn btn-outline btn-sm" onclick="aoRefundDeduction('${escapeHtml(r.id)}')">Record deduction review</button>`:''}
+      ${['REQUESTED','APPROVED','AWAITING_MANUAL_STEP'].includes(r.state)?`<button class="btn btn-outline btn-sm" onclick="aoRefundAct('${escapeHtml(r.id)}','review')">Send to review</button><button class="btn btn-outline btn-sm" onclick="aoRefundAct('${escapeHtml(r.id)}','cancel')">Cancel</button>`:''}
+    </div></div>`).join('') : '<p class="text-2 small">No refunds in this state.</p>');
+}
+function aoRefundAct(id, action){
+  let note; if(action!=='approve'){ note = aoReason('Note (required):'); if(!note) return; }
+  else if(!window.confirm('Approve this refund? If Paystack refunds are on, this sends real money back to the buyer.')) return;
+  aoPost('/api/creator-admin-refunds', { action, id, note }, 'Refund updated.');
+}
+function aoRefundManual(id){
+  const providerReference = aoReason('Paystack refund reference (from the dashboard):'); if(!providerReference) return;
+  const note = window.prompt('Note (optional):')||'';
+  aoPost('/api/creator-admin-refunds', { action:'record_manual', id, providerReference, note }, 'Recorded. It completes when Paystack confirms.');
+}
+function aoRefundDeduction(id){ const note = aoReason('Why is the deduction fair? (at least 10 characters)'); if(!note) return; aoPost('/api/creator-admin-refunds', { action:'review_deduction', id, note }, 'Deduction reviewed.'); }
+
+function aoFundingHtml(){
+  const d = ao.data.funding; if(!d) return '<p class="text-2 small">Loading…</p>';
+  const modeText = d.mode==='NOVA_FUNDED' ? 'NOVA pays the supplier. Confirm each order below once you have paid CJ.' : d.mode==='CREATOR_ACCOUNT' ? 'Creators pay inside their own CJ account. Nothing to confirm here.' : 'Supplier ordering is OFF (CJ_FUNDING_MODE not set), so CJ orders are held. Paid CJ orders appear below.';
+  return `<p class="text-2 small">Mode: <b>${escapeHtml(d.mode)}</b>. ${escapeHtml(modeText)} Your confirmation is recorded as your word; NOVA does not check it with CJ.</p>` +
+  (d.orders.length ? d.orders.map(e=>`<div class="card" style="padding:12px;margin-bottom:8px;">
+    <div style="font-weight:700;">Order ${escapeHtml(e.orderId)}</div>
+    <div class="text-2 small">Product ${escapeHtml(e.productId||'—')} · waiting since ${aoDate(e.createdAtMs)}</div>
+    ${d.mode==='NOVA_FUNDED'?`<button class="btn btn-primary btn-sm" style="margin-top:8px;" onclick="aoConfirmFunded('${escapeHtml(e.orderId)}')">I funded this order</button>`:`<div class="small" style="margin-top:6px;">Switch the mode to NOVA_FUNDED or CREATOR_ACCOUNT on the server, or refund the buyer through the Refunds tab.</div>`}
+  </div>`).join('') : '<p class="text-2 small">No orders waiting for supplier funding.</p>');
+}
+function aoConfirmFunded(orderId){
+  const reference = aoReason('Your CJ payment reference or order number:'); if(!reference) return;
+  if(!window.confirm('Confirm NOVA has paid (or will pay) CJ for this order? The CJ order will be placed now.')) return;
+  aoPost('/api/creator-admin-funding', { action:'confirm_funded', orderId, reference }, 'Confirmed. The supplier order is being placed.');
+}
+
+function aoStationsHtml(){
+  const d = ao.data.stations; if(!d) return '<p class="text-2 small">Loading…</p>';
+  const off = d.enabled ? '' : '<p class="small" style="color:var(--error);">Pickup stations are switched off (PICKUP_STATIONS_ENABLED). You can read submissions but not approve them.</p>';
+  return off + `<div style="margin-bottom:10px;">${aoSelect('stations',[['SUBMITTED','Waiting for review'],['UNDER_REVIEW','Under review'],['NEEDS_CHANGES','Needs changes'],['APPROVED','Live'],['SUSPENDED','Suspended'],['REJECTED','Rejected']])}</div>
+  <p class="text-2 small">Approve only a staffed business with a real premises. Homes are never allowed. Every check must be ticked.</p>` +
+  (d.stations.length ? d.stations.map(s=>`<div class="card" style="padding:12px;margin-bottom:8px;">
+    <div style="font-weight:700;">${escapeHtml(s.name)} <span class="chip" style="font-size:10px;">${escapeHtml(s.businessType)}</span></div>
+    <div class="text-2 small">${escapeHtml(s.address)}, ${escapeHtml(s.city)}, ${escapeHtml(s.stateRegion||'')} · ${escapeHtml(s.openingHours)} · ${escapeHtml(s.managerName)} · ${escapeHtml(s.contactPhone)}</div>
+    ${s.reviewNote?`<div class="text-2 small">Last note: ${escapeHtml(s.reviewNote)}</div>`:''}
+    <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
+      ${['SUBMITTED','UNDER_REVIEW','SUSPENDED'].includes(s.state)?`<button class="btn btn-primary btn-sm" onclick="aoStationReview('${escapeHtml(s.id)}','APPROVED')">Approve (confirm checks)</button>`:''}
+      ${['SUBMITTED','UNDER_REVIEW'].includes(s.state)?`<button class="btn btn-outline btn-sm" onclick="aoStationReview('${escapeHtml(s.id)}','NEEDS_CHANGES',true)">Ask for changes</button>`:''}
+      ${['SUBMITTED','UNDER_REVIEW','SUSPENDED'].includes(s.state)?`<button class="btn btn-outline btn-sm" onclick="aoStationReview('${escapeHtml(s.id)}','REJECTED',true)">Reject</button>`:''}
+      ${s.state==='APPROVED'?`<button class="btn btn-outline btn-sm" onclick="aoStationReview('${escapeHtml(s.id)}','SUSPENDED',true)">Suspend</button>`:''}
+    </div></div>`).join('') : '<p class="text-2 small">None in this state.</p>');
+}
+function aoStationReview(id, to, needNote){
+  let note, checks = {};
+  if(needNote){ note = aoReason('Reason (the station owner will see this):'); if(!note) return; }
+  if(to==='APPROVED'){
+    const items = (ao.data.stations.reviewChecks||[]);
+    const ok = window.confirm('Confirm you have personally checked ALL of these:\n\n- '+items.join('\n- ')+'\n\nApprove?');
+    if(!ok) return; items.forEach(c=>{ checks[c] = true; });
+  }
+  aoPost('/api/pickup-stations', { action:'review', id, to, checks, note }, 'Station updated.');
+}
+
+function aoRidersHtml(){
+  const r = ao.data.riders || {};
+  return `<p class="text-2 small">Give a rider a one-order link. It lets them type the buyer's code and nothing else. It expires in 6 hours and only works for that order. Needs RIDER_VAULT_ENABLED and DELIVERY_CODE_SECRET on the server.</p>
+  <div class="form-field"><label>Order ID</label><input id="rd_order" class="input"></div>
+  <div class="form-field"><label>Rider name or ID</label><input id="rd_rider" class="input"></div>
+  <button class="btn btn-primary btn-sm" onclick="aoIssueRider()">Create rider link</button>
+  ${r.link?`<div class="card" style="padding:12px;margin-top:12px;"><div class="small">Send this link to the rider (shown once):</div><input class="input" readonly style="width:100%;margin-top:6px;" value="${escapeHtml(r.link)}" onclick="this.select()"><div class="text-2 small" style="margin-top:6px;">Task ${escapeHtml(r.taskId)}</div><button class="btn btn-outline btn-sm" style="margin-top:8px;" onclick="aoRevokeRider('${escapeHtml(r.taskId)}')">Revoke this link</button></div>`:''}`;
+}
+async function aoIssueRider(){
+  const orderId = ($('#rd_order').value||'').trim(), riderId = ($('#rd_rider').value||'').trim();
+  if(!orderId || !riderId){ ao.error='Enter the order ID and the rider.'; renderAdminTab(); return; }
+  try{
+    const d = await aoApi('/api/delivery-proof', { action:'issue_rider_task', orderId, riderId });
+    const base = location.origin + location.pathname.replace(/\/admin\/?(index\.html)?$/, '/');
+    ao.data.riders = { link: base+'rider/index.html#o='+encodeURIComponent(orderId)+'&t='+encodeURIComponent(d.taskId)+'&k='+encodeURIComponent(d.token), taskId:d.taskId };
+    ao.error=''; ao.note='Link created.';
+  }catch(e){ ao.error = e.message||'Could not create the link.'; }
+  renderAdminTab();
+}
+function aoRevokeRider(taskId){ if(!window.confirm('Revoke this rider link?')) return; aoPost('/api/delivery-proof', { action:'revoke_rider_task', taskId }, 'Link revoked.'); ao.data.riders = { link:'' }; }
+
 function adminCreatorOps(){
   if(!ao.data[ao.sub] && !ao.loading) aoLoad(false);
   const t = (id,l)=>`<button class="chip ${ao.sub===id?'active':''}" onclick="aoSetSub('${id}')">${l}</button>`;
-  const body = ao.sub==='listings'?aoListingsHtml():ao.sub==='payouts'?aoPayoutsHtml():ao.sub==='orders'?aoOrdersHtml():ao.sub==='disputes'?aoDisputesHtml():ao.sub==='reconcile'?aoReconcileHtml():aoAlertsHtml();
+  const body = ao.sub==='listings'?aoListingsHtml():ao.sub==='payouts'?aoPayoutsHtml():ao.sub==='orders'?aoOrdersHtml():ao.sub==='disputes'?aoDisputesHtml():ao.sub==='reconcile'?aoReconcileHtml():ao.sub==='exceptions'?aoExceptionsHtml():ao.sub==='refunds'?aoRefundsHtml():ao.sub==='funding'?aoFundingHtml():ao.sub==='stations'?aoStationsHtml():ao.sub==='riders'?aoRidersHtml():aoAlertsHtml();
   return `<div class="admin-topbar"><h2>Creator Ops</h2><button class="btn btn-outline btn-sm" onclick="aoLoad(true)">Refresh</button></div>
-  <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">${t('listings','Listing review')}${t('payouts','Payouts')}${t('orders','Orders & SLA')}${t('disputes','Disputes')}${t('reconcile','Reconciliation')}${t('alerts','Alerts & automation')}</div>
+  <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">${t('listings','Listing review')}${t('payouts','Payouts')}${t('orders','Orders & SLA')}${t('disputes','Disputes')}${t('reconcile','Reconciliation')}${t('exceptions','Order problems')}${t('refunds','Refunds')}${t('funding','Supplier funding')}${t('stations','Pickup stations')}${t('riders','Rider links')}${t('alerts','Alerts & automation')}</div>
   ${ao.error?`<p class="small" style="color:var(--error);">⚠️ ${escapeHtml(ao.error)}</p>`:''}
   ${ao.note?`<p class="small" style="color:#2ee6a6;">✓ ${escapeHtml(ao.note)}</p>`:''}
   ${ao.loading?'<p class="text-2 small">Loading…</p>':''}
@@ -2802,7 +2919,8 @@ function affiliateWithdrawalCardHtml(w, affiliates){
 function saveAffiliateSettings(){
   DB.content = {...DB.content,
     affiliateCommissionDefaultPct: Number($('#af_commission').value)||0,
-    affiliateWithdrawalFeePct: Number($('#af_fee').value)||0,
+    creatorCommissionBps: Math.round((Number($('#cr_fee').value)||0)*100),
+    affiliateWithdrawalFeeBps: Math.round((Number($('#af_fee').value)||0)*100),
     affiliateMinWithdrawalNGN: Number($('#af_min').value)||0,
     affiliateWhatsappUrl: $('#af_wa').value.trim(),
     affiliateTelegramUrl: $('#af_tg').value.trim(),

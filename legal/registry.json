@@ -1,0 +1,253 @@
+{
+ "generatedFrom": "policies/registry.json",
+ "approved": false,
+ "values": {
+  "CREATOR_FEE_PCT": "10",
+  "AFFILIATE_WITHDRAWAL_FEE_PCT": "5",
+  "DISPUTE_PHYSICAL_DAYS": "14",
+  "DISPUTE_DIGITAL_DAYS": "14",
+  "DISPUTE_SERVICE_DAYS": "14"
+ },
+ "documents": [
+  {
+   "id": "terms",
+   "title": "Platform Terms of Use",
+   "audience": "public",
+   "route": "legal/terms.html",
+   "version": "1.0-draft",
+   "effectiveDate": null,
+   "status": "DRAFT",
+   "contentHash": "6737e0f59c8b",
+   "placeholders": []
+  },
+  {
+   "id": "privacy",
+   "title": "Privacy Notice",
+   "audience": "public",
+   "route": "legal/privacy.html",
+   "version": "1.0-draft",
+   "effectiveDate": null,
+   "status": "DRAFT",
+   "contentHash": "2939860d0595",
+   "placeholders": []
+  },
+  {
+   "id": "cookies",
+   "title": "Cookies & Similar Technologies Notice",
+   "audience": "public",
+   "route": "legal/cookies.html",
+   "version": "1.0-draft",
+   "effectiveDate": null,
+   "status": "DRAFT",
+   "contentHash": "352b8b8d3dd5",
+   "placeholders": []
+  },
+  {
+   "id": "marketplace",
+   "title": "Marketplace & Seller Disclosure",
+   "audience": "public",
+   "route": "legal/marketplace.html",
+   "version": "1.0-draft",
+   "effectiveDate": null,
+   "status": "DRAFT",
+   "contentHash": "26bed92911d4",
+   "placeholders": []
+  },
+  {
+   "id": "refunds",
+   "title": "Refunds, Returns, Cancellations & Disputes Policy",
+   "audience": "public",
+   "route": "legal/refunds.html",
+   "version": "1.0-draft",
+   "effectiveDate": null,
+   "status": "DRAFT",
+   "contentHash": "816243c1fbb0",
+   "placeholders": []
+  },
+  {
+   "id": "acceptable-use",
+   "title": "Marketplace Rules & Acceptable Use Policy",
+   "audience": "public",
+   "route": "legal/acceptable-use.html",
+   "version": "1.0-draft",
+   "effectiveDate": null,
+   "status": "DRAFT",
+   "contentHash": "c83729006b21",
+   "placeholders": []
+  },
+  {
+   "id": "youth",
+   "title": "Youth Access & Minor Safety Policy",
+   "audience": "public",
+   "route": "legal/youth.html",
+   "version": "1.0-draft",
+   "effectiveDate": null,
+   "status": "DRAFT",
+   "contentHash": "15794f7d2648",
+   "placeholders": []
+  },
+  {
+   "id": "ip",
+   "title": "Intellectual Property, Copyright & Takedown Policy",
+   "audience": "public",
+   "route": "legal/ip.html",
+   "version": "1.0-draft",
+   "effectiveDate": null,
+   "status": "DRAFT",
+   "contentHash": "1de3d03105df",
+   "placeholders": []
+  },
+  {
+   "id": "affiliate",
+   "title": "Affiliate Program Terms",
+   "audience": "public",
+   "route": "legal/affiliate.html",
+   "version": "1.0-draft",
+   "effectiveDate": null,
+   "status": "DRAFT",
+   "contentHash": "94b7f62eba5f",
+   "placeholders": []
+  },
+  {
+   "id": "ai",
+   "title": "AI Assistant Terms",
+   "audience": "public",
+   "route": "legal/ai.html",
+   "version": "1.0-draft",
+   "effectiveDate": null,
+   "status": "DRAFT",
+   "contentHash": "62c28a6559f1",
+   "placeholders": []
+  },
+  {
+   "id": "accessibility",
+   "title": "Accessibility Statement",
+   "audience": "public",
+   "route": "legal/accessibility.html",
+   "version": "1.0-draft",
+   "effectiveDate": null,
+   "status": "DRAFT",
+   "contentHash": "76ba0078bd49",
+   "placeholders": []
+  },
+  {
+   "id": "complaints",
+   "title": "Complaints & Consumer Redress Procedure",
+   "audience": "public",
+   "route": "legal/complaints.html",
+   "version": "1.0-draft",
+   "effectiveDate": null,
+   "status": "DRAFT",
+   "contentHash": "3e230d3093eb",
+   "placeholders": []
+  },
+  {
+   "id": "creator-terms",
+   "title": "Creator Terms & Seller Agreement",
+   "audience": "creator",
+   "route": "legal/creator-terms.html",
+   "version": "1.0-draft",
+   "effectiveDate": null,
+   "status": "DRAFT",
+   "contentHash": "060a7b9c8bc3",
+   "placeholders": []
+  },
+  {
+   "id": "creator-marketplace-rules",
+   "title": "Marketplace & Product Rules",
+   "audience": "creator",
+   "route": "legal/creator-marketplace-rules.html",
+   "version": "1.0-draft",
+   "effectiveDate": null,
+   "status": "DRAFT",
+   "contentHash": "b909fb6d51dd",
+   "placeholders": []
+  },
+  {
+   "id": "creator-product-policy",
+   "title": "Product Policy Template",
+   "audience": "creator",
+   "route": "legal/creator-product-policy.html",
+   "version": "1.0-draft",
+   "effectiveDate": null,
+   "status": "DRAFT",
+   "contentHash": "883d710ac3db",
+   "placeholders": [
+    "[PRODUCT NAME]",
+    "[TYPE]",
+    "[VERSION]",
+    "[DATE]",
+    "[INCLUDED]",
+    "[EXCLUSIONS]",
+    "[PREREQUISITES]",
+    "[METHOD]",
+    "[REGIONS]",
+    "[TIME]",
+    "[CONTACT]",
+    "[FALLBACK]",
+    "[POLICY]",
+    "[PERIOD]",
+    "[REMEDY]",
+    "[TREATMENT]",
+    "[YES/NO]",
+    "[RATE IF APPLICABLE]",
+    "[TARGET]"
+   ]
+  },
+  {
+   "id": "creator-payouts",
+   "title": "Fees, Ledger & Payout Policy",
+   "audience": "creator",
+   "route": "legal/creator-payouts.html",
+   "version": "1.0-draft",
+   "effectiveDate": null,
+   "status": "DRAFT",
+   "contentHash": "286826d663b6",
+   "placeholders": []
+  },
+  {
+   "id": "creator-verification",
+   "title": "Verification & KYC Notice",
+   "audience": "creator",
+   "route": "legal/creator-verification.html",
+   "version": "1.0-draft",
+   "effectiveDate": null,
+   "status": "DRAFT",
+   "contentHash": "6d5af39b20ad",
+   "placeholders": []
+  },
+  {
+   "id": "creator-ip",
+   "title": "Intellectual Property Licence",
+   "audience": "creator",
+   "route": "legal/creator-ip.html",
+   "version": "1.0-draft",
+   "effectiveDate": null,
+   "status": "DRAFT",
+   "contentHash": "63ff60bbd40b",
+   "placeholders": []
+  },
+  {
+   "id": "creator-enforcement",
+   "title": "Suspension, Enforcement & Appeals Policy",
+   "audience": "creator",
+   "route": "legal/creator-enforcement.html",
+   "version": "1.0-draft",
+   "effectiveDate": null,
+   "status": "DRAFT",
+   "contentHash": "ad7829bf5eca",
+   "placeholders": []
+  },
+  {
+   "id": "creator-privacy",
+   "title": "Privacy & Data-Processing Provisions",
+   "audience": "creator",
+   "route": "legal/creator-privacy.html",
+   "version": "1.0-draft",
+   "effectiveDate": null,
+   "status": "DRAFT",
+   "contentHash": "9833f13eb468",
+   "placeholders": []
+  }
+ ]
+}

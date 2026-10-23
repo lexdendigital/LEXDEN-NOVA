@@ -1,4 +1,5 @@
 const test = require('node:test');
+const { after } = test;
 const assert = require('node:assert/strict');
 const http = require('node:http');
 const express = require('express');
@@ -182,6 +183,10 @@ const J = async (url, opts = {}) => { const r = await fetch(url, opts); return {
 const auth = { Authorization: 'Bearer good', 'Content-Type': 'application/json' };
 
 test('Actions API (admin): open schema, auth required, full tool parity, approve a creator application on command', async () => {
+  process.env.MCP_HIGH_RISK_TOOLS = 'ENABLED'; // owner knowingly unlocked for this scenario
+  try { await actionsAdminScenario(); } finally { delete process.env.MCP_HIGH_RISK_TOOLS; }
+});
+async function actionsAdminScenario() {
   DB = makeDb({
     creatorApplications: { cu1: { status: 'SUBMITTED', creatorType: 'personal', publicFields: { displayName: 'Ada Crafts', category: 'Art' } } },
     creatorPrivate: { cu1: { email: 'ada@x.co' } },
@@ -245,9 +250,11 @@ test('Actions API (admin): open schema, auth required, full tool parity, approve
     // unknown tool
     assert.equal((await J(`${url}/gpt/admin/call`, { method: 'POST', headers: auth, body: JSON.stringify({ tool: 'nova_review_creator_applicat' }) })).status, 404);
   } finally { server.close(); }
-});
+}
 
 test('admin MCP tool alone (no HTTP): reject needs a reason; start_review then approve also works', async () => {
+  process.env.MCP_HIGH_RISK_TOOLS = 'ENABLED';
+  after(() => { delete process.env.MCP_HIGH_RISK_TOOLS; });
   DB = makeDb({ creatorApplications: { a: { status: 'SUBMITTED', creatorType: 'personal', publicFields: { displayName: 'A' } }, b: { status: 'SUBMITTED', creatorType: 'personal', publicFields: {} } } });
   const tools = mcpIndex.collectTools('admin', { extra: { email: 'boss@lexden.test', uid: 'adminUid' } });
   const t = tools.get('nova_review_creator_application');
@@ -338,4 +345,24 @@ test('email queue payload drops undefined fields (the bug that lost retries)', a
   const p = { templateKey: 'verify', to: { email: 'a@b.co' }, params: { code: '1' }, replyTo: undefined };
   const clean = JSON.parse(JSON.stringify(p));
   assert.ok(!('replyTo' in clean));
+});
+
+test('HIGH-RISK tools are blocked for AI by default: money, refunds, approvals, live code; reads still work', async () => {
+  const risk = require('../mcp/lib/risk');
+  for (const t of ['nova_pay_withdrawal_via_paystack', 'nova_mark_withdrawal_paid', 'nova_approve_withdrawal', 'nova_approve_creator_withdrawal', 'nova_resolve_creator_dispute', 'nova_write_source_file', 'nova_replace_in_source_file', 'creator_request_withdrawal']) {
+    assert.ok(risk.blockedReason(t, {}, {}), t);
+  }
+  assert.ok(risk.blockedReason('nova_review_creator_application', { action: 'approve' }, {}));
+  assert.ok(risk.blockedReason('nova_review_creator_application', { action: 'reject' }, {}));
+  assert.equal(risk.blockedReason('nova_review_creator_application', { action: 'start_review' }, {}), null);
+  assert.equal(risk.blockedReason('nova_list_creator_withdrawals', {}, {}), null);
+  // the owner switch unlocks admin tools only; a creator's own AI can never request a payout
+  assert.equal(risk.blockedReason('nova_pay_withdrawal_via_paystack', {}, { MCP_HIGH_RISK_TOOLS: 'ENABLED' }), null);
+  assert.ok(risk.blockedReason('creator_request_withdrawal', {}, { MCP_HIGH_RISK_TOOLS: 'ENABLED' }));
+  // and the live tool wrapper really refuses, and does not touch data
+  DB = makeDb({ creatorApplications: { a: { status: 'IN_REVIEW', creatorType: 'personal', publicFields: { displayName: 'A' } } } });
+  const tools = mcpIndex.collectTools('admin', { extra: { email: 'boss@lexden.test', uid: 'adminUid' } });
+  const r = await tools.get('nova_review_creator_application').run({ uid: 'a', action: 'approve', confirm: true });
+  assert.equal(r.isError, true); assert.match(r.content[0].text, /only be done by a person/);
+  assert.equal(DB._store.creatorApplications.a.status, 'IN_REVIEW');
 });
