@@ -388,6 +388,20 @@ async function sendNovaAuthEmail(type, email, name){
 // /api/confirm-email-verified (all in the same Vercel project as
 // send-email.js). Returns {ok, error} shapes so callers can show the
 // server's exact message instead of a generic failure.
+// The API runs on a free Render instance that sleeps when idle and needs
+// 30-60s to wake. Pinging /health early (page load, and again when the
+// sign-up form opens) wakes it while the person is still typing, so the
+// real Send-code request is answered in ~1-3s instead of hanging.
+let _lastWarm = 0;
+function warmApi(force){
+  try{
+    const base = novaApiBase(); if(!base) return;
+    if(!force && Date.now() - _lastWarm < 4*60*1000) return;
+    _lastWarm = Date.now();
+    fetch(base+'/health', { mode:'no-cors', cache:'no-store' }).catch(()=>{});
+  }catch(e){}
+}
+if(typeof window!=='undefined'){ setTimeout(()=>warmApi(true), 800); document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) warmApi(); }); }
 async function sendSignupOtpCode(email){
   const base = novaApiBase();
   if(!base) return { ok:false, error:'Email service is not configured yet — contact support.' };
@@ -395,13 +409,13 @@ async function sendSignupOtpCode(email){
     const r = await fetchWithTimeout(base+'/api/send-otp', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ email })
-    }, 20000);
+    }, 10000);
     const data = await r.json().catch(()=>({}));
     if(!r.ok) return { ok:false, error: (data.error || 'Could not send the code.') + ' [code ' + r.status + ']' };
     return { ok:true };
   }catch(e){
     console.warn('sendSignupOtpCode failed', e);
-    if(e && e.name==='AbortError') return { ok:false, error:'That took too long — the email server may be waking up. Please try again. [no reply in 20s]' };
+    if(e && e.name==='AbortError') return { ok:false, error:'That took too long — the email server is waking up. Tap Send code again in a few seconds. [no reply in 10s]' };
     return { ok:false, error:'Network problem — check your connection. [' + String(e && (e.name+': '+e.message) || 'unknown').slice(0,80) + ']' };
   }
 }

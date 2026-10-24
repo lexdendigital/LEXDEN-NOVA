@@ -1945,6 +1945,7 @@ function signupStep3Next(){
   rerenderSignup();
 }
 function signupStep4(){
+  try{ warmApi(); }catch(e){}
   const uploading = signupWizard.avatarUploading;
   const hasPhoto = !!signupWizard.avatarPreview;
   const uploadDone = hasPhoto && !!signupWizard.photoURL;
@@ -1963,12 +1964,13 @@ function signupStep4(){
     <div class="form-field">
       <label>Email</label>
       <div style="display:flex;gap:8px;align-items:stretch;">
-        <input type="email" id="wzEmail" autocomplete="username" placeholder="you@example.com" style="flex:1;"
+        <input type="email" id="wzEmail" autocomplete="username" placeholder="you@example.com" style="flex:1 1 auto;min-width:0;"
                value="${escapeHtml(signupWizard.email)}" oninput="onSignupEmailInput(this.value)">
         <button type="button" id="wzSendCodeBtn" class="btn btn-outline btn-sm" onclick="sendSignupOtp()"
-                style="white-space:nowrap;display:${(isValidEmailStr(signupWizard.email) && !signupEmailIsVerified())?'inline-flex':'none'};"
+                style="white-space:nowrap;flex:0 0 auto;min-width:104px;justify-content:center;padding-left:12px;padding-right:12px;display:${(isValidEmailStr(signupWizard.email) && !signupEmailIsVerified())?'inline-flex':'none'};"
                 ${signupWizard.otpSending?'disabled':''}>${signupWizard.otpSending?'Sending…':(signupWizard.otpSent?'Resend code':'Send code')}</button>
       </div>
+      <div id="wzSendErr" class="text-2 small" style="color:var(--error);margin-top:4px;display:${(signupWizard.otpError && !signupWizard.otpSent)?'block':'none'};">${escapeHtml(signupWizard.otpError||'')}</div>
       <div id="wzEmailVerifiedNote" class="text-2 small" style="color:var(--accent);margin-top:4px;display:${signupEmailIsVerified()?'block':'none'};">✓ Email verified</div>
     </div>
     <div id="wzOtpRow" class="form-field" style="display:${(signupWizard.otpSent && !signupEmailIsVerified())?'block':'none'};">
