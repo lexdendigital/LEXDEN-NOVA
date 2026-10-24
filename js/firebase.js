@@ -368,7 +368,7 @@ async function sendNovaEmail(templateKey, to, params){
     const r = await fetchWithTimeout(base+'/api/send-email', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ templateKey, to, params })
-    }, 20000);
+    }, 10000);
     return r.ok;
   }catch(e){ console.warn('sendNovaEmail failed', templateKey, e); return false; }
 }
@@ -376,10 +376,10 @@ async function sendNovaAuthEmail(type, email, name){
   const base = novaApiBase();
   if(!base) return false;
   try{
-    const r = await fetch(base+'/api/send-auth-email', {
+    const r = await fetchWithTimeout(base+'/api/send-auth-email', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ type, email, name })
-    });
+    }, 10000);
     return r.ok;
   }catch(e){ console.warn('sendNovaAuthEmail failed', type, e); return false; }
 }
@@ -426,7 +426,7 @@ async function verifySignupOtpCode(email, code){
     const r = await fetchWithTimeout(base+'/api/verify-otp', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ email, code })
-    }, 20000);
+    }, 10000);
     const data = await r.json().catch(()=>({}));
     if(!r.ok || !data.ok) return { ok:false, error: data.error || 'Could not verify that code.' };
     return { ok:true, verifiedToken: data.verifiedToken };
@@ -447,6 +447,12 @@ async function confirmEmailVerifiedServerSide(uid, email, verifiedToken){
     return r.ok;
   }catch(e){ console.warn('confirmEmailVerifiedServerSide failed', e); return false; }
 }
+// ROOT-CAUSE FIX: this file is loaded as <script type="module">, so its
+// top-level functions are PRIVATE to it. shopper.js / state.js are classic
+// scripts and called sendNovaEmail / sendSignupOtpCode / verifySignupOtpCode
+// as globals -> ReferenceError before any request was made, which is why no
+// email of any kind ever reached the server. Expose them explicitly.
+Object.assign(window, { fetchWithTimeout, novaApiBase, sendNovaEmail, sendNovaAuthEmail, warmApi, sendSignupOtpCode, verifySignupOtpCode, confirmEmailVerifiedServerSide });
 // "Have we seen this uid sign in on this device before?" — a lightweight,
 // no-backend way to fire the Security Alert email on what looks like a new
 // device/browser, without building real device-fingerprinting

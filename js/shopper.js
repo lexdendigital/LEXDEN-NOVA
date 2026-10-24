@@ -2024,7 +2024,15 @@ async function sendSignupOtp(){
   }
   signupWizard.otpSending = true; signupWizard.otpError = '';
   rerenderSignup();
-  const result = await sendSignupOtpCode(email);
+  let result;
+  try{
+    result = await Promise.race([
+      sendSignupOtpCode(email),
+      new Promise(res=>setTimeout(()=>res({ ok:false, error:'That took too long. Please tap Send code again. [10s]' }), 10500))
+    ]);
+  }catch(e){
+    result = { ok:false, error:'Could not send the code. Please try again. [' + String(e && e.message || e).slice(0,60) + ']' };
+  }
   signupWizard.otpSending = false;
   if(!result.ok){ signupWizard.otpError = result.error; rerenderSignup(); return; }
   signupWizard.otpSent = true; signupWizard.otpCooldownUntil = Date.now() + 60000;
@@ -2039,7 +2047,9 @@ async function verifySignupOtp(){
   if(code.length !== 6){ signupWizard.otpError = 'Enter the 6-digit code.'; rerenderSignup(); return; }
   signupWizard.otpVerifying = true; signupWizard.otpError = '';
   rerenderSignup();
-  const result = await verifySignupOtpCode(email, code);
+  let result;
+  try{ result = await verifySignupOtpCode(email, code); }
+  catch(e){ result = { ok:false, error:'Could not verify the code. Please try again.' }; }
   signupWizard.otpVerifying = false;
   if(!result.ok){ signupWizard.otpError = result.error; rerenderSignup(); return; }
   signupWizard.emailVerified = true; signupWizard.verifiedEmail = email; signupWizard.verifiedToken = result.verifiedToken;

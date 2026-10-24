@@ -1008,7 +1008,7 @@ async function submitNewsletterSignup(){
   // this to land "immediately", and an email send shouldn't be held up
   // by (or fail because of) a slow cloud write. Fire-and-forget: a failed
   // send here shouldn't block or fail the subscribe action itself.
-  sendNovaEmail('newsletter', { email }, { email }).catch(()=>{});
+  try{ Promise.resolve(sendNovaEmail('newsletter', { email }, { email })).catch(()=>{}); }catch(e){ console.warn('newsletter email not sent', e); }
   // Never leave the button on "Subscribing…": give the cloud write 10s, then move on.
   const ok = await Promise.race([pushNewsletterSubToCloud(email), new Promise(r=>setTimeout(()=>r(false), 10000))]);
   localStorage.setItem('ln_newsletter_seen', String(Date.now()));
