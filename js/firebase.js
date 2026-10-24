@@ -397,12 +397,12 @@ async function sendSignupOtpCode(email){
       body: JSON.stringify({ email })
     }, 20000);
     const data = await r.json().catch(()=>({}));
-    if(!r.ok) return { ok:false, error: data.error || 'Could not send the code.' };
+    if(!r.ok) return { ok:false, error: (data.error || 'Could not send the code.') + ' [code ' + r.status + ']' };
     return { ok:true };
   }catch(e){
     console.warn('sendSignupOtpCode failed', e);
-    if(e && e.name==='AbortError') return { ok:false, error:'That took too long — the email server may be waking up. Please try again.' };
-    return { ok:false, error:'Network problem — check your connection.' };
+    if(e && e.name==='AbortError') return { ok:false, error:'That took too long — the email server may be waking up. Please try again. [no reply in 20s]' };
+    return { ok:false, error:'Network problem — check your connection. [' + String(e && (e.name+': '+e.message) || 'unknown').slice(0,80) + ']' };
   }
 }
 async function verifySignupOtpCode(email, code){
