@@ -1,6 +1,6 @@
 # LEXDEN NOVA — YOUTH ACCESS & MINOR SAFETY POLICY
 
-**Version:** 1.0-draft  
+**Version:** 1.0  
 **Effective date:** [EFFECTIVE DATE]  
 **Support:** lexdendigital@gmail.com
 

@@ -1,6 +1,6 @@
 # LEXDEN NOVA CREATOR — VERIFICATION & KYC NOTICE
 
-**Version:** 1.0-draft  
+**Version:** 1.0  
 **Effective date:** [EFFECTIVE DATE]
 
 ## 1. Why verification is used

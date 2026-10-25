@@ -1,13 +1,12 @@
 # LEXDEN NOVA — PLATFORM TERMS OF USE
 
-**Version:** 1.0-draft  
+**Version:** 1.0  
 **Effective date:** [EFFECTIVE DATE]  
 **Operator:** [LEXDEN LEGAL ENTITY NAME], a LEXDEN enterprise business trading/operating as LEXDEN NOVA  
 **Registered address:** [REGISTERED ADDRESS]  
 **Support:** lexdendigital@gmail.com  
 **Legal notices:** [LEGAL NOTICE EMAIL]
 
-> **Publication status:** Replace all bracketed operator/contact placeholders before publication.
 
 ## 1. Agreement
 

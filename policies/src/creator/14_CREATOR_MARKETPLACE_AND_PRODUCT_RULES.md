@@ -1,6 +1,6 @@
 # LEXDEN NOVA CREATOR — MARKETPLACE & PRODUCT RULES
 
-**Version:** 1.0-draft  
+**Version:** 1.0  
 **Effective date:** [EFFECTIVE DATE]
 
 ## Mandatory hierarchy

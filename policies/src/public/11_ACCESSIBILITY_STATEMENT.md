@@ -1,6 +1,6 @@
 # LEXDEN NOVA — ACCESSIBILITY STATEMENT
 
-**Version:** 1.0-draft  
+**Version:** 1.0  
 **Effective date:** [EFFECTIVE DATE]  
 **Contact:** lexdendigital@gmail.com
 

@@ -1,6 +1,6 @@
 # LEXDEN NOVA — INTELLECTUAL PROPERTY, COPYRIGHT & TAKEDOWN POLICY
 
-**Version:** 1.0-draft  
+**Version:** 1.0  
 **Effective date:** [EFFECTIVE DATE]  
 **Legal notices:** [LEGAL NOTICE EMAIL]
 

@@ -1,6 +1,6 @@
 # LEXDEN NOVA CREATOR — FEES, LEDGER & PAYOUT POLICY
 
-**Version:** 1.0-draft  
+**Version:** 1.0  
 **Effective date:** [EFFECTIVE DATE]
 
 ## 1. Financial truth

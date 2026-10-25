@@ -1,6 +1,6 @@
 {
  "generatedFrom": "policies/registry.json",
- "approved": false,
+ "approved": true,
  "values": {
   "CREATOR_FEE_PCT": "10",
   "AFFILIATE_WITHDRAWAL_FEE_PCT": "5",
@@ -14,10 +14,10 @@
    "title": "Platform Terms of Use",
    "audience": "public",
    "route": "legal/terms.html",
-   "version": "1.0-draft",
+   "version": "1.0",
    "effectiveDate": null,
-   "status": "DRAFT",
-   "contentHash": "6737e0f59c8b",
+   "status": "PUBLISHED",
+   "contentHash": "2cfe42c311d3",
    "placeholders": []
   },
   {
@@ -25,10 +25,10 @@
    "title": "Privacy Notice",
    "audience": "public",
    "route": "legal/privacy.html",
-   "version": "1.0-draft",
+   "version": "1.0",
    "effectiveDate": null,
-   "status": "DRAFT",
-   "contentHash": "2939860d0595",
+   "status": "PUBLISHED",
+   "contentHash": "f5a4b8be8e6c",
    "placeholders": []
   },
   {
@@ -36,10 +36,10 @@
    "title": "Cookies & Similar Technologies Notice",
    "audience": "public",
    "route": "legal/cookies.html",
-   "version": "1.0-draft",
+   "version": "1.0",
    "effectiveDate": null,
-   "status": "DRAFT",
-   "contentHash": "352b8b8d3dd5",
+   "status": "PUBLISHED",
+   "contentHash": "e35b4d61fce5",
    "placeholders": []
   },
   {
@@ -47,10 +47,10 @@
    "title": "Marketplace & Seller Disclosure",
    "audience": "public",
    "route": "legal/marketplace.html",
-   "version": "1.0-draft",
+   "version": "1.0",
    "effectiveDate": null,
-   "status": "DRAFT",
-   "contentHash": "26bed92911d4",
+   "status": "PUBLISHED",
+   "contentHash": "1f56c7e336af",
    "placeholders": []
   },
   {
@@ -58,10 +58,10 @@
    "title": "Refunds, Returns, Cancellations & Disputes Policy",
    "audience": "public",
    "route": "legal/refunds.html",
-   "version": "1.0-draft",
+   "version": "1.0",
    "effectiveDate": null,
-   "status": "DRAFT",
-   "contentHash": "816243c1fbb0",
+   "status": "PUBLISHED",
+   "contentHash": "82a868fb955a",
    "placeholders": []
   },
   {
@@ -69,10 +69,10 @@
    "title": "Marketplace Rules & Acceptable Use Policy",
    "audience": "public",
    "route": "legal/acceptable-use.html",
-   "version": "1.0-draft",
+   "version": "1.0",
    "effectiveDate": null,
-   "status": "DRAFT",
-   "contentHash": "c83729006b21",
+   "status": "PUBLISHED",
+   "contentHash": "b962736d233a",
    "placeholders": []
   },
   {
@@ -80,10 +80,10 @@
    "title": "Youth Access & Minor Safety Policy",
    "audience": "public",
    "route": "legal/youth.html",
-   "version": "1.0-draft",
+   "version": "1.0",
    "effectiveDate": null,
-   "status": "DRAFT",
-   "contentHash": "15794f7d2648",
+   "status": "PUBLISHED",
+   "contentHash": "3bc9c2c160f4",
    "placeholders": []
   },
   {
@@ -91,10 +91,10 @@
    "title": "Intellectual Property, Copyright & Takedown Policy",
    "audience": "public",
    "route": "legal/ip.html",
-   "version": "1.0-draft",
+   "version": "1.0",
    "effectiveDate": null,
-   "status": "DRAFT",
-   "contentHash": "1de3d03105df",
+   "status": "PUBLISHED",
+   "contentHash": "68c5593d7b6f",
    "placeholders": []
   },
   {
@@ -102,10 +102,10 @@
    "title": "Affiliate Program Terms",
    "audience": "public",
    "route": "legal/affiliate.html",
-   "version": "1.0-draft",
+   "version": "1.0",
    "effectiveDate": null,
-   "status": "DRAFT",
-   "contentHash": "94b7f62eba5f",
+   "status": "PUBLISHED",
+   "contentHash": "44933ff44193",
    "placeholders": []
   },
   {
@@ -113,10 +113,10 @@
    "title": "AI Assistant Terms",
    "audience": "public",
    "route": "legal/ai.html",
-   "version": "1.0-draft",
+   "version": "1.0",
    "effectiveDate": null,
-   "status": "DRAFT",
-   "contentHash": "62c28a6559f1",
+   "status": "PUBLISHED",
+   "contentHash": "50f2e8eb4570",
    "placeholders": []
   },
   {
@@ -124,10 +124,10 @@
    "title": "Accessibility Statement",
    "audience": "public",
    "route": "legal/accessibility.html",
-   "version": "1.0-draft",
+   "version": "1.0",
    "effectiveDate": null,
-   "status": "DRAFT",
-   "contentHash": "76ba0078bd49",
+   "status": "PUBLISHED",
+   "contentHash": "22ba2abd6c4e",
    "placeholders": []
   },
   {
@@ -135,10 +135,10 @@
    "title": "Complaints & Consumer Redress Procedure",
    "audience": "public",
    "route": "legal/complaints.html",
-   "version": "1.0-draft",
+   "version": "1.0",
    "effectiveDate": null,
-   "status": "DRAFT",
-   "contentHash": "3e230d3093eb",
+   "status": "PUBLISHED",
+   "contentHash": "5cf54ec4a8d9",
    "placeholders": []
   },
   {
@@ -146,10 +146,10 @@
    "title": "Creator Terms & Seller Agreement",
    "audience": "creator",
    "route": "legal/creator-terms.html",
-   "version": "1.0-draft",
+   "version": "1.0",
    "effectiveDate": null,
-   "status": "DRAFT",
-   "contentHash": "060a7b9c8bc3",
+   "status": "PUBLISHED",
+   "contentHash": "ab28c3974e99",
    "placeholders": []
   },
   {
@@ -157,10 +157,10 @@
    "title": "Marketplace & Product Rules",
    "audience": "creator",
    "route": "legal/creator-marketplace-rules.html",
-   "version": "1.0-draft",
+   "version": "1.0",
    "effectiveDate": null,
-   "status": "DRAFT",
-   "contentHash": "b909fb6d51dd",
+   "status": "PUBLISHED",
+   "contentHash": "bfbc0528f84e",
    "placeholders": []
   },
   {
@@ -168,9 +168,9 @@
    "title": "Product Policy Template",
    "audience": "creator",
    "route": "legal/creator-product-policy.html",
-   "version": "1.0-draft",
+   "version": "1.0",
    "effectiveDate": null,
-   "status": "DRAFT",
+   "status": "PUBLISHED",
    "contentHash": "883d710ac3db",
    "placeholders": [
     "[PRODUCT NAME]",
@@ -199,10 +199,10 @@
    "title": "Fees, Ledger & Payout Policy",
    "audience": "creator",
    "route": "legal/creator-payouts.html",
-   "version": "1.0-draft",
+   "version": "1.0",
    "effectiveDate": null,
-   "status": "DRAFT",
-   "contentHash": "286826d663b6",
+   "status": "PUBLISHED",
+   "contentHash": "578994c23b65",
    "placeholders": []
   },
   {
@@ -210,10 +210,10 @@
    "title": "Verification & KYC Notice",
    "audience": "creator",
    "route": "legal/creator-verification.html",
-   "version": "1.0-draft",
+   "version": "1.0",
    "effectiveDate": null,
-   "status": "DRAFT",
-   "contentHash": "6d5af39b20ad",
+   "status": "PUBLISHED",
+   "contentHash": "a608df830069",
    "placeholders": []
   },
   {
@@ -221,10 +221,10 @@
    "title": "Intellectual Property Licence",
    "audience": "creator",
    "route": "legal/creator-ip.html",
-   "version": "1.0-draft",
+   "version": "1.0",
    "effectiveDate": null,
-   "status": "DRAFT",
-   "contentHash": "63ff60bbd40b",
+   "status": "PUBLISHED",
+   "contentHash": "f59f5896041e",
    "placeholders": []
   },
   {
@@ -232,10 +232,10 @@
    "title": "Suspension, Enforcement & Appeals Policy",
    "audience": "creator",
    "route": "legal/creator-enforcement.html",
-   "version": "1.0-draft",
+   "version": "1.0",
    "effectiveDate": null,
-   "status": "DRAFT",
-   "contentHash": "ad7829bf5eca",
+   "status": "PUBLISHED",
+   "contentHash": "63119835d0d9",
    "placeholders": []
   },
   {
@@ -243,10 +243,10 @@
    "title": "Privacy & Data-Processing Provisions",
    "audience": "creator",
    "route": "legal/creator-privacy.html",
-   "version": "1.0-draft",
+   "version": "1.0",
    "effectiveDate": null,
-   "status": "DRAFT",
-   "contentHash": "9833f13eb468",
+   "status": "PUBLISHED",
+   "contentHash": "659040371ec8",
    "placeholders": []
   }
  ]

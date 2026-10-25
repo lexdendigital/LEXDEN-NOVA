@@ -1,6 +1,6 @@
 # LEXDEN NOVA — PRIVACY NOTICE
 
-**Version:** 1.0-draft  
+**Version:** 1.0  
 **Effective date:** [EFFECTIVE DATE]  
 **Operator:** [LEXDEN LEGAL ENTITY NAME], trading as/operating LEXDEN NOVA  
 **Contact:** lexdendigital@gmail.com  

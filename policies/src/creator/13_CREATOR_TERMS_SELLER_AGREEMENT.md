@@ -1,6 +1,6 @@
 # LEXDEN NOVA CREATOR — CREATOR TERMS & SELLER AGREEMENT
 
-**Version:** 1.0-draft  
+**Version:** 1.0  
 **Effective date:** [EFFECTIVE DATE]  
 **Operator:** [LEXDEN LEGAL ENTITY NAME], operating LEXDEN NOVA
 

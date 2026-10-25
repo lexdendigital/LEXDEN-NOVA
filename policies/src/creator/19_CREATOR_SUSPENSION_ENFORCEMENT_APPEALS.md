@@ -1,6 +1,6 @@
 # LEXDEN NOVA CREATOR — SUSPENSION, ENFORCEMENT & APPEALS POLICY
 
-**Version:** 1.0-draft  
+**Version:** 1.0  
 **Effective date:** [EFFECTIVE DATE]
 
 ## 1. Risk-based enforcement
