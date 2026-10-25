@@ -462,6 +462,13 @@ window.__novaUpsertUserProfile = async function(shopper){
       country: shopper.country !== undefined ? shopper.country : (prior.country||''),
       state: shopper.state !== undefined ? shopper.state : (prior.state||''),
       howHeard: shopper.howHeard !== undefined ? shopper.howHeard : (prior.howHeard||''),
+      legalAccepted: shopper.legalAccepted !== undefined ? !!shopper.legalAccepted : !!prior.legalAccepted,
+      legalAcceptedAt: shopper.legalAcceptedAt !== undefined ? shopper.legalAcceptedAt : (prior.legalAcceptedAt||''),
+      termsVersion: shopper.termsVersion !== undefined ? shopper.termsVersion : (prior.termsVersion||''),
+      privacyVersion: shopper.privacyVersion !== undefined ? shopper.privacyVersion : (prior.privacyVersion||''),
+      marketingConsent: shopper.marketingConsent !== undefined ? !!shopper.marketingConsent : !!prior.marketingConsent,
+      marketingConsentAt: shopper.marketingConsentAt !== undefined ? shopper.marketingConsentAt : (prior.marketingConsentAt||''),
+      marketingConsentSource: shopper.marketingConsentSource !== undefined ? shopper.marketingConsentSource : (prior.marketingConsentSource||''),
       // Set once — either by saving or explicitly skipping the "finish
       // your profile" card — so a Google shopper is only ever asked for
       // the details Google didn't supply ONE time, the first time they
@@ -1015,16 +1022,21 @@ async function submitNewsletterSignup(){
   closeNewsletterModal();
   toast(ok ? 'You\'re subscribed! 🎉' : 'Saved on this device — will sync once you\'re back online.', ok ? 'success' : 'error');
 }
-async function pushNewsletterSubToCloud(email){
+async function pushNewsletterSubToCloud(email, source='popup', meta={}){
   if(!window.__fb) return false;
   const { fbDb, doc, setDoc } = window.__fb;
   try{
+    const now = new Date().toISOString();
     const key = email.toLowerCase().replace(/[^a-z0-9@._-]/g,'_');
     await setDoc(doc(fbDb, "newsletterSubs", key), {
       email: email.toLowerCase(),
-      at: new Date().toISOString(),
-      source: 'popup',
-      uid: window.__fbUid || null,
+      at: meta.consentAt || now,
+      source,
+      uid: meta.uid || window.__fbUid || null,
+      name: meta.name || '',
+      marketingConsent: true,
+      consentAt: meta.consentAt || now,
+      consentTextVersion: meta.consentTextVersion || (source==='popup' ? 'popup-v1' : 'signup-marketing-v1'),
     }, { merge:true });
     return true;
   }catch(e){ console.warn("Newsletter push failed", e); return false; }
