@@ -35,7 +35,7 @@ function register(server) {
     inputSchema: {
       keyword: z.string().optional(), categoryId: z.string().optional(),
       page: z.number().int().min(1).default(1), pageSize: z.number().int().min(1).max(50).default(20),
-      countryCode: z.string().default('NG'),
+      countryCode: z.string().optional().describe('Optional 2-letter code. Leave empty to search all of CJ; setting it (e.g. NG) only returns items stocked for that country and hides most results.'),
     },
   }, async (args) => {
     const r = await callHandler(cjProductsHandler, { method: 'GET', query: { mode: 'search', ...args } });

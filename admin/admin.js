@@ -1904,7 +1904,7 @@ function adminCJDropshipping(){
       <h3 style="font-size:14px;margin-bottom:8px;">Import Products</h3>
       <p class="text-2 small" style="margin-bottom:10px;">Search CJ's live catalog and import as a <strong>Draft</strong> physical product — nothing here goes live on the storefront until you review it in Products and set Status to Published (README §29/§30).</p>
       <div class="flex gap-8">
-        <input id="cj_searchKeyword" placeholder="Search CJ products (e.g. wireless earbuds)" style="flex:1;padding:9px 11px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);">
+        <input id="cj_searchKeyword" placeholder="Search CJ products (e.g. wireless earbuds)" onkeydown="if(event.key==='Enter'){event.preventDefault();cjRunImportSearch();}" style="flex:1;padding:9px 11px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);">
         <button class="btn btn-primary btn-sm" onclick="cjRunImportSearch()">Search</button>
       </div>
       <div id="cjImportResults" style="margin-top:12px;"></div>
@@ -1985,78 +1985,115 @@ async function cjTestConnection(){
 async function cjRunImportSearch(){
   const keyword = ($('#cj_searchKeyword').value||'').trim();
   const resultsEl = $('#cjImportResults');
-  resultsEl.innerHTML = '<p class="text-2 small">Searching…</p>';
+  resultsEl.innerHTML = '<p class="text-2 small">Searching CJ…</p>';
   const r = await cjApiGet(`/cj-products?mode=search&keyword=${encodeURIComponent(keyword)}&pageSize=20`);
-  if(!r.ok){ resultsEl.innerHTML = `<p class="text-2 small" style="color:var(--error);">${escapeHtml(r.error||'Search failed.')}</p>`; return; }
-  if(!r.products || !r.products.length){ resultsEl.innerHTML = '<p class="text-2 small">No results.</p>'; return; }
+  if(!r.ok){
+    const disabled = /api access has been disabled|reactivate/i.test(String(r.error||''));
+    resultsEl.innerHTML = `<p class="text-2 small" style="color:var(--error);">${escapeHtml(r.error||'Search failed.')}</p>${disabled?'<p class="text-2 small">CJ has switched off API access for this account. <a href="https://www.cjdropshipping.com/my.html#/authorize/APIStores" target="_blank" rel="noopener" style="color:var(--accent);">Open CJ and reactivate it</a>, then search again.</p>':''}`;
+    return;
+  }
+  if(!r.products || !r.products.length){ resultsEl.innerHTML = `<p class="text-2 small">CJ returned no products for "${escapeHtml(keyword)}". Try a shorter or more general English keyword (for example "earbuds" instead of "wireless bluetooth earbuds 2024").</p>`; return; }
   window.__cjSearchResults = r.products;
   resultsEl.innerHTML = `<div class="admin-grid">${r.products.map(p=>`
     <div class="card" style="padding:10px;">
       ${p.image?`<img src="${escapeHtml(p.image)}" style="width:100%;height:110px;object-fit:cover;border-radius:8px;margin-bottom:6px;">`:''}
       <p class="small" style="font-weight:700;">${escapeHtml((p.name||'').slice(0,80))}</p>
-      <p class="small text-2">${p.sellPrice!=null?'$'+p.sellPrice.toFixed(2):''} ${p.variantCount?'· '+p.variantCount+' variants':''}</p>
+      <p class="small text-2">${p.priceText?escapeHtml(String(p.priceText).replace(/^\$?/,'$')):(p.sellPrice!=null?'$'+Number(p.sellPrice).toFixed(2):'Price on import')}${p.stock!=null?' · '+Number(p.stock).toLocaleString()+' in stock':''}</p>
+      ${p.categoryName?`<p class="small text-2">${escapeHtml(p.categoryName)}</p>`:''}
       <button class="btn btn-primary btn-sm" style="width:100%;margin-top:6px;" onclick="importCjProduct('${escapeHtml(p.pid)}')">Import</button>
     </div>`).join('')}</div>`;
 }
 async function importCjProduct(pid){
+  const already = (DB.products||[]).find(x=>x.physical && x.physical.cj && String(x.physical.cj.productId)===String(pid));
+  if(already){ toast(`Already imported as "${already.name}". Open it in Products.`, 'info'); return; }
   toast('Fetching product from CJ…');
   const r = await cjApiGet(`/cj-product?pid=${encodeURIComponent(pid)}`);
   if(!r.ok){ toast(r.error||'Could not fetch product detail.', 'error'); return; }
-  const { product, variants } = r;
-  const firstVariant = (variants||[])[0] || {};
+  const product = r.product || {};
+  const variants = (r.variants||[]).filter(Boolean);
+  const firstVariant = variants[0] || {};
+  // Live stock for up to 20 variants, same snapshot the AI assistant import takes.
+  let stockMap = {}, stockOk = false, stockErr = '';
+  const vids = variants.map(v=>v.vid).filter(Boolean).slice(0,20);
+  if(vids.length){
+    const sr = await cjApiGet(`/cj-stock?vid=${encodeURIComponent(vids.join(','))}`);
+    if(sr && sr.ok){ stockMap = sr.stock || {}; stockOk = true; } else stockErr = (sr && sr.error) || 'Stock could not be verified.';
+  }
+  const inStock = stockOk && Object.values(stockMap).some(x=>x && x.inStock);
+  // Specs: every supplier attribute CJ gave us, as label → value.
+  const specs = {};
+  const addSpec = (label, value)=>{ if(value==null || value==='' ) return; specs[label] = Array.isArray(value) ? value.filter(Boolean).join(', ') : String(value); };
+  addSpec('Supplier category', product.categoryName); addSpec('Product options', product.productOptions);
+  addSpec('Material', product.materials); addSpec('Package weight (g)', product.packageWeight);
+  addSpec('Package materials', product.packageMaterials); addSpec('Shipping attributes', product.logisticsAttributes);
+  addSpec('Customs code', product.customsCode); addSpec('Customs description', product.customsName);
+  addSpec('Supplier suggested price (USD)', product.suggestedSellPrice);
+  if(product.specifications && typeof product.specifications==='object') Object.entries(product.specifications).forEach(([k,v])=>addSpec(k,v));
+  const images = [...new Set([...(product.images||[]), ...variants.map(v=>v.image)].filter(u=>typeof u==='string' && /^https?:\/\//i.test(u)))];
+  const w = firstVariant.weight!=null ? firstVariant.weight : product.weight;
+  const dim = (firstVariant.length||firstVariant.width||firstVariant.height) ? [firstVariant.length,firstVariant.width,firstVariant.height].map(v=>v==null?'?':(Number(v)/10)).join(' × ')+' cm' : '';
   const cats = DB.categories.filter(c=>c.id!=='all');
   const data = {
     id: 'p'+Date.now(),
     name: (product.name||'Imported CJ product').slice(0,200),
     category: cats[0]?.id || 'general',
+    categoryName: product.categoryName || '',
     price: 0, // supplier cost is not a shopper price; leave selling price for admin review
     salePrice: null,
-    itemCode: 'CJ-'+String(pid).slice(-8),
+    itemCode: 'CJ-'+String(pid).slice(-8).toUpperCase(),
     seller: 'Lexden Digital',
-    image: (product.images&&product.images[0]) || '',
-    gallery: (product.images||[]).map(url=>({url, type:'image'})),
+    image: images[0] || '',
+    gallery: images.map((url,i)=>({url, type:'image', alt:`${product.name||'Product'} image ${i+1}`})),
     affiliateLink: '#',
     fileUrl: '', deliveryLink: '', externalPaymentLink: '',
     status: 'draft', // README §29 — never auto-publish an import
-    tags: ['cj-import'],
+    tags: ['cj-import','physical'],
     description: product.description || '',
-    specs: {},
+    specs,
     rating: 4.5, reviewCount: 0, featured: false, trending: false,
     productType: 'PHYSICAL',
-    options: (variants||[]).filter(Boolean).length ? [{
-      id:'cj-variant', name:'Supplier variant', values:(variants||[]).filter(Boolean).map((variant,index)=>({id:`cj-${variant.vid||index}`,label:variant.name||variant.variantKey||variant.sku||`Option ${index+1}`})),
+    options: variants.length ? [{
+      id:'cj-variant', name:'Supplier variant', values:variants.map((variant,index)=>({id:`cj-${variant.vid||index}`,label:variant.name||variant.variantKey||variant.sku||`Option ${index+1}`})),
     }] : [],
-    variants: (variants||[]).filter(Boolean).map((variant,index)=>({
+    variants: variants.map((variant,index)=>({
       id:`cj-${variant.vid||index}`,title:variant.name||variant.variantKey||variant.sku||`Option ${index+1}`,
-      optionValues:{'cj-variant':`cj-${variant.vid||index}`},price:null,salePrice:null,stock:null,
+      optionValues:{'cj-variant':`cj-${variant.vid||index}`},price:null,salePrice:null,
+      stock: stockMap[variant.vid] ? stockMap[variant.vid].total : null,
       sku:variant.sku||'',image:variant.image||'',cjVariantId:variant.vid||'',active:true,
     })),
     pricingReviewRequired: true,
     physical: {
       stockMode: 'SUPPLIER_STOCK',
-      stockStatus: 'in_stock',
-      deliveryEstimate: '7–20 business days',
+      stockStatus: inStock ? 'in_stock' : 'out_of_stock',
+      deliveryEstimate: product.deliveryCycle ? `${product.deliveryCycle} days (supplier estimate; confirm destination)` : '7–20 business days',
       shippingCountries: [DB.content.cjTargetCountry||'Nigeria'],
-      weight: '', dimensions: '',
+      weight: w!=null ? `${(Number(w)/1000).toFixed(3)} kg` : '',
+      dimensions: dim,
       returnPolicy: '',
-      supplierId: '', supplierSku: firstVariant.sku || '',
-      supplierCost: firstVariant.sellPrice || null,
+      supplier: 'CJ Dropshipping',
+      supplierId: '', supplierSku: firstVariant.sku || product.sku || '',
+      supplierCost: firstVariant.sellPrice ?? product.sellPrice ?? null,
       supplierCurrency: 'USD',
       routing: null,
       cj: {
-        productId: product.pid,
+        productId: product.pid || pid,
         variantId: firstVariant.vid || '',
-        sku: firstVariant.sku || '',
+        sku: firstVariant.sku || product.sku || '',
         syncEnabled: true,
         lastSyncedAt: new Date().toISOString(),
+        lastImportedAt: new Date().toISOString(),
+        stockCheckError: stockOk ? null : (stockErr || 'Stock could not be verified; refresh inventory before publishing.'),
+        videoIds: product.videoIds || [],
+        variants: variants.map(v=>({ id:v.vid||'', sku:v.sku||'', name:v.name||'', optionKey:v.variantKey||'', barcode:v.barcode||'', standard:v.standard||'', unit:v.unit||'', image:v.image||'', sellPrice:v.sellPrice??null, suggestedSellPrice:v.suggestedSellPrice??null, weight:v.weight??null, length:v.length??null, width:v.width??null, height:v.height??null, stock: stockMap[v.vid]||null, supplierInventories:v.inventories||[] })),
       },
     },
+    importSource: { supplier:'CJ Dropshipping', productId: product.pid || pid, importedAt: new Date().toISOString(), sourceCategoryId: product.categoryId || '' },
   };
   DB.products = [...DB.legacyProducts, data];
   const ok = await pushProductsToCloud();
   if(ok){
     logActivity('Admin', `Imported CJ product "${data.name}"`);
-    toast('Imported as Draft — review and publish from Products.', 'success');
+    toast(images.length ? 'Imported as Draft — review and publish from Products.' : 'Imported as Draft, but CJ gave no usable image — add one before publishing.', images.length?'success':'info');
     updateCatalogSchema();
     renderAdminTab();
   } else {
