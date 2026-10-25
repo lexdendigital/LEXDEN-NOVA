@@ -1856,6 +1856,9 @@ function resetSignupWizard(prefillEmail){
     firstName:'', lastName:'', email:prefillEmail||'', password:'',
     avatarFile:null, avatarPreview:'', photoURL:'', avatarUploading:false, avatarUploadError:'',
     gender:'', dob:'', country:'', state:'', occupation:'', occupationOther:'', howHeard:'',
+    // Legal acceptance is required to create an account. Marketing consent
+    // is deliberately separate, optional and never pre-checked.
+    legalAccepted:false, marketingConsent:false,
     // Email OTP verification state (step 4) — see sendSignupOtpCode() /
     // verifySignupOtpCode() below. verifiedEmail records exactly WHICH
     // address the token covers, so editing the email after verifying
@@ -2073,13 +2076,45 @@ function signupStep4Next(){
   signupWizard.step = 5;
   rerenderSignup();
 }
+function signupUserIsUnder18(){
+  if(!signupWizard || !signupWizard.dob) return true;
+  const dob = new Date(signupWizard.dob + 'T00:00:00');
+  if(Number.isNaN(dob.getTime())) return true;
+  const today = new Date();
+  let age = today.getFullYear() - dob.getFullYear();
+  const monthDelta = today.getMonth() - dob.getMonth();
+  if(monthDelta < 0 || (monthDelta === 0 && today.getDate() < dob.getDate())) age--;
+  return age < 18;
+}
 function signupStep5(){
+  const under18 = signupUserIsUnder18();
   return `
     <div class="form-field"><label>Occupation</label>${wizardDropdown('occupation', SIGNUP_OCCUPATION_OPTIONS, 'Select occupation')}</div>
     ${signupWizard.occupation==='Other' ? `
     <div class="form-field"><label>Please specify</label><input type="text" id="wzOccupationOther" placeholder="Tell us what you do" value="${escapeHtml(signupWizard.occupationOther)}" onchange="signupWizard.occupationOther=this.value.trim();"></div>
     ` : ''}
     <div class="form-field"><label>How did you hear about us?</label>${wizardDropdown('howHeard', SIGNUP_HOW_HEARD_OPTIONS, 'Select an option')}</div>
+
+    <div style="margin:14px 0 12px;display:grid;gap:12px;">
+      <label for="wzLegalConsent" style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;font-size:12.5px;line-height:1.5;">
+        <input type="checkbox" id="wzLegalConsent" ${signupWizard.legalAccepted?'checked':''}
+          onchange="signupWizard.legalAccepted=this.checked;" style="margin-top:3px;flex:none;">
+        <span>I agree to the <a href="legal/terms.html" target="_blank" rel="noopener" onclick="event.stopPropagation();" style="color:var(--accent);font-weight:600;">LEXDEN NOVA Terms of Use</a> and acknowledge the <a href="legal/privacy.html" target="_blank" rel="noopener" onclick="event.stopPropagation();" style="color:var(--accent);font-weight:600;">Privacy Notice</a>.</span>
+      </label>
+
+      ${under18 ? `
+        <div class="text-2 small" style="padding-left:26px;line-height:1.5;">
+          Marketing emails are not enabled for accounts under 18 through this signup form. Essential account, security and transaction emails may still be sent when needed.
+        </div>
+      ` : `
+        <label for="wzMarketingConsent" style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;font-size:12.5px;line-height:1.5;">
+          <input type="checkbox" id="wzMarketingConsent" ${signupWizard.marketingConsent?'checked':''}
+            onchange="signupWizard.marketingConsent=this.checked;" style="margin-top:3px;flex:none;">
+          <span>I want to receive LEXDEN NOVA emails about new products, services, offers and updates. I can unsubscribe at any time.</span>
+        </label>
+      `}
+    </div>
+
     <button class="btn btn-primary btn-block" id="signupFinalBtn" onclick="finishSignup()" ${signupWizard.submitting?'disabled':''}>${signupWizard.submitting?'Creating account…':'Create Account'}</button>`;
 }
 function prevSignupStep(){
@@ -2096,12 +2131,15 @@ async function finishSignup(){
   if(!signupWizard.occupation){ setSignupError('Select an occupation.'); return; }
   if(signupWizard.occupation==='Other' && !signupWizard.occupationOther){ setSignupError('Tell us what you do.'); return; }
   if(!signupWizard.howHeard){ setSignupError('Let us know how you heard about us.'); return; }
+  if(!signupWizard.legalAccepted){ setSignupError('Please accept the Terms of Use and acknowledge the Privacy Notice to create your account.'); return; }
+  if(signupUserIsUnder18()) signupWizard.marketingConsent = false;
   setSignupError('');
   signupWizard.submitting = true;
   setSignupButtonState(true, 'Creating account…');
   const fullName = `${signupWizard.firstName} ${signupWizard.lastName}`.trim();
   const address = [signupWizard.state, signupWizard.country].filter(Boolean).join(', ');
   const finalOccupation = signupWizard.occupation==='Other' ? signupWizard.occupationOther : signupWizard.occupation;
+  const consentAt = new Date().toISOString();
   try{
     if(!window.__emailSignUp) throw new Error('Sign-up is not ready yet — try again in a moment.');
     // Every network step below is wrapped in withTimeout so a stalled
@@ -2127,6 +2165,11 @@ async function finishSignup(){
         uid, name: fullName, email, photoURL, address,
         occupation: finalOccupation, gender: signupWizard.gender, dob: signupWizard.dob,
         country: signupWizard.country, state: signupWizard.state, howHeard: signupWizard.howHeard,
+        legalAccepted: true, legalAcceptedAt: consentAt,
+        termsVersion: '1.0', privacyVersion: '1.0',
+        marketingConsent: !!signupWizard.marketingConsent,
+        marketingConsentAt: signupWizard.marketingConsent ? consentAt : '',
+        marketingConsentSource: signupWizard.marketingConsent ? 'account-signup' : '',
         provider: 'password',
       }),
       15000, 'Saving your profile is taking too long.'
@@ -2144,6 +2187,11 @@ async function finishSignup(){
         uid, name: fullName, email, photoURL, address,
         occupation: finalOccupation, gender: signupWizard.gender, dob: signupWizard.dob,
         country: signupWizard.country, state: signupWizard.state, howHeard: signupWizard.howHeard,
+        legalAccepted: true, legalAcceptedAt: consentAt,
+        termsVersion: '1.0', privacyVersion: '1.0',
+        marketingConsent: !!signupWizard.marketingConsent,
+        marketingConsentAt: signupWizard.marketingConsent ? consentAt : '',
+        marketingConsentSource: signupWizard.marketingConsent ? 'account-signup' : '',
         provider: 'password',
       }).catch(e2=>{
         console.warn('Profile save retry also failed', e2);
@@ -2161,8 +2209,20 @@ async function finishSignup(){
       uid, name: fullName, email, photoURL, address,
       occupation: finalOccupation, gender: signupWizard.gender, dob: signupWizard.dob,
       country: signupWizard.country, state: signupWizard.state, howHeard: signupWizard.howHeard,
+      legalAccepted: true, legalAcceptedAt: consentAt,
+      termsVersion: '1.0', privacyVersion: '1.0',
+      marketingConsent: !!signupWizard.marketingConsent,
+      marketingConsentAt: signupWizard.marketingConsent ? consentAt : '',
+      marketingConsentSource: signupWizard.marketingConsent ? 'account-signup' : '',
       provider: 'password', profileSetupDone: true,
     };
+    if(signupWizard.marketingConsent){
+      // Best-effort only: account creation must never fail because the
+      // newsletter collection is temporarily unavailable.
+      Promise.resolve(pushNewsletterSubToCloud(email, 'account-signup', {
+        uid, name: fullName, consentAt, consentTextVersion: 'signup-marketing-v1'
+      })).catch(()=>{});
+    }
     toast('You have successfully created your account! 🎉', 'success');
     resetSignupWizard();
     if(!applyPendingFeedLikeIfAny()) navigate('#profile');
