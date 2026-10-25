@@ -368,6 +368,23 @@ function customSelect(id, value, options, placeholder, onPick, sm){
     </div>
   </div>`;
 }
+// ---- Generic styled file picker ----
+// Replaces the OS's raw "Choose File / No file chosen" button (which looks
+// nothing like the rest of the app on any browser) with the same button
+// style used throughout NOVA, same pattern the sign-up avatar picker
+// already used: a <label for=id> styled as a button sits on top of a
+// visually-hidden real <input type=file id=id>, so every native file
+// picker sheet still opens exactly as before — only the trigger's look
+// changes. statusHtml is rendered under the button (selected file name,
+// an uploading spinner, a preview image, an error+retry link, etc.) and
+// is entirely the caller's responsibility, same as before this existed.
+function fileButton(id, label, accept, onchange, statusHtml){
+  return `<div class="file-btn">
+    <label class="btn btn-outline btn-sm" for="${id}">${escapeHtml(label)}</label>
+    <input type="file" id="${id}" accept="${escapeHtml(accept||'')}" style="display:none;" onchange="${onchange}">
+    ${statusHtml||''}
+  </div>`;
+}
 function closeAllCustomSelects(){
   $all('.csel.open').forEach(o=>o.classList.remove('open'));
   $all('.csel-host').forEach(h=>h.classList.remove('csel-host'));

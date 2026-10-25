@@ -538,6 +538,7 @@ img{max-width:100%;display:block;}
 .list-row .ic-svg{width:18px;height:18px;}
 .icon-btn:active{transform:scale(0.9);background:var(--card);}
 .icon-btn:hover{background:var(--card);}
+.icon-btn.active{background:var(--card);color:var(--accent);}
 .badge-dot{position:absolute;top:4px;right:4px;width:8px;height:8px;border-radius:50%;background:var(--accent-4);border:2px solid var(--bg);box-shadow:0 0 5px var(--magenta-glow);}
 .header-search{flex:1;display:flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--border);border-radius:var(--r-input);padding:8px 12px;margin:0 10px;}
 .header-search input{background:none;border:none;outline:none;color:var(--text);font-size:14px;width:100%;}
@@ -1042,6 +1043,8 @@ img{max-width:100%;display:block;}
 @media (max-width:640px){.form-grid{grid-template-columns:1fr;}}
 .form-field{display:flex;flex-direction:column;gap:5px;margin-bottom:12px;}
 .form-field label{font-size:12px;color:var(--text-2);font-weight:600;}
+.file-btn{display:flex;flex-direction:column;align-items:flex-start;gap:6px;}
+.file-btn .btn{width:auto;}
 @media (prefers-reduced-motion: no-preference){
   .form-field input,.form-field select,.form-field textarea{
     padding:9px 11px;border-radius:8px;border:1px solid var(--border);

@@ -102,13 +102,27 @@ function creatorMoreTab(){
 // changes, same guard resetEditProfileForm uses (shopper._uid check).
 let creatorForm = null;
 function resetCreatorForm(appData){
+  // Don't re-ask for details the shopper already gave at sign-up. Only
+  // fill these in on a FIRST application (no appData yet) — once a real
+  // application exists, its own saved values always win, even if they
+  // happen to be blank (the applicant may have deliberately cleared one).
+  const shopper = !appData ? window.__fbShopper : null;
   creatorForm = {
     creatorType: (appData && appData.creatorType) || null,
-    publicFields: { ...(appData && appData.publicFields) },
-    privateFields: { ...(appData && appData.privateFields) },
+    publicFields: {
+      profileImageUrl: shopper ? shopper.photoURL : undefined,
+      ...(appData && appData.publicFields),
+    },
+    privateFields: {
+      email: shopper ? shopper.email : '',
+      legalName: shopper ? shopper.name : '',
+      dob: shopper ? shopper.dob : '',
+      contactName: shopper ? shopper.name : '',
+      ...(appData && appData.privateFields),
+    },
     socialHandlesText: ((appData && appData.publicFields && appData.publicFields.socialHandles) || []).join('\n'),
     acceptTerms: !!(appData && appData.privateFields && appData.privateFields.acceptedTermsAt),
-    profileImagePreview: (appData && appData.publicFields && appData.publicFields.profileImageUrl) || null,
+    profileImagePreview: (appData && appData.publicFields && appData.publicFields.profileImageUrl) || (shopper && shopper.photoURL) || null,
     profileImageUploading: false,
     documents: [],
     errors: [],
@@ -316,13 +330,13 @@ function creatorProductForm(){
   const needsAccess = ['EXTERNAL_ACCESS','LIVE_PROGRAM','SUBSCRIPTION','BUNDLE','DIGITAL_DOWNLOAD','SOFTWARE','EBOOK','TEMPLATE'].includes(t);
   return `<div class="card" style="padding:16px;margin-bottom:14px;">
     <div style="display:flex;justify-content:space-between;align-items:center;"><h3 style="font-size:16px;">${F.productId?'Edit listing':'New listing'}</h3><button class="btn btn-outline btn-sm" onclick="cp.form=null;render();">Close</button></div>
-    ${cpField('What are you selling?', F.productId ? `<div class="text-2 small">${escapeHtml((CW_TYPES.find(x=>x[0]===t)||[0,t])[1])} (cannot be changed)</div>` : `<select onchange="cpRerender('offeringType',this.value)">${CW_TYPES.map(([v,l])=>`<option value="${v}" ${v===t?'selected':''}>${l}</option>`).join('')}</select>`)}
+    ${cpField('What are you selling?', F.productId ? `<div class="text-2 small">${escapeHtml((CW_TYPES.find(x=>x[0]===t)||[0,t])[1])} (cannot be changed)</div>` : customSelect('cf_offeringType', t||'', CW_TYPES.map(([v,l])=>({value:v,label:l})), 'Choose…', v=>cpRerender('offeringType',v)))}
     ${cpField('Title', cpText('title','Clear name of what the buyer gets'))}
     ${cpField('Description', cpArea('description','What it is, who it is for, what is included. Use short lines.',6))}
-    ${cpField('Category', `<select onchange="cpSet('category',this.value)"><option value="">Choose…</option>${cats.map(c=>`<option value="${escapeHtml(c.name)}" ${String(f.category||'').toLowerCase()===String(c.name).toLowerCase()?'selected':''}>${escapeHtml(c.name)}</option>`).join('')}</select>`)}
+    ${cpField('Category', customSelect('cf_listingCategory', f.category||'', cats.map(c=>({value:c.name,label:c.name})), 'Choose…', v=>cpSet('category',v)))}
     ${cpField('Images (first one is the cover)', `
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;">${(f.images||[]).map((u,i)=>`<div style="position:relative;"><img src="${escapeHtml(u)}" style="width:64px;height:64px;object-fit:cover;border-radius:8px;"><button onclick="cpRemoveImage(${i})" style="position:absolute;top:-6px;right:-6px;border:0;border-radius:50%;width:20px;height:20px;background:var(--error);color:#fff;">×</button></div>`).join('')}</div>
-      <input type="file" accept="image/*" onchange="cpAddImage(this)">
+      ${fileButton('cpImageInput','Add image','image/*','cpAddImage(this)')}
       <div style="display:flex;gap:6px;margin-top:6px;"><input id="cpImgUrl" type="url" placeholder="or paste an https:// image link" style="flex:1;"><button class="btn btn-outline btn-sm" onclick="cpAddImageUrl()">Add</button></div>`)}
     <div style="display:flex;gap:10px;align-items:flex-end;">
       <div style="flex:2;">${cpField('Price (₦ Naira)', f.isFree?'<div class="text-2 small">Free listing</div>':cpText('price','e.g. 5000','number'))}</div>
@@ -330,18 +344,18 @@ function creatorProductForm(){
     </div>
     ${cpField('Refund / return policy', cpArea('refundPolicy','e.g. Refunds within 7 days if the file is corrupted.',2))}
     ${t==='PHYSICAL_PRODUCT' ? `
-      ${cpField('How will you fulfil orders?', `<select onchange="cpRerender('fulfillmentMode',this.value)"><option value="SELLER_STOCK" ${f.fulfillmentMode!=='MANUAL_SUPPLIER'?'selected':''}>I ship from my own stock</option><option value="MANUAL_SUPPLIER" ${f.fulfillmentMode==='MANUAL_SUPPLIER'?'selected':''}>I order from my supplier and ship it myself</option></select>`, 'CJ Dropshipping listings are set up through the Claude connector (see Home).')}
+      ${cpField('How will you fulfil orders?', customSelect('cf_fulfillmentMode', f.fulfillmentMode==='MANUAL_SUPPLIER'?'MANUAL_SUPPLIER':'SELLER_STOCK', [{value:'SELLER_STOCK',label:'I ship from my own stock'},{value:'MANUAL_SUPPLIER',label:'I order from my supplier and ship it myself'}], '', v=>cpRerender('fulfillmentMode',v)), 'CJ Dropshipping listings are set up through the Claude connector (see Home).')}
       ${f.fulfillmentMode==='MANUAL_SUPPLIER' ? cpField('Supplier name', cpText('supplierName','Who you order from')) : `${cpField('Stock quantity', cpText('stock','e.g. 20','number'))}${cpField('Package weight (grams)', cpText('weightGrams','e.g. 500','number'))}${cpField('Shipping from (city/country)', cpText('shippingOrigin','e.g. Lagos, Nigeria'))}`}
       ${cpField('Days you need to dispatch', cpText('processingDays','1–30','number'), 'Your shipping deadline is 48h, or longer if you set more days here.')}` : ''}
     ${t==='SOFTWARE' ? cpField('System requirements', cpText('systemRequirements','e.g. Windows 10+, 4GB RAM')) : ''}
     ${t==='EBOOK' ? cpField('Page count', cpText('pageCount','e.g. 120','number')) : ''}
     ${t==='TEMPLATE' ? cpField('Compatible with', cpText('compatibility','e.g. Figma, Notion, Word')) : ''}
-    ${t==='COURSE' ? `${cpField('Skill level', `<select onchange="cpSet('level',this.value)"><option value="">Choose…</option>${['Beginner','Intermediate','Advanced','All levels'].map(l=>`<option ${f.level===l?'selected':''}>${l}</option>`).join('')}</select>`)}${cpField('Modules (one per line)', cpArea('modulesText','Module 1 title\nModule 2 title',5))}` : ''}
+    ${t==='COURSE' ? `${cpField('Skill level', customSelect('cf_level', f.level||'', ['Beginner','Intermediate','Advanced','All levels'], 'Choose…', v=>cpSet('level',v)))}${cpField('Modules (one per line)', cpArea('modulesText','Module 1 title\nModule 2 title',5))}` : ''}
     ${t==='SERVICE' ? `${cpField('Turnaround time', cpText('turnaround','e.g. 3 days'))}${cpField('What do you deliver?', cpArea('deliverables','e.g. 3 logo concepts + source files',3))}` : ''}
     ${t==='SUBSCRIPTION' ? cpField('Billing interval', cpText('billingInterval','e.g. monthly')) : ''}
     ${t!=='PHYSICAL_PRODUCT' && t!=='SERVICE' && t!=='COURSE' || t==='COURSE' ? `
       <div style="border-top:1px solid var(--border);margin:10px 0;padding-top:10px;"><strong>What the buyer receives after paying</strong></div>
-      ${isDigitalFile ? cpField('Upload a file (PDF, ZIP, EPUB, DOC — 8MB max)', `<input type="file" onchange="cpUploadFile(this)">${f.fileAssetId?`<div class="small" style="color:#2ee6a6;margin-top:4px;">✓ File attached${F.fileName?': '+escapeHtml(F.fileName):''}</div>`:''}`, 'Stored privately; only buyers can download it.') : ''}
+      ${isDigitalFile ? cpField('Upload a file (PDF, ZIP, EPUB, DOC — 8MB max)', fileButton('cpDeliverableInput', f.fileAssetId?'Replace file':'Choose file', '', 'cpUploadFile(this)', f.fileAssetId?`<div class="small" style="color:#2ee6a6;">✓ File attached${F.fileName?': '+escapeHtml(F.fileName):''}</div>`:''), 'Stored privately; only buyers can download it.') : ''}
       ${needsAccess || t==='COURSE' ? cpField(isDigitalFile?'…or an access / delivery link':'Access link (course site, community, meeting…)', cpText('externalUrl','https://…','url'), 'Only shown to people who bought it. We re-check that it still works.') : ''}` : ''}
     ${cp.formError ? `<div class="small" style="color:var(--error);margin:10px 0;">⚠️ ${escapeHtml(cp.formError)}</div>` : ''}
     ${cp.info ? `<div class="small" style="color:#2ee6a6;margin:10px 0;">${escapeHtml(cp.info)}</div>` : ''}
@@ -493,7 +507,7 @@ function cshCardHtml(){
     const locs = csh.locations || [];
     const mine = (ci.channels||[]).filter(l=>l.channel==='SHOPIFY');
     inner = `<div class="small"><b>${escapeHtml(c.shopName||c.shop)}</b> <span class="text-2">· ${escapeHtml(c.shop)}</span></div>
-      <div style="margin:8px 0;"><label class="text-2 small">Location whose stock to keep equal</label><select style="width:100%;" onchange="cshSetLocation(this.value)" ${dis}><option value="">${c.locationName?escapeHtml(c.locationName):'Choose a location…'}</option>${locs.map(l=>`<option value="${escapeHtml(l.id)}">${escapeHtml(l.name)}</option>`).join('')}</select></div>
+      <div style="margin:8px 0;"><label class="text-2 small">Location whose stock to keep equal</label>${customSelect('cshLocation', c.locationId||'', locs.map(l=>({value:l.id,label:l.name})), c.locationName?escapeHtml(c.locationName):'Choose a location…', v=>cshSetLocation(v))}</div>
       ${c.lastError?`<div class="small" style="color:var(--error);">Last problem: ${escapeHtml(c.lastError)}</div>`:''}
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0;"><button class="btn btn-outline btn-sm" ${dis||!c.locationId?'disabled':''} onclick="cshImport()">Find my Shopify items</button>${s.syncAvailable?`<button class="btn btn-outline btn-sm" ${dis||!c.locationId?'disabled':''} onclick="cshSync()">Sync now</button>`:''}<button class="btn btn-outline btn-sm" ${dis} onclick="cshDisconnect()">Disconnect</button></div>
       ${s.syncAvailable?'':'<div class="text-2 small">Automatic sync is not switched on yet. You can connect and match items now.</div>'}
@@ -668,7 +682,7 @@ function creatorMoneyTab(){
   if(editing) cmLoadBanks();
   const payoutBox = editing ? `<div class="card" style="padding:14px;margin-bottom:12px;"><strong>Payout account</strong>
       <div class="text-2 small" style="margin:4px 0 8px;">Your name is verified with Paystack. Money is only ever sent to this account.</div>
-      <select id="cmBank" style="width:100%;margin-bottom:8px;"><option value="">${cm.banks?'Choose your bank…':'Loading banks…'}</option>${(cm.banks||[]).map(b=>`<option value="${escapeHtml(b.code)}">${escapeHtml(b.name)}</option>`).join('')}</select>
+      <div style="margin-bottom:8px;">${customSelect('cmBank', '', (cm.banks||[]).map(b=>({value:b.code,label:b.name})), cm.banks?'Choose your bank…':'Loading banks…')}</div>
       <input id="cmAcct" inputmode="numeric" maxlength="10" placeholder="10-digit account number" style="width:100%;margin-bottom:8px;">
       <div style="display:flex;gap:6px;"><button class="btn btn-primary" ${cm.busy?'disabled':''} onclick="cmSavePayout()">${cm.busy?'Verifying…':'Verify & save'}</button>${cm.payout?'<button class="btn btn-outline" onclick="cm.editPayout=false;render();">Cancel</button>':''}</div></div>`
     : `<div class="card" style="padding:14px;margin-bottom:12px;"><div style="display:flex;justify-content:space-between;"><strong>Payout account</strong><a href="#" onclick="event.preventDefault();cm.editPayout=true;render();" style="color:var(--accent);font-size:13px;">Change</a></div>
@@ -844,9 +858,7 @@ function screenCreatorForm(serverData){
       <div class="text-2 small" style="margin-bottom:10px;">Applying as <strong>${isBusiness?'Business':'Personal'} Creator</strong>. <a href="#" onclick="event.preventDefault();pickCreatorType(${isBusiness?`'personal'`:`'business'`})" style="color:var(--accent);">Switch to ${isBusiness?'Personal':'Business'}</a></div>
 
       <div class="form-field"><label>Category</label>
-        <select id="cf_category">
-          ${['apps','courses','templates','ebooks','software','services','physical','mixed'].map(c=>`<option value="${c}" ${f.publicFields.category===c?'selected':''}>${c[0].toUpperCase()+c.slice(1)}</option>`).join('')}
-        </select>
+        ${customSelect('cf_category', f.publicFields.category||'', ['apps','courses','templates','ebooks','software','services','physical','mixed'].map(c=>({value:c,label:c[0].toUpperCase()+c.slice(1)})), 'Choose…')}
       </div>
 
       <div class="form-field"><label>${isBusiness?'Business display name':'Display name'} <span class="text-2 small">(shown to buyers — never your legal name)</span></label>
@@ -854,8 +866,7 @@ function screenCreatorForm(serverData){
       </div>
 
       <div class="form-field"><label>Profile image</label>
-        <input type="file" accept="image/*" onchange="previewCreatorAvatar(this)">
-        ${f.profileImagePreview ? `<img src="${f.profileImagePreview}" style="width:72px;height:72px;border-radius:50%;object-fit:cover;margin-top:8px;">` : ''}
+        ${fileButton('cfAvatarInput', f.profileImagePreview?'Change picture':'Choose picture', 'image/*', 'previewCreatorAvatar(this)', f.profileImagePreview?`<img src="${f.profileImagePreview}" style="width:72px;height:72px;border-radius:50%;object-fit:cover;">`:'')}
       </div>
 
       ${isBusiness ? `
@@ -865,8 +876,7 @@ function screenCreatorForm(serverData){
       <div class="form-field"><label>WhatsApp / customer-care number</label><input id="cf_whatsapp" value="${escapeHtml(f.privateFields.whatsapp||'')}" placeholder="+234..."></div>
       <div class="form-field"><label>At least one social handle (one per line, full URL)</label><textarea id="cf_social" rows="2" placeholder="https://instagram.com/yourbusiness">${escapeHtml(f.socialHandlesText||'')}</textarea></div>
       <div class="form-field"><label>Business/identity document</label>
-        <input type="file" accept="image/jpeg,image/png,application/pdf" onchange="uploadCreatorDocument(this,'business_registration')">
-        ${(f.privateFields.documentIds||[]).length ? `<div class="text-2 small" style="margin-top:6px;">✅ ${f.privateFields.documentIds.length} document(s) uploaded</div>` : ''}
+        ${fileButton('cfDocInput', (f.privateFields.documentIds||[]).length?'Add another document':'Choose document', 'image/jpeg,image/png,application/pdf', "uploadCreatorDocument(this,'business_registration')", (f.privateFields.documentIds||[]).length ? `<div class="text-2 small">✅ ${f.privateFields.documentIds.length} document(s) uploaded</div>` : '')}
       </div>
       ` : `
       <div class="form-field"><label>Legal name <span class="text-2 small">(private — never shown publicly)</span></label><input id="cf_legalName" value="${escapeHtml(f.privateFields.legalName||'')}"></div>

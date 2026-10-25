@@ -1246,12 +1246,12 @@ function screenProfile(){
     ${identityCard}
     <div class="section">
       <div class="card" style="padding:4px 16px;">
-        <div class="list-row" style="cursor:pointer;" onclick="navigate('#wishlist')"><span class="left"><span class="ic">${icon('heart')}</span>My Wishlist</span><span>${icon('chevron')}</span></div>
         <div class="list-row" style="cursor:pointer;" onclick="navigate('#orders')"><span class="left"><span class="ic">${icon('package')}</span>Order History</span><span>${icon('chevron')}</span></div>
+        <div class="list-row" style="cursor:pointer;" onclick="navigate('#library')"><span class="left"><span class="ic">${icon('download')}</span>My Library</span><span>${icon('chevron')}</span></div>
+        <div class="list-row" style="cursor:pointer;" onclick="navigate('#wishlist')"><span class="left"><span class="ic">${icon('heart')}</span>My Wishlist</span><span>${icon('chevron')}</span></div>
         <div class="list-row" style="cursor:pointer;" onclick="navigate('#pickup')"><span class="left"><span class="ic">${icon('package')}</span>Pickup stations</span><span>${icon('chevron')}</span></div>
         <div class="list-row" style="cursor:pointer;" onclick="navigate('#settings')"><span class="left"><span class="ic">${icon('settings')}</span>Settings</span><span>${icon('chevron')}</span></div>
         <div class="list-row" style="cursor:pointer;" onclick="location.href='affiliate/index.html'"><span class="left"><span class="ic">${icon('target')}</span>Nova Affiliate Program</span><span>${icon('chevron')}</span></div>
-        <div class="list-row" style="cursor:pointer;" onclick="navigate('#library')"><span class="left"><span class="ic">${icon('download')}</span>My Library</span><span>${icon('chevron')}</span></div>
         <div class="list-row" style="cursor:pointer;" onclick="navigate('#creator')"><span class="left"><span class="ic">${icon('target')}</span>${escapeHtml(creatorRowLabel())}</span><span>${icon('chevron')}</span></div>
       </div>
     </div>

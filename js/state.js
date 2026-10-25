@@ -1462,7 +1462,7 @@ function rpForm(){
   return `<div class="card" style="padding:14px;margin:0 0 10px;border:1px solid var(--warn,#d4af37);">
     <div style="font-weight:700;margin-bottom:6px;">Report a problem: ${escapeHtml(rp.title)}</div>
     <div class="text-2 small" style="margin-bottom:8px;">Use this within 14 days of buying. The seller's earning for this order is put on hold until our team decides.</div>
-    <select class="input" onchange="rpField('reason',this.value)">${DISPUTE_REASONS.map(r=>`<option value="${r[0]}" ${rp.reason===r[0]?'selected':''}>${escapeHtml(r[1])}</option>`).join('')}</select>
+    ${customSelect('rpReason', rp.reason||'', DISPUTE_REASONS.map(r=>({value:r[0],label:r[1]})), 'Choose a reason…', v=>rpField('reason',v))}
     <textarea class="input" rows="4" maxlength="2000" placeholder="Tell us what went wrong…" style="margin-top:8px;" oninput="rpField('details',this.value)">${escapeHtml(rp.details)}</textarea>
     ${rp.err?`<div class="small" style="color:var(--error);margin-top:6px;">⚠️ ${escapeHtml(rp.err)}</div>`:''}
     <div style="display:flex;gap:8px;margin-top:8px;"><button class="btn btn-primary btn-sm" ${rp.busy?'disabled':''} onclick="rpSubmit()">${rp.busy?'Sending…':'Send report'}</button><button class="btn btn-outline btn-sm" onclick="rpCancel()">Cancel</button></div></div>`;
@@ -1683,7 +1683,7 @@ function screenPickup(){
     <div class="card" style="padding:16px;margin-top:14px;"><h3 style="font-size:15px;margin-bottom:6px;">Run a shop? Become a pickup station</h3>
       <div class="text-2 small" style="margin-bottom:8px;">Sign in first. Only staffed businesses with a real premises are accepted, never homes.</div>
       ${inp('name','Business name')}${inp('address','Street address')}${inp('city','City')}${inp('state','State')}${inp('openingHours','Opening hours','Mon-Sat 9am-6pm')}${inp('managerName','Manager name')}${inp('contactPhone','Contact phone')}
-      <div class="form-field"><label>Type of business</label><select class="input" onchange="psField('businessType',this.value)">${types.map(t=>`<option value="${t}" ${F.businessType===t?'selected':''}>${t.replace(/_/g,' ').toLowerCase()}</option>`).join('')}</select></div>
+      <div class="form-field"><label>Type of business</label>${customSelect('psBusinessType', F.businessType||'', types.map(t=>({value:t,label:t.replace(/_/g,' ').toLowerCase()})), 'Choose…', v=>psField('businessType',v))}</div>
       ${ps.err?`<div class="small" style="color:var(--error);">⚠️ ${escapeHtml(ps.err)}</div>`:''}${ps.info?`<div class="small" style="color:#2ee6a6;">✓ ${escapeHtml(ps.info)}</div>`:''}
       <button class="btn btn-primary" ${ps.busy?'disabled':''} onclick="psSubmit()">${ps.busy?'Sending…':'Send for review'}</button>
       ${(ps.mine||[]).map(m=>`<div class="text-2 small" style="margin-top:8px;">${escapeHtml(m.name)}: <b>${escapeHtml(m.state.replace(/_/g,' ').toLowerCase())}</b>${m.reviewNote?' · '+escapeHtml(m.reviewNote):''}</div>`).join('')}

@@ -178,7 +178,7 @@ function productVariantSelector(p){
   const variants=(p.variants||[]); if(!variants.length)return '';
   const selected=getSelectedProductVariant(p); if(!selected)return `<div class="variant-unavailable" role="status">No options are currently available. Please contact us for help.</div>`;
   const options=Array.isArray(p.options)?p.options:[];
-  if(!options.length)return `<div class="variant-choice-group" id="variantSelector-${escapeHtml(p.id)}"><label for="variantChoice-${escapeHtml(p.id)}">Choose an option</label><select id="variantChoice-${escapeHtml(p.id)}" onchange="selectProductVariant('${jsStr(p.id)}',this.value)">${variants.map(v=>`<option value="${escapeHtml(v.id)}" ${String(v.id)===String(selected.id)?'selected':''} ${isVariantPurchasable(v)?'':'disabled'}>${escapeHtml(v.title||v.name||v.sku||'Option')} · ${priceLabel({...p,variants:[],price:effectiveVariantPrice(p,v),salePrice:null})}${v.stock===0?' · Out of stock':''}</option>`).join('')}</select><div class="small text-2" id="pdVariantAvailability" aria-live="polite">${selected.stock===0?'Out of stock':selected.stock!=null?`${selected.stock} available`:'Available'}</div></div>`;
+  if(!options.length)return `<div class="variant-choice-group" id="variantSelector-${escapeHtml(p.id)}"><label>Choose an option</label>${customSelect('variantChoice-'+p.id, selected.id, variants.map(v=>({value:v.id,label:(v.title||v.name||v.sku||'Option')+' · '+priceLabel({...p,variants:[],price:effectiveVariantPrice(p,v),salePrice:null})+(v.stock===0?' · Out of stock':'')})), '', v=>selectProductVariant(p.id,v))}<div class="small text-2" id="pdVariantAvailability" aria-live="polite">${selected.stock===0?'Out of stock':selected.stock!=null?`${selected.stock} available`:'Available'}</div></div>`;
   return `<div class="variant-selector" id="variantSelector-${escapeHtml(p.id)}">${options.map(option=>`<fieldset class="variant-choice-group"><legend>${escapeHtml(option.name)}</legend><div class="variant-choice-list">${(option.values||[]).map(value=>{
     const active=String((selected.optionValues||{})[option.id])===String(value.id);
     const available=variants.some(variant=>isVariantPurchasable(variant)&&String((variant.optionValues||{})[option.id])===String(value.id)&&(p.options||[]).every(other=>other.id===option.id||String((variant.optionValues||{})[other.id])===String((selected.optionValues||{})[other.id])));
@@ -763,9 +763,14 @@ function navLinks(activeHash){
   }).join('');
 }
 function topNavLinks(activeHash){
+  // No "Profile" text link here on purpose — the profile avatar/user icon
+  // in the header's icon row (see shellHeader) already opens #profile, so
+  // a second link to the exact same page would just be clutter on desktop.
+  // Mobile's bottom nav (navLinks(), a separate list) keeps its own
+  // Profile tab since that icon row doesn't exist there.
   const items = [
     {href:'#home', label:'Home'},{href:'#products', label:'Products'},{href:'#service', label:'Service'},
-    {href:'#feed', label:'Feed'},{href:'#profile', label:'Profile'},{href:'#menu', label:'Menu'},
+    {href:'#feed', label:'Feed'},{href:'#menu', label:'Menu'},
   ];
   return items.map(it=>`<a class="${activeHash===it.href?'active':''}" href="${it.href}">${it.label}</a>`).join('');
 }
@@ -899,7 +904,7 @@ function shellHeader(){
     <div class="header-icons">
       <button class="icon-btn" onclick="toggleThemeBtn()" title="Toggle theme">${icon(appState.theme==='dark'?'moon':'sun')}</button>
       <a class="icon-btn" href="#wishlist" title="Wishlist">${icon('heart')}</a>
-      <a class="icon-btn" href="#profile" title="Profile">${icon('user')}</a>
+      <a class="icon-btn${appState.route==='#profile'?' active':''}" href="#profile" title="Profile">${icon('user')}</a>
     </div>
   </div>
   <div class="app-header">
