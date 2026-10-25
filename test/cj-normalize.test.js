@@ -17,7 +17,7 @@ test('normalizes the official CJ listV2 content[].productList[] response', () =>
   assert.equal(result.rawCount, 1);
   assert.deepEqual(result.products[0], {
     pid: 'pid-1', name: 'Wireless headphones', image: 'https://images.example/headphones.jpg',
-    sku: 'SPU-1', sellPrice: 12.5, variantCount: null, categoryId: 'cat-1',
+    sku: 'SPU-1', sellPrice: 12.5, priceText: '12.50', variantCount: null, categoryId: 'cat-1',
     categoryName: 'Audio', description: 'Bluetooth headphones', video: null,
     stock: 71, weight: null, listedNum: null, supplierName: 'CJ Dropshipping',
   });
@@ -41,4 +41,16 @@ test('flattens product groups without mistaking the group for a product', () => 
   assert.equal(result.rawCount, 2);
   assert.deepEqual(result.products.map(p => p.pid), ['a', 'b']);
   assert.deepEqual(result.products.map(p => p.name), ['A', 'B']);
+});
+
+test('reads CJ price ranges and alternate price fields instead of blanking them', () => {
+  const { products } = normalizeSearchPayload({ content: [{ productList: [
+    { id: 'a', nameEn: 'Range', sellPrice: '1.20 -- 3.50' },
+    { id: 'b', nameEn: 'Now only', sellPrice: null, nowPrice: '$4.5' },
+    { id: 'c', nameEn: 'No price' },
+  ] }] });
+  assert.equal(products[0].sellPrice, 1.2);
+  assert.equal(products[0].priceText, '1.20 -- 3.50');
+  assert.equal(products[1].sellPrice, 4.5);
+  assert.equal(products[2].sellPrice, null);
 });
