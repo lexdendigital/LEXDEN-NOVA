@@ -94,7 +94,20 @@ setInterval(function(){if(!document.hidden)fetch(b+'/health',{mode:'no-cors',cac
 <link rel="stylesheet" href="css/app.css">
 </head>
 <body>
-<div id="app"><div id="boot-splash" style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#080b1c;color:#9aa3c7;font:600 14px system-ui,sans-serif;letter-spacing:.08em">LEXDEN NOVA…</div></div>
+<script>
+// Set data-theme BEFORE first paint so the boot splash (and the app behind
+// it) matches the saved preference instead of always flashing dark — the
+// default is now light, so a light-mode visitor would otherwise see a dark
+// splash for a split second on every load.
+(function(){
+  try{
+    var raw = localStorage.getItem('ln_theme');
+    var theme = raw ? JSON.parse(raw) : 'light';
+    document.documentElement.setAttribute('data-theme', theme === 'dark' ? 'dark' : 'light');
+  }catch(e){ document.documentElement.setAttribute('data-theme', 'light'); }
+})();
+</script>
+<div id="app"><div id="boot-splash" style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--bg,#f5f6fa);color:var(--mut,#5a6378);font:600 14px system-ui,sans-serif;letter-spacing:.08em">LEXDEN NOVA…</div></div>
 <div id="toast-stack"></div>
 
 <script type="module" src="js/firebase.js"></script>

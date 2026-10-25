@@ -1636,7 +1636,7 @@ const appState = {
   novaOpen:false,
   adminAuthed:false,
   adminTab:'dashboard',
-  theme: lsGet(LS_KEYS.theme, 'dark'),
+  theme: lsGet(LS_KEYS.theme, 'light'),
   novaPendingOffer: null,
   // PHASE 3: PWA install/update banners — runtime-only, driven by
   // browser events (beforeinstallprompt / service worker updatefound).
