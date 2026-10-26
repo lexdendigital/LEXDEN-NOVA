@@ -45,13 +45,17 @@ module.exports = async (req, res) => {
   const errors = {};
 
   try {
-    // CJ's stock endpoint is per-variant — fan out, but keep it modest
-    // (max 20 above) so an import screen can't accidentally hammer CJ.
-    await Promise.all(vids.map(async vid => {
+    // CJ's stock endpoint is per-variant and a free CJ account allows one
+    // request per second (cjFetch queues them). Go one at a time and stop
+    // when the time budget is spent so the caller always gets an answer
+    // within its own 15s wait; variants not reached are reported, not hidden.
+    const BUDGET_MS = 11000;
+    for (const vid of vids) {
+      if (Date.now() - started > BUDGET_MS) { errors[vid] = 'Not checked yet — CJ allows about one lookup per second. Run it again for the rest.'; continue; }
       const r = await cjFetch('/product/stock/queryByVid', { query: { vid } });
       if (r.ok) stock[vid] = summarizeStockRows(r.data);
       else errors[vid] = r.message;
-    }));
+    }
 
     const tookMs = Date.now() - started;
     await writeSyncLog({

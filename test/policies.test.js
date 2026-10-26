@@ -52,7 +52,7 @@ test('markdown renderer escapes HTML', () => { assert.equal(mdToHtml('<script>x<
 test('acceptance records the SERVER version + content id, is append-only and idempotent', async () => {
   const db = fake.makeDb(); const registry = acceptApi.accept.length ? undefined : undefined;
   const a = await acceptApi.accept(db, { uid: 'u1', policyId: 'creator-terms', context: 'CREATOR_ACTIVATION' });
-  assert.equal(a.recorded, true); assert.equal(a.version, '1.0-draft');
+  assert.equal(a.recorded, true); assert.equal(a.version, '1.0');
   const b = await acceptApi.accept(db, { uid: 'u1', policyId: 'creator-terms', context: 'CREATOR_ACTIVATION' });
   assert.equal(b.recorded, false); assert.equal(Object.keys(db._store.policyAcceptances).length, 1);
   await assert.rejects(acceptApi.accept(db, { uid: 'u1', policyId: 'retention', context: 'CREATOR_ACTIVATION' }), (e) => e.code === 'UNKNOWN_POLICY');

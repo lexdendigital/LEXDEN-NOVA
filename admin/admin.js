@@ -1863,14 +1863,18 @@ function deleteFeedPost(id){
   pushSettingsToCloud();
   renderAdminTab();
 }
-async function cjApiGet(path){
+// ms: how long to wait. The server sleeps when idle and needs up to ~45s to
+// wake, so searches wait longer than the old fixed 15s (which gave up before
+// the server was even awake and looked like "nothing happened").
+async function cjApiGet(path, ms){
   const base = cjBackendUrl();
   if(!base) return {ok:false, error:'Set the CJ backend API base URL below first.'};
   try{
-    const r = await withTimeout(fetch(base+path), 15000, 'CJ backend did not respond in time.');
+    const r = await withTimeout(fetch(base+path), ms||45000, 'The server did not answer in time. Try once more in a minute.');
+    if(!r.ok) return {ok:false, error:`The server answered with an error [code ${r.status}].`};
     return await r.json();
   }catch(e){
-    return {ok:false, error:e.message||'Could not reach the CJ backend.'};
+    return {ok:false, error:(e.message||'Could not reach the server.') + (e.name==='TypeError' ? ' [network]' : '')};
   }
 }
 
@@ -1904,10 +1908,10 @@ function adminCJDropshipping(){
       <h3 style="font-size:14px;margin-bottom:8px;">Import Products</h3>
       <p class="text-2 small" style="margin-bottom:10px;">Search CJ's live catalog and import as a <strong>Draft</strong> physical product — nothing here goes live on the storefront until you review it in Products and set Status to Published (README §29/§30).</p>
       <div class="flex gap-8">
-        <input id="cj_searchKeyword" placeholder="Search CJ products (e.g. wireless earbuds)" onkeydown="if(event.key==='Enter'){event.preventDefault();cjRunImportSearch();}" style="flex:1;padding:9px 11px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);">
+        <input id="cj_searchKeyword" value="${escapeHtml(window.__cjSearchKeyword||'')}" placeholder="Search CJ products (e.g. wireless earbuds)" onkeydown="if(event.key==='Enter'){event.preventDefault();cjRunImportSearch();}" style="flex:1;padding:9px 11px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);">
         <button class="btn btn-primary btn-sm" onclick="cjRunImportSearch()">Search</button>
       </div>
-      <div id="cjImportResults" style="margin-top:12px;"></div>
+      <div id="cjImportResults" style="margin-top:12px;">${window.__cjSearchHtml||''}</div>
     </div>
 
     <div class="card" style="padding:16px;margin-bottom:16px;">
@@ -1982,26 +1986,36 @@ async function cjTestConnection(){
   if(statusEl) statusEl.textContent = `Last check: ${status} — ${new Date().toLocaleString()}`;
   toast(r.connected ? 'CJ connection OK' : `CJ connection: ${status}`, r.connected ? 'success' : 'error');
 }
+// Search results are remembered in window.__cjSearchHtml and written into
+// whatever #cjImportResults is on screen RIGHT NOW. The admin page can
+// re-render while CJ is still answering (it rebuilds the whole tab); the old
+// code held on to the element from before the wait, so the answer landed in
+// a box that was no longer on the page and the admin saw nothing at all.
+function cjShowSearch(html){
+  window.__cjSearchHtml = html;
+  const el = $('#cjImportResults'); if(el) el.innerHTML = html;
+}
 async function cjRunImportSearch(){
-  const keyword = ($('#cj_searchKeyword').value||'').trim();
-  const resultsEl = $('#cjImportResults');
-  resultsEl.innerHTML = '<p class="text-2 small">Searching CJ…</p>';
+  const input = $('#cj_searchKeyword');
+  const keyword = ((input && input.value)||'').trim();
+  window.__cjSearchKeyword = keyword;
+  cjShowSearch('<p class="text-2 small">Searching CJ… (the first search after a quiet spell can take up to 30 seconds while the server wakes up)</p>');
   const r = await cjApiGet(`/cj-products?mode=search&keyword=${encodeURIComponent(keyword)}&pageSize=20`);
   if(!r.ok){
     const disabled = /api access has been disabled|reactivate/i.test(String(r.error||''));
-    resultsEl.innerHTML = `<p class="text-2 small" style="color:var(--error);">${escapeHtml(r.error||'Search failed.')}</p>${disabled?'<p class="text-2 small">CJ has switched off API access for this account. <a href="https://www.cjdropshipping.com/my.html#/authorize/APIStores" target="_blank" rel="noopener" style="color:var(--accent);">Open CJ and reactivate it</a>, then search again.</p>':''}`;
+    cjShowSearch(`<p class="text-2 small" style="color:var(--error);">${escapeHtml(r.error||'Search failed.')}</p>${disabled?'<p class="text-2 small">CJ has switched off API access for this account. <a href="https://www.cjdropshipping.com/my.html#/authorize/APIStores" target="_blank" rel="noopener" style="color:var(--accent);">Open CJ and reactivate it</a>, then search again.</p>':''}`);
     return;
   }
-  if(!r.products || !r.products.length){ resultsEl.innerHTML = `<p class="text-2 small">CJ returned no products for "${escapeHtml(keyword)}". Try a shorter or more general English keyword (for example "earbuds" instead of "wireless bluetooth earbuds 2024").</p>`; return; }
+  if(!r.products || !r.products.length){ cjShowSearch(`<p class="text-2 small">CJ returned no products for "${escapeHtml(keyword)}". Try a shorter or more general English keyword (for example "earbuds" instead of "wireless bluetooth earbuds 2024").</p>`); return; }
   window.__cjSearchResults = r.products;
-  resultsEl.innerHTML = `<div class="admin-grid">${r.products.map(p=>`
+  cjShowSearch(`<div class="admin-grid">${r.products.map(p=>`
     <div class="card" style="padding:10px;">
       ${p.image?`<img src="${escapeHtml(p.image)}" style="width:100%;height:110px;object-fit:cover;border-radius:8px;margin-bottom:6px;">`:''}
       <p class="small" style="font-weight:700;">${escapeHtml((p.name||'').slice(0,80))}</p>
       <p class="small text-2">${p.priceText?escapeHtml(String(p.priceText).replace(/^\$?/,'$')):(p.sellPrice!=null?'$'+Number(p.sellPrice).toFixed(2):'Price on import')}${p.stock!=null?' · '+Number(p.stock).toLocaleString()+' in stock':''}</p>
       ${p.categoryName?`<p class="small text-2">${escapeHtml(p.categoryName)}</p>`:''}
       <button class="btn btn-primary btn-sm" style="width:100%;margin-top:6px;" onclick="importCjProduct('${escapeHtml(p.pid)}')">Import</button>
-    </div>`).join('')}</div>`;
+    </div>`).join('')}</div>`);
 }
 async function importCjProduct(pid){
   const already = (DB.products||[]).find(x=>x.physical && x.physical.cj && String(x.physical.cj.productId)===String(pid));
@@ -2110,11 +2124,19 @@ async function cjTestProductMapping(productId){
 async function cjRefreshStock(productId){
   const p = findProduct(productId);
   const vid = p&&p.physical&&p.physical.cj&&p.physical.cj.variantId;
-  if(!vid){ toast('Enter a CJ variant ID first.','error'); return; }
-  const r = await cjApiGet(`/cj-stock?vid=${encodeURIComponent(vid)}&sync=1&productId=${encodeURIComponent(productId)}`);
+  // Check the main CJ variant plus every other variant that has its own CJ id
+  // (CJ gives one stock answer per variant, about one per second).
+  const vids = [...new Set([vid, ...((p&&p.variants)||[]).map(v=>v&&v.cjVariantId)].filter(Boolean))].slice(0,8);
+  if(!vids.length){ toast('Enter a CJ variant ID first.','error'); return; }
+  toast(`Checking ${vids.length} variant${vids.length>1?'s':''} with CJ…`,'info');
+  const r = await cjApiGet(`/cj-stock?vid=${encodeURIComponent(vids.join(','))}&sync=1&productId=${encodeURIComponent(productId)}`, 30000);
   if(!r.ok){ toast(r.error||'Stock check failed.','error'); return; }
-  const s = r.stock && r.stock[vid];
-  toast(s ? `Stock: ${s.inStock?`${s.total} in stock`:'Out of stock'}` : 'No stock data returned.', s&&s.inStock?'success':'error');
+  const main = vids[0];
+  const s = r.stock && r.stock[main];
+  const failed = Object.keys(r.errors||{}).length;
+  if(!s && failed){ toast(`CJ said: ${Object.values(r.errors)[0]}`,'error'); return; }
+  const total = Object.values(r.stock||{}).reduce((n,x)=>n+(x.total||0),0);
+  toast(s ? `Stock: ${s.inStock?`${total} in stock across ${Object.keys(r.stock).length} variant(s)`:'Out of stock'}${failed?` (${failed} not checked)`:''}` : 'No stock data returned.', s&&s.inStock?'success':'error');
   // The backend already wrote physical.stockStatus/cj.lastSyncedAt to
   // Firestore (sync=1 above) — mirror that into this session's in-memory
   // DB.products so the panel reflects it immediately without a full reload.

@@ -102,6 +102,21 @@ const FieldValue = admin.firestore.FieldValue;
 // ---- Simple in-memory pacing for CJ's ~1 req/s auth limit. Best-effort
 // only (resets on cold start / doesn't coordinate across instances) — CJ's
 // own 429 handling below is the real backstop.
+// ---- General pacing for every CJ data call (free tier = 1 request/second).
+// A shared promise chain lets calls queue in order; each waits until at
+// least CJ_MIN_GAP_MS has passed since the previous one left.
+const CJ_MIN_GAP_MS = Number(process.env.CJ_MIN_GAP_MS) || 1100;
+let _cjGate = Promise.resolve();
+let _lastCjCallAt = 0;
+function paceCall() {
+  const turn = _cjGate.then(async () => {
+    const wait = _lastCjCallAt + CJ_MIN_GAP_MS - Date.now();
+    if (wait > 0) await new Promise(r => setTimeout(r, wait));
+    _lastCjCallAt = Date.now();
+  });
+  _cjGate = turn.catch(() => {});
+  return turn;
+}
 let lastAuthCallAt = 0;
 async function paceAuthCall() {
   const minGapMs = 1100;
@@ -215,7 +230,7 @@ async function getValidToken({ forceRefresh = false } = {}) {
 // rejection (CJ uses HTTP 200 + result:false + a 1004xx-ish code for an
 // expired/invalid token rather than a real 401, so this checks the body,
 // not just the status).
-async function cjFetch(path, { method = 'GET', query, body, timeoutMs = 12000, _retried = false } = {}) {
+async function cjFetch(path, { method = 'GET', query, body, timeoutMs = 12000, _retried = false, _rlRetried = false } = {}) {
   let token;
   try {
     token = await getValidToken();
@@ -228,6 +243,12 @@ async function cjFetch(path, { method = 'GET', query, body, timeoutMs = 12000, _
     const qs = buildCjQuery(query);
     if (qs) url += `?${qs}`;
   }
+
+  // A free CJ account allows 1 request per second. Every data call from
+  // every route takes a turn here, so a stock lookup for 5 variants (or a
+  // search plus an import running together) queues up instead of firing at
+  // once and getting "rate limit reached" for everything after the first.
+  await paceCall();
 
   let res, json;
   try {
@@ -244,7 +265,14 @@ async function cjFetch(path, { method = 'GET', query, body, timeoutMs = 12000, _
     return { ok: false, code: e.name === 'AbortError' ? 'TIMEOUT' : 'NETWORK_ERROR', message: e.message };
   }
 
-  if (res.status === 429) {
+  // CJ reports "too many requests" as HTTP 429 OR as a normal 200 with an
+  // error message, so check both. Wait out the window and try once more.
+  const rateLimited = res.status === 429 || (json && json.result === false && /too many requests|qps|rate limit/i.test(String(json.message || '')));
+  if (rateLimited) {
+    if (!_rlRetried) {
+      await new Promise(r => setTimeout(r, 1600));
+      return cjFetch(path, { method, query, body, timeoutMs, _retried, _rlRetried: true });
+    }
     return { ok: false, code: 'RATE_LIMITED', message: 'CJ API rate limit reached — try again shortly.' };
   }
 
@@ -326,7 +354,7 @@ async function saveProductsDoc(list) {
 
 module.exports = {
   db, FieldValue, initAdmin,
-  cjFetch, getValidToken,
+  cjFetch, getValidToken, paceCall,
   writeSyncLog, redact,
   verifyCjWebhookSignature,
   corsHeaders, setCors, isAllowedOrigin,
