@@ -34,7 +34,7 @@ function isPublicCatalogProduct(product) {
   return !!product && product.status === 'published' && product.active !== false;
 }
 function isIndexableCatalogProduct(product) {
-  if (!isPublicCatalogProduct(product)) return false;
+  if (!isPublicCatalogProduct(product) || product.pricingReviewRequired === true) return false;
   if (!String(product.name || '').trim() || plainText(product.description).length < 40 || !httpsUrl(product.image)) return false;
   if (effectiveCatalogPrice(product) === null) return false;
   if (String(product.productType || '').toUpperCase() === 'PHYSICAL'
@@ -85,12 +85,13 @@ function buildProductPage({ id, product, settings, listing, baseUrl = API_BASE }
   const indexable = listing
     ? !!(listing.title && details.length >= 40 && realImage && validPrice)
     : (isIndexableCatalogProduct(product) && !typeConflict);
+  const productType = String(product.productType || '').toUpperCase();
   const stock = listing
     ? (listing.inStock ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock')
-    : (String(product.productType || '').toUpperCase() === 'PHYSICAL'
+    : (productType === 'PHYSICAL'
       ? (product.physical && product.physical.stockStatus === 'in_stock' ? 'https://schema.org/InStock'
         : product.physical && product.physical.stockStatus === 'out_of_stock' ? 'https://schema.org/OutOfStock' : null)
-      : 'https://schema.org/InStock');
+      : productType === 'DIGITAL' ? 'https://schema.org/InStock' : null);
 
   let schema = null;
   if (indexable && !external && !suspicious && validPrice && stock) {
