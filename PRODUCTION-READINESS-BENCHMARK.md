@@ -2,6 +2,16 @@
 
 **Audit basis:** source repository branch `production-hardening-agent-discovery-2026-10-26`, compared to deployed base commit `39c7000231192e9ceb37dff0fea80c3ad433b312`, plus current official platform documentation reviewed on 26 October 2026.
 
+## Validation record — review branch
+
+The branch-only dependency-remediation run completed successfully against the reviewed source and updated dependency tree:
+- Regression tests: **468 passed, 0 failed**
+- JavaScript syntax scan: **passed**
+- Production dependency audit: `npm audit --omit=dev --audit-level=high` **passed**
+- Patched dependency set includes `firebase-admin@13.10.0`, `@modelcontextprotocol/server@2.4.0`, `zod@4.6.7`, `@grpc/grpc-js@1.14.6`, and `body-parser@1.20.9`
+
+This verifies the code/dependency tree in the review branch, not a production deployment. The main branch and live catalog remain unchanged. Separate end-to-end checks and resolution of the stale local-currency conversion data remain release gates.
+
 ## Executive finding
 
 The repository has a substantial feature surface: storefront, Paystack verification, Firestore catalogue, Creator marketplace, affiliate system, supplier integration, MCP administration, fulfillment, policy acceptance, notification and lifecycle automation. The main scaling constraint is not the number of features. It is inconsistent enforcement of catalog completeness, price freshness, public product rendering, origin policy, and seller/fulfillment truth across the different systems.
