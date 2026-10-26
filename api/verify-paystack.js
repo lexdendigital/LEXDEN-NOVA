@@ -299,6 +299,18 @@ async function attributeAffiliateCommission(db, { reference, buyerUid, productId
         ? db.collection('users').doc(buyerUid).set({ generalAffiliateConsumed: true }, { merge: true })
         : Promise.resolve(),
     ]);
+    if (affSnap.data().email) {
+      queueEmailBackground({
+        templateKey: 'affiliate_commission',
+        to: { email: affSnap.data().email, name: displayName },
+        params: {
+          FIRSTNAME: displayName.split(' ')[0] || undefined,
+          product_name: productName || 'a LEXDEN NOVA product',
+          commission: String(currency || '') + ' ' + commissionAmount.toLocaleString('en-NG'),
+          affiliate_url: 'https://lexdendigital.github.io/LEXDEN-NOVA/affiliate/'
+        }
+      });
+    }
   } catch (e) {
     console.error('attributeAffiliateCommission failed (non-fatal):', e.message);
   }
