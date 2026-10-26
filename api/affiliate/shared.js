@@ -1,3 +1,4 @@
+const { applyCors } = require('../cors');
 // /api/affiliate/shared.js
 //
 // Shared helpers for every affiliate program backend file
@@ -95,9 +96,7 @@ async function requireAdminAuth(req) {
 }
 
 function setCors(res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  applyCors(res.req, res, { methods: 'GET, POST, OPTIONS', headers: 'Content-Type, Authorization' });
 }
 
 // Adds `n` WITHDRAWAL-ELIGIBLE days to `from`, skipping Sundays — this is

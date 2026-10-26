@@ -147,7 +147,7 @@ async function getExpectedAmount(productId, currency, variantId, opts = {}) {
   ]);
   const list = productsDoc && Array.isArray(productsDoc.list) ? productsDoc.list : null;
   const product = list && list.find(p => p && String(p.id) === String(productId));
-  if (!product) return null;
+  if (!product || product.status !== 'published' || product.active === false) return null;
   if (product.free && !Array.isArray(product.variants)) return { price: 0, variant: null, variantId: null, variantName: null, product };
   const selection = resolveProductSelection(product, variantId, currency, settingsDoc);
   return selection ? { ...selection, product } : null;
@@ -393,14 +393,14 @@ async function verifyWithPaystack(reference, keys) {
   return { ok: false, error: lastMessage || 'Paystack could not find or verify this transaction.' };
 }
 
+const { applyCors } = require('./cors');
+
 module.exports = async function handler(req, res) {
   // CORS: index.html is hosted on GitHub Pages and may change host again
   // later, so this allows any origin to POST — the security boundary here
   // is the secret key + Paystack verification, never the origin header,
   // so this is safe to leave open.
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  applyCors(req, res, { methods: 'POST, OPTIONS', headers: 'Content-Type, Authorization, Idempotency-Key' });
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   if (req.method !== 'POST') {
@@ -582,7 +582,8 @@ module.exports = async function handler(req, res) {
     }
   }
   if (expectedAmount !== null && expectedAmount !== undefined) {
-    const tolerance = Math.max(1, Math.ceil(expectedAmount * 0.02)); // 2%, min 1 unit
+    const minorUnit = String(paidCurrency).toUpperCase() === 'USD' ? 0.01 : 1;
+    const tolerance = Math.max(minorUnit, Math.ceil((expectedAmount * 0.02) / minorUnit) * minorUnit); // keep stale-price tolerance, but don't round USD up to a whole dollar
     // (legacy admin-curated catalogue keeps its existing tolerance; creator products were exact-checked above)
     let blocked = selection.creator ? false : amountMajor < expectedAmount - tolerance;
     if (blocked && !selection.creator) {
@@ -591,7 +592,7 @@ module.exports = async function handler(req, res) {
       const fresh = await getExpectedAmount(productId, paidCurrency, variantId, { fresh: true });
       if (fresh && fresh.price !== null && fresh.price !== undefined) {
         selection = fresh;
-        const t2 = Math.max(1, Math.ceil(fresh.price * 0.02));
+        const t2 = Math.max(minorUnit, Math.ceil((fresh.price * 0.02) / minorUnit) * minorUnit);
         blocked = amountMajor < fresh.price - t2;
       }
     }

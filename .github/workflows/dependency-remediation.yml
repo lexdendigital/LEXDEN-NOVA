@@ -1,0 +1,59 @@
+name: dependency-remediation
+on:
+  push:
+    branches:
+      - production-hardening-agent-discovery-2026-10-26
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: dependency-remediation-review-branch
+  cancel-in-progress: false
+jobs:
+  remediate:
+    if: github.ref == 'refs/heads/production-hardening-agent-discovery-2026-10-26' && (github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[run-dependency-remediation]'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout review branch without persistent credentials
+        uses: actions/checkout@v4
+        with:
+          ref: production-hardening-agent-discovery-2026-10-26
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install current locked dependencies
+        run: npm ci
+      - name: Apply non-breaking advisory fixes
+        run: npm audit fix || echo 'Some remaining advisories require the explicit SDK upgrades below; the final audit remains blocking.'
+      - name: Upgrade affected major-pinned SDKs to patched releases
+        run: npm install --save-exact firebase-admin@13.10.0 @modelcontextprotocol/server@2.4.0
+      - name: Run all regression tests before committing
+        run: npm test
+      - name: Parse-check JavaScript
+        shell: bash
+        run: |
+          set -euo pipefail
+          find . -type f -name '*.js' -not -path './node_modules/*' -print0 | xargs -0 -n1 node --check
+      - name: Require no high-severity production dependency findings
+        run: npm audit --omit=dev --audit-level=high
+      - name: Commit patched lockfile only after all gates pass
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git add package.json package-lock.json
+          if git diff --cached --quiet; then
+            echo "No dependency changes to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Remediate audited production dependencies"
+          AUTH_HEADER="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          git -c "http.extraheader=AUTHORIZATION: basic $AUTH_HEADER" push origin "HEAD:refs/heads/production-hardening-agent-discovery-2026-10-26"

@@ -1,5 +1,13 @@
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: GPTBot
+Disallow: /
+
 User-agent: *
 Allow: /
 
 Sitemap: https://lexdendigital.github.io/LEXDEN-NOVA/sitemap.xml
-Sitemap: https://lexden-nova.onrender.com/sitemap.xml

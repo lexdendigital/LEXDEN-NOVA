@@ -1,3 +1,4 @@
+const { applyCors } = require('./cors');
 // Sends a 6-digit one-time email-verification code through Brevo, for
 // LEXDEN NOVA's sign-up wizard (verify email BEFORE the account exists).
 //
@@ -42,12 +43,7 @@ function hashCode(code, email) {
 }
 
 function setCors(req, res) {
-  const origin = req.headers.origin;
-  if (origin && ALLOWED_ORIGINS.includes(origin)) {
-    res.setHeader("Access-Control-Allow-Origin", origin);
-  }
-  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  applyCors(req, res, { methods: 'POST, OPTIONS', headers: 'Content-Type' });
 }
 
 function initAdmin() {

@@ -1,3 +1,4 @@
+const { applyCors } = require('./cors');
 // Flips Firebase Auth's emailVerified flag to true on a brand-new account,
 // using the signed token verify-otp.js issued when the shopper proved
 // ownership of the address BEFORE the account existed. Called once, right
@@ -17,10 +18,7 @@ const ALLOWED_ORIGINS = [
 ];
 
 function setCors(req, res) {
-  const origin = req.headers.origin;
-  if (origin && ALLOWED_ORIGINS.includes(origin)) res.setHeader("Access-Control-Allow-Origin", origin);
-  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  applyCors(req, res, { methods: 'POST, OPTIONS', headers: 'Content-Type' });
 }
 
 function initAdmin() {

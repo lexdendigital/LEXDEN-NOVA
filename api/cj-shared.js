@@ -48,34 +48,18 @@ const { buildCjQuery } = require('./cj-query');
 
 const CJ_BASE = 'https://developers.cjdropshipping.com/api2.0/v1';
 
-const ALLOWED_ORIGINS = [
-  'https://lexdendigital.github.io',
-  'http://localhost:3000',
-  'http://127.0.0.1:3000',
-];
-function isAllowedOrigin(origin) {
-  if (!origin) return false;
-  if (ALLOWED_ORIGINS.includes(origin)) return true;
-  // Render preview/production hostnames for this same service.
-  try {
-    const host = new URL(origin).hostname;
-    return host.endsWith('.onrender.com');
-  } catch {
-    return false;
-  }
-}
+const { applyCors, isAllowedOrigin } = require('./cors');
 function corsHeaders(origin) {
-  const allow = isAllowedOrigin(origin) ? origin : ALLOWED_ORIGINS[0];
-  return {
-    'Access-Control-Allow-Origin': allow,
+  const headers = {
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, X-Admin-Token',
     'Vary': 'Origin',
   };
+  if (isAllowedOrigin(origin)) headers['Access-Control-Allow-Origin'] = origin;
+  return headers;
 }
 function setCors(req, res) {
-  const h = corsHeaders(req.headers.origin);
-  for (const k in h) res.setHeader(k, h[k]);
+  applyCors(req, res, { methods: 'GET, POST, OPTIONS', headers: 'Content-Type, X-Admin-Token' });
 }
 
 // ---- Firebase Admin (singleton per warm instance) ----

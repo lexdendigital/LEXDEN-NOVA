@@ -14,6 +14,8 @@
 const express = require('express');
 const cors = require('cors');
 const { mountMcp, recordServerError } = require('./mcp');
+const { isAllowedOrigin } = require('./api/cors');
+const { createRateLimiter } = require('./api/rate-limit');
 
 const app = express();
 
@@ -23,15 +25,30 @@ const app = express();
 // lifetime. Wired up before anything else so it catches startup-time
 // failures too.
 process.on('unhandledRejection', (reason) => {
-  console.error('Unhandled rejection:', reason);
-  recordServerError({ type: 'unhandledRejection', message: (reason && reason.message) || String(reason), stack: reason && reason.stack });
+  console.error('Unhandled rejection; process will exit for supervisor restart:', reason);
+  try { recordServerError({ type: 'unhandledRejection', message: (reason && reason.message) || String(reason), stack: reason && reason.stack }); } catch (_) {}
+  process.exit(1);
 });
 process.on('uncaughtException', (err) => {
-  console.error('Uncaught exception:', err);
-  recordServerError({ type: 'uncaughtException', message: err.message, stack: err.stack });
+  console.error('Uncaught exception; process will exit for supervisor restart:', err);
+  try { recordServerError({ type: 'uncaughtException', message: err.message, stack: err.stack }); } catch (_) {}
+  process.exit(1);
 });
 app.disable('x-powered-by');
 app.set('trust proxy', 1); // Render sits behind a proxy/load balancer
+
+// Small, broadly compatible security-header baseline. CSP is intentionally
+// deferred to report-only rollout because the legacy storefront still has
+// inline event handlers that must be migrated first.
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  if (req.secure || req.headers['x-forwarded-proto'] === 'https') {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
+  next();
+});
 
 // ---- CORS ----
 // Most handlers already set their own Access-Control-* headers per
@@ -42,25 +59,14 @@ app.set('trust proxy', 1); // Render sits behind a proxy/load balancer
 // its own headers) is covered too, and handles OPTIONS preflight
 // consistently everywhere. A route's own res.setHeader() call always
 // overrides this if both run.
-const DEFAULT_ORIGINS = ['https://lexdendigital.github.io'];
-const envOrigins = (process.env.CORS_ALLOWED_ORIGINS || '')
-  .split(',').map(s => s.trim()).filter(Boolean);
-const ALLOWED_ORIGINS = envOrigins.length ? envOrigins : DEFAULT_ORIGINS;
-
 app.use(cors({
   origin(origin, cb) {
-    if (!origin) return cb(null, true); // curl, health checks, server-to-server (CJ/Paystack webhooks)
-    if (ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
-    try {
-      const host = new URL(origin).hostname;
-      // Any GitHub Pages site and this Render service's own domain (handy
-      // for testing endpoints directly from the browser).
-      if (host.endsWith('.github.io') || host.endsWith('.onrender.com')) return cb(null, true);
-      if (host === 'localhost' || host === '127.0.0.1') return cb(null, true);
-    } catch { /* malformed Origin header — fall through to reject */ }
-    cb(null, false);
+    if (!origin) return cb(null, true); // non-browser webhooks, health checks, CLI callers
+    return cb(null, isAllowedOrigin(origin));
   },
   credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Admin-Token', 'X-Firebase-AppCheck', 'Idempotency-Key', 'X-Request-Id'],
 }));
 
 // ---- Body parsing ----
@@ -73,7 +79,7 @@ app.use(cors({
 // README's recommended server.js).
 app.use((req, res, next) => {
   if (req.path === '/api/cj-webhook' || req.path === '/api/paystack-webhook') return next();
-  express.json({ limit: '10mb' })(req, res, next);
+  express.json({ limit: '2mb' })(req, res, next);
 });
 // FIX (MCP): OAuth clients (Claude included) POST /token as
 // application/x-www-form-urlencoded per RFC 6749 — express.json() alone
@@ -137,14 +143,29 @@ const ENDPOINTS = [
   'secure-access',
 ];
 
+const endpointRateLimiters = {
+  'nova-ai': createRateLimiter({ name: 'nova-ai', windowMs: 60_000, max: 30 }),
+  'send-otp': createRateLimiter({ name: 'send-otp', windowMs: 15 * 60_000, max: 5 }),
+  'verify-otp': createRateLimiter({ name: 'verify-otp', windowMs: 15 * 60_000, max: 12 }),
+  'send-email': createRateLimiter({ name: 'send-email', windowMs: 15 * 60_000, max: 15 }),
+  'send-auth-email': createRateLimiter({ name: 'send-auth-email', windowMs: 15 * 60_000, max: 10 }),
+  'confirm-email-verified': createRateLimiter({ name: 'confirm-email-verified', windowMs: 15 * 60_000, max: 12 }),
+  'verify-paystack': createRateLimiter({ name: 'verify-paystack', windowMs: 60_000, max: 60 }),
+};
 for (const name of ENDPOINTS) {
-  app.all(`/api/${name}`, safeHandler(require(`./api/${name}`)));
+  const route = safeHandler(require(`./api/${name}`));
+  const limiter = endpointRateLimiters[name];
+  app.all(`/api/${name}`, ...(limiter ? [limiter, route] : [route]));
 }
 
 // ---- Live sitemap + robots (real catalog only; see api/sitemap.js) ----
 const sitemapHandler = require('./api/sitemap');
 app.get(['/sitemap.xml', '/api/sitemap'], safeHandler(sitemapHandler));
 app.get('/robots.txt', sitemapHandler.robots);
+const productPageHandler = require('./api/product-page');
+app.get('/product/:id', safeHandler(productPageHandler));
+const agentFeedHandler = require('./api/agent-feed');
+app.get(['/feeds/agent-products.jsonl', '/feeds/agent-products.csv', '/feeds/agent-products-status.json'], safeHandler(agentFeedHandler));
 
 // ---- Affiliate program (added for the affiliate mega-update) — files
 // live under api/affiliate/ (its own directory, as requested) but keep
@@ -164,8 +185,15 @@ const AFFILIATE_ENDPOINTS = {
   'affiliate-signup': './api/affiliate/signup',
   'process-abandon-emails': './api/affiliate/abandon-emails',
 };
+const affiliateRateLimiters = {
+  'affiliate-ai': createRateLimiter({ name: 'affiliate-ai', windowMs: 60_000, max: 25 }),
+  'affiliate-diagnose': createRateLimiter({ name: 'affiliate-diagnose', windowMs: 60_000, max: 15 }),
+  'affiliate-signup': createRateLimiter({ name: 'affiliate-signup', windowMs: 15 * 60_000, max: 10 }),
+};
 for (const [name, path] of Object.entries(AFFILIATE_ENDPOINTS)) {
-  app.all(`/api/${name}`, require(path));
+  const route = safeHandler(require(path));
+  const limiter = affiliateRateLimiters[name];
+  app.all(`/api/${name}`, ...(limiter ? [limiter, route] : [route]));
 }
 
 // ---- LEXDEN NOVA CREATOR (Stage A: data model + auth + state machine) ----
@@ -214,8 +242,15 @@ const CREATOR_ENDPOINTS = [
   'creator-admin-refunds', 'creator-inventory', 'creator-checkout', 'creator-admin-exceptions', 'delivery-proof', 'policy-accept', 'policy-internal', 'creator-earnings',
   'creator-admin-funding', 'pickup-stations', 'creator-updates', 'creator-channel-shopify',
 ];
+const creatorRateLimiters = {
+  'creator-ai': createRateLimiter({ name: 'creator-ai', windowMs: 60_000, max: 25 }),
+  'creator-application': createRateLimiter({ name: 'creator-application', windowMs: 15 * 60_000, max: 8 }),
+  'creator-documents': createRateLimiter({ name: 'creator-documents', windowMs: 15 * 60_000, max: 12 }),
+};
 for (const name of CREATOR_ENDPOINTS) {
-  app.all(`/api/${name}`, require(`./api/${name}`));
+  const route = safeHandler(require(`./api/${name}`));
+  const limiter = creatorRateLimiters[name];
+  app.all(`/api/${name}`, ...(limiter ? [limiter, route] : [route]));
 }
 
 // ---- Link-preview routes ----
@@ -229,10 +264,8 @@ app.get('/feed/:id', (req, res) => {
   req.query.id = req.params.id;
   return feedHandler(req, res);
 });
-app.get('/product/:id', (req, res) => {
-  req.query.id = req.params.id;
-  return productHandler(req, res);
-});
+// Product requests are served by api/product-page.js above. The legacy
+// /api/product endpoint remains available for existing in-app preview callers.
 
 // ---- Affiliate link redirects (/go/:ref and /go/:ref/:pid) ----
 // This is what makes click counts *accurate* (requirement #1) — logging

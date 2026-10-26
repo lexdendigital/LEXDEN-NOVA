@@ -41,11 +41,11 @@ PER-LINK BREAKDOWN:
 ${linkLines || '(no link activity yet)'}`;
 }
 
+const { applyCors } = require('../cors');
+
 module.exports = async function handler(req, res) {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  applyCors(req, res, { methods: 'GET, POST, OPTIONS', headers: 'Content-Type, Authorization' });
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   if (req.method !== 'POST') {
