@@ -11,6 +11,7 @@
 const { getDb, FieldValue, requireAffiliateAuth, setCors, addNonSundayDays } = require('./shared');
 const cfg = require('../core/config');
 const M = require('../core/money');
+const { queueEmailBackground } = require('../email-shared');
 
 // FEE: the approved AFFILIATE withdrawal fee (5% of the requested GROSS amount). It is
 // computed server-side in integer kobo, shown to the affiliate BEFORE they submit
@@ -121,6 +122,16 @@ module.exports = async (req, res) => {
       return { id: wdRef.id, amountRequested: amount, amountPayable, feeAmount, feePct: p.feePct };
     });
 
+    queueEmailBackground({
+      templateKey: 'affiliate_withdrawal_update',
+      to: { email: decoded.email },
+      params: {
+        status: 'pending',
+        amount_requested: '₦' + Number(result.amountRequested || 0).toLocaleString('en-NG'),
+        amount_payable: '₦' + Number(result.amountPayable || 0).toLocaleString('en-NG'),
+        affiliate_url: 'https://lexdendigital.github.io/LEXDEN-NOVA/affiliate/'
+      }
+    });
     return res.status(200).json({ ok: true, ...result });
   } catch (e) {
     console.error('affiliate-withdraw failed:', e.message);
