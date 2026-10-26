@@ -65,6 +65,10 @@ test('untrusted product title markup is stripped before rendering', () => {
 
 test('stale foreign-exchange rates never produce a converted storefront price', () => {
   const stale = { content: { displayCurrency: 'NGN', exchangeRates: { NGN: 1330 }, ratesUpdatedAt: '2026-09-01T00:00:00Z' } };
-  assert.equal(priceInfo(makeProduct(), stale), null);
+  const fallback = priceInfo(makeProduct(), stale);
+  assert.equal(fallback.currency, 'USD');
+  assert.equal(fallback.amount, 6.61);
+  assert.equal(fallback.localConversionPending, true);
+  assert.match(fallback.label, /local conversion pending/);
   assert.equal(priceInfo(makeProduct(), settings).currency, 'USD');
 });
