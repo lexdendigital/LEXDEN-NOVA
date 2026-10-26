@@ -32,7 +32,7 @@ jobs:
       - name: Apply non-breaking advisory fixes
         run: npm audit fix || echo 'Some remaining advisories require the explicit SDK upgrades below; the final audit remains blocking.'
       - name: Upgrade affected major-pinned SDKs to patched releases
-        run: npm install --save-exact firebase-admin@13.10.0 @modelcontextprotocol/server@2.4.0 @modelcontextprotocol/node@2.4.0
+        run: npm install --save-exact firebase-admin@13.10.0 @modelcontextprotocol/server@2.4.0
       - name: Run all regression tests before committing
         run: npm test
       - name: Parse-check JavaScript
