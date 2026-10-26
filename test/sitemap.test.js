@@ -6,7 +6,7 @@ const { buildSitemapXml } = require('../api/sitemap');
 const product = (id, overrides = {}) => ({
   id, name: 'LEXDEN Professional Design Course', status: 'published', active: true,
   productType: 'DIGITAL', category: 'courses', price: 12, salePrice: 9,
-  image: 'https://cdn.example.test/course.jpg',
+  image: 'https://cdn.example.test/course.jpg', seller: 'LEXDEN ACADEMY',
   description: 'A real course with complete details, guided lessons, templates, and a practical project.',
   ...overrides,
 });
