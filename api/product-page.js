@@ -138,10 +138,10 @@ function buildProductPage({ id, product, settings, listing, baseUrl = API_BASE }
   const sellerLine = sellerName
     ? '<p class="trust-line"><strong>Seller</strong><span>' + esc(sellerName) + '</span></p>'
     : '<p class="trust-line"><strong>Seller</strong><span>Identity being verified</span></p>';
-  const productType = String(listing ? (listing.physical ? 'PHYSICAL' : 'DIGITAL') : product.productType || '').toUpperCase();
+  const displayedProductType = String(listing ? (listing.physical ? 'PHYSICAL' : 'DIGITAL') : product.productType || '').toUpperCase();
   const deliveryText = listing
     ? plainText(listing.deliveryEstimate || listing.fulfillmentText, 180)
-    : (productType === 'PHYSICAL'
+    : (displayedProductType === 'PHYSICAL'
       ? plainText(product.physical && product.physical.deliveryEstimate, 180)
       : plainText(product.accessDelivery || product.deliveryFormat || product.format, 180));
   const shippingText = !listing && productType === 'PHYSICAL' && product.physical && Array.isArray(product.physical.shippingCountries)
@@ -149,7 +149,7 @@ function buildProductPage({ id, product, settings, listing, baseUrl = API_BASE }
     : '';
   const returnsText = plainText(listing ? listing.refundPolicy : (product.refundPolicy || product.returnPolicy || (product.physical && product.physical.returnPolicy)), 220);
   const trustHtml = '<section class="trust-grid" aria-label="Seller and purchase information">' + sellerLine +
-    (deliveryText ? '<p class="trust-line"><strong>' + (productType === 'PHYSICAL' ? 'Delivery estimate' : 'Digital access') + '</strong><span>' + esc(deliveryText) + '</span></p>' : '') +
+    (deliveryText ? '<p class="trust-line"><strong>' + (displayedProductType === 'PHYSICAL' ? 'Delivery estimate' : 'Digital access') + '</strong><span>' + esc(deliveryText) + '</span></p>' : '') +
     (shippingText ? '<p class="trust-line"><strong>Ships to</strong><span>' + esc(shippingText) + '</span></p>' : '') +
     (returnsText ? '<p class="trust-line"><strong>Returns / refunds</strong><span>' + esc(returnsText) + '</span></p>' : '<p class="trust-line"><strong>Policies</strong><span>Review the published <a href="https://lexdendigital.github.io/LEXDEN-NOVA/legal/refunds.html">refunds policy</a> and <a href="https://lexdendigital.github.io/LEXDEN-NOVA/legal/terms.html">terms</a>.</span></p>') +
     (external ? '<p class="trust-line"><strong>Checkout</strong><span>Payment and final total are confirmed by the external seller.</span></p>' : '<p class="trust-line"><strong>Checkout</strong><span>Final price and availability are rechecked during checkout.</span></p>') +
