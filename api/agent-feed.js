@@ -4,7 +4,7 @@ const { getCatalogDoc } = require('./_shared');
 const { isPublicCatalogProduct, isSuspiciousDiscount, effectiveCatalogPrice } = require('./product-page');
 const BASE = (process.env.PUBLIC_API_URL || 'https://lexden-nova.onrender.com').replace(/\/+$/, '');
 const MAX_RATE_AGE_MS = 7 * 24 * 60 * 60 * 1000;
-const FIELDS = ['item_id','title','description','url','brand','seller_name','image_url','price','availability'];
+const FIELDS = ['item_id','title','description','url','brand','seller_name','image_url','price','sale_price','availability','is_eligible_search','is_eligible_checkout'];
 
 function plain(value, max = 5000) {
   return String(value == null ? '' : value).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
@@ -60,15 +60,24 @@ function buildAgentFeed({ products = [], settings = {}, baseUrl = BASE, now = Da
   for (const p of products) {
     const reason = exclusionReason(p, settings, now);
     if (reason) { excluded[reason] = (excluded[reason] || 0) + 1; continue; }
-    const amount = effectiveCatalogPrice(p) * rate;
-    if (!Number.isFinite(amount) || amount <= 0) { excluded.invalid_price = (excluded.invalid_price || 0) + 1; continue; }
+    // OpenAI's published feed contract distinguishes regular price from
+    // sale_price. Keep major units/currency explicit, and never label a
+    // computed sale price as the regular price.
+    const regularBase = Number(p.price);
+    const regularAmount = regularBase * rate;
+    const saleBase = Number(p.salePrice);
+    const hasSale = Number.isFinite(saleBase) && saleBase > 0 && saleBase < regularBase;
+    const saleAmount = hasSale ? saleBase * rate : null;
+    if (!Number.isFinite(regularAmount) || regularAmount <= 0 || (hasSale && (!Number.isFinite(saleAmount) || saleAmount <= 0))) { excluded.invalid_price = (excluded.invalid_price || 0) + 1; continue; }
     const seller = plain(p.sellerName || p.seller, 120);
     rows.push({
       item_id: String(p.id), title: plain(p.name, 150), description: plain(p.description, 5000),
       url: baseUrl + '/product/' + encodeURIComponent(String(p.id)),
       brand: plain(p.brand || p.brandName || (seller.toUpperCase() === 'LEXDEN ACADEMY' ? seller : ''), 100),
       seller_name: seller, image_url: secureUrl(p.image),
-      price: amount.toFixed(2) + ' ' + currency, availability: availabilityFor(p),
+      price: regularAmount.toFixed(2) + ' ' + currency,
+      sale_price: hasSale ? saleAmount.toFixed(2) + ' ' + currency : '',
+      availability: availabilityFor(p), is_eligible_search: true, is_eligible_checkout: false,
     });
   }
   const state = currencyState(settings, now);
