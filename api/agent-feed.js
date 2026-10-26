@@ -42,8 +42,8 @@ function exclusionReason(p, settings, now = Date.now()) {
   } else if (type === 'DIGITAL') {
     if (!secureUrl(p.deliveryLink || p.fileUrl || p.downloadUrl) && !plain(p.accessDelivery, 2000)) return 'digital_delivery_incomplete';
   } else return 'missing_product_type';
-  const c = contentOf(settings);
-  if (String(c.displayCurrency || '').toUpperCase() !== 'USD' && !currencyState(settings, now).ok) return 'exchange_rate_stale';
+  // Feed price is emitted in canonical USD. Local display currency freshness
+  // is reported separately and does not alter the underlying catalog price.
   return null;
 }
 function availabilityFor(p) {
@@ -55,8 +55,11 @@ function availabilityFor(p) {
 function buildAgentFeed({ products = [], settings = {}, baseUrl = BASE, now = Date.now() } = {}) {
   const excluded = {};
   const c = contentOf(settings);
-  const currency = String(c.displayCurrency || 'USD').toUpperCase();
-  const rate = currency === 'USD' ? 1 : Number(c.exchangeRates && c.exchangeRates[currency]);
+  // Storefront catalogue amounts are canonical USD. Agent feeds use those
+  // exact values, not the shopper's display-currency conversion, so a stale
+  // local FX snapshot cannot poison the machine-readable price.
+  const currency = 'USD';
+  const rate = 1;
   const rows = [];
   for (const p of products) {
     const reason = exclusionReason(p, settings, now);
@@ -82,7 +85,7 @@ function buildAgentFeed({ products = [], settings = {}, baseUrl = BASE, now = Da
     });
   }
   const state = currencyState(settings, now);
-  return { rows, excluded, currency, rateCurrent: currency === 'USD' || state.ok };
+  return { rows, excluded, currency, rateCurrent: true, localCurrencyRateCurrent: state.ok };
 }
 function csvCell(value) {
   const s = String(value == null ? '' : value);
@@ -110,6 +113,7 @@ async function handler(req, res) {
       ok: report.ok, totalCatalogProducts: report.totalCatalogProducts || null,
       eligibleProducts: report.rows.length, excludedByReason: report.excluded || {},
       currency: report.currency || null, exchangeRateCurrent: report.rateCurrent === true,
+      localCurrencyRateCurrent: report.localCurrencyRateCurrent === true,
       message: report.rows.length ? 'Only validated, directly purchasable offers are exported.' : 'No products currently meet machine-commerce feed validation. Review the live catalog before submitting the feed.',
     });
   }
