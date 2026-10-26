@@ -200,7 +200,7 @@ async function callRealNovaAPI(userText){
 function buildNovaContext(){
   return {
     route: appState.route,
-    products: DB.products.filter(p=>p.status==='published').map(p=>({
+    products: DB.products.filter(p=>p.status==='published' && p.active!==false).map(p=>({
       id:p.id, name:p.name, category:p.category,
       priceUSD:isFreeProduct(p)?0:p.price, salePriceUSD:p.salePrice||null,
       free:isFreeProduct(p), discountPercent:discountPercent(p), rating:p.rating,
@@ -374,7 +374,7 @@ function moneyStr(p){
 function generateNovaResponse(raw){
   const text = synonymNormalize(pidginNormalize(raw.toLowerCase()));
   const c = DB.content;
-  const products = DB.products.filter(p=>p.status!=='published' ? p.status!=='draft' : true).filter(p=>p.status!=='draft');
+  const products = DB.products.filter(p=>p.status==='published' && p.active!==false);
   const currentProduct = appState.route.startsWith('#product/') ? findProduct(appState.route.split('/')[1]) : null;
 
   // -1) MULTI-CONSTRAINT PARSER — this is the actual upgrade over a flat
