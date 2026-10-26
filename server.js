@@ -15,6 +15,7 @@ const express = require('express');
 const cors = require('cors');
 const { mountMcp, recordServerError } = require('./mcp');
 const { isAllowedOrigin } = require('./api/cors');
+const { createRateLimiter } = require('./api/rate-limit');
 
 const app = express();
 
@@ -24,8 +25,9 @@ const app = express();
 // lifetime. Wired up before anything else so it catches startup-time
 // failures too.
 process.on('unhandledRejection', (reason) => {
-  console.error('Unhandled rejection:', reason);
-  recordServerError({ type: 'unhandledRejection', message: (reason && reason.message) || String(reason), stack: reason && reason.stack });
+  console.error('Unhandled rejection; process will exit for supervisor restart:', reason);
+  try { recordServerError({ type: 'unhandledRejection', message: (reason && reason.message) || String(reason), stack: reason && reason.stack }); } catch (_) {}
+  process.exit(1);
 });
 process.on('uncaughtException', (err) => {
   console.error('Uncaught exception; process will exit for supervisor restart:', err);
@@ -141,8 +143,19 @@ const ENDPOINTS = [
   'secure-access',
 ];
 
+const endpointRateLimiters = {
+  'nova-ai': createRateLimiter({ name: 'nova-ai', windowMs: 60_000, max: 30 }),
+  'send-otp': createRateLimiter({ name: 'send-otp', windowMs: 15 * 60_000, max: 5 }),
+  'verify-otp': createRateLimiter({ name: 'verify-otp', windowMs: 15 * 60_000, max: 12 }),
+  'send-email': createRateLimiter({ name: 'send-email', windowMs: 15 * 60_000, max: 15 }),
+  'send-auth-email': createRateLimiter({ name: 'send-auth-email', windowMs: 15 * 60_000, max: 10 }),
+  'confirm-email-verified': createRateLimiter({ name: 'confirm-email-verified', windowMs: 15 * 60_000, max: 12 }),
+  'verify-paystack': createRateLimiter({ name: 'verify-paystack', windowMs: 60_000, max: 60 }),
+};
 for (const name of ENDPOINTS) {
-  app.all(`/api/${name}`, safeHandler(require(`./api/${name}`)));
+  const route = safeHandler(require(`./api/${name}`));
+  const limiter = endpointRateLimiters[name];
+  app.all(`/api/${name}`, ...(limiter ? [limiter, route] : [route]));
 }
 
 // ---- Live sitemap + robots (real catalog only; see api/sitemap.js) ----
@@ -172,8 +185,15 @@ const AFFILIATE_ENDPOINTS = {
   'affiliate-signup': './api/affiliate/signup',
   'process-abandon-emails': './api/affiliate/abandon-emails',
 };
+const affiliateRateLimiters = {
+  'affiliate-ai': createRateLimiter({ name: 'affiliate-ai', windowMs: 60_000, max: 25 }),
+  'affiliate-diagnose': createRateLimiter({ name: 'affiliate-diagnose', windowMs: 60_000, max: 15 }),
+  'affiliate-signup': createRateLimiter({ name: 'affiliate-signup', windowMs: 15 * 60_000, max: 10 }),
+};
 for (const [name, path] of Object.entries(AFFILIATE_ENDPOINTS)) {
-  app.all(`/api/${name}`, safeHandler(require(path)));
+  const route = safeHandler(require(path));
+  const limiter = affiliateRateLimiters[name];
+  app.all(`/api/${name}`, ...(limiter ? [limiter, route] : [route]));
 }
 
 // ---- LEXDEN NOVA CREATOR (Stage A: data model + auth + state machine) ----
@@ -222,8 +242,15 @@ const CREATOR_ENDPOINTS = [
   'creator-admin-refunds', 'creator-inventory', 'creator-checkout', 'creator-admin-exceptions', 'delivery-proof', 'policy-accept', 'policy-internal', 'creator-earnings',
   'creator-admin-funding', 'pickup-stations', 'creator-updates', 'creator-channel-shopify',
 ];
+const creatorRateLimiters = {
+  'creator-ai': createRateLimiter({ name: 'creator-ai', windowMs: 60_000, max: 25 }),
+  'creator-application': createRateLimiter({ name: 'creator-application', windowMs: 15 * 60_000, max: 8 }),
+  'creator-documents': createRateLimiter({ name: 'creator-documents', windowMs: 15 * 60_000, max: 12 }),
+};
 for (const name of CREATOR_ENDPOINTS) {
-  app.all(`/api/${name}`, safeHandler(require(`./api/${name}`)));
+  const route = safeHandler(require(`./api/${name}`));
+  const limiter = creatorRateLimiters[name];
+  app.all(`/api/${name}`, ...(limiter ? [limiter, route] : [route]));
 }
 
 // ---- Link-preview routes ----
