@@ -616,8 +616,17 @@ function startPaystackCheckout(productId, variantId, deliveryDetails, confirmed)
     // (kobo for NGN, cents for USD, etc.) — always base amount * 100,
     // per Paystack's own "Supported currency" docs.
     const variantPrice=effectiveVariantPrice(p,selectedVariant);
-    const amountMajor = creatorInfo ? creatorInfo.price : Math.round((variantPrice==null?(p.salePrice || p.price):variantPrice) * rate);
-    const amountSubunit = amountMajor * 100;
+    const listedBase = selectedVariant && Number.isFinite(Number(selectedVariant.price)) ? Number(selectedVariant.price) : Number(p.price);
+    const listedSale = selectedVariant && Number.isFinite(Number(selectedVariant.salePrice)) ? Number(selectedVariant.salePrice) : Number(p.salePrice);
+    if (p.pricingReviewRequired === true || (listedBase > 0 && listedSale > 0 && listedSale < listedBase * 0.05)) {
+      toast('This item is temporarily unavailable while we verify its price. Please check back later.', 'error'); return;
+    }
+    if (String(p.productType || '').toUpperCase() === 'PHYSICAL' && String(p.category || p.categoryId || '').toLowerCase() === 'courses') {
+      toast('This listing needs a product-type review before it can be purchased.', 'error'); return;
+    }
+    const rawAmount = (variantPrice==null?(p.salePrice || p.price):variantPrice) * rate;
+    const amountMajor = creatorInfo ? creatorInfo.price : (String(chargeCode).toUpperCase() === 'USD' ? Math.round(rawAmount * 100) / 100 : Math.round(rawAmount));
+    const amountSubunit = Math.round(amountMajor * 100);
     const reference = 'LN-' + Date.now() + '-' + Math.random().toString(36).slice(2,8);
     try{
       window.logLifecycleEvent && window.logLifecycleEvent('checkout_started', email, {
