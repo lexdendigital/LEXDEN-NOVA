@@ -619,6 +619,16 @@ function startPaystackCheckout(productId, variantId, deliveryDetails, confirmed)
     const amountMajor = creatorInfo ? creatorInfo.price : Math.round((variantPrice==null?(p.salePrice || p.price):variantPrice) * rate);
     const amountSubunit = amountMajor * 100;
     const reference = 'LN-' + Date.now() + '-' + Math.random().toString(36).slice(2,8);
+    try{
+      window.logLifecycleEvent && window.logLifecycleEvent('checkout_started', email, {
+        productId: p.id,
+        productName: p.name,
+        productUrl: location.origin + location.pathname + '#product/' + p.id,
+        checkoutUrl: location.origin + location.pathname + '#product/' + p.id,
+        variant: selectedVariant ? variantLabel(p, selectedVariant) : null,
+        amount: chargeCode + ' ' + amountMajor
+      });
+    }catch(e){}
     if(chargeCode !== selectedCode && !creatorInfo){
       toast(`Checkout isn't set up in ${selectedCode} yet — charging in ${chargeCode} instead.`, 'info');
     }
