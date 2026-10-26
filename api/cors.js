@@ -17,7 +17,7 @@ function isAllowedOrigin(origin) {
 function applyCors(req, res, options = {}) {
   const origin = req && req.headers && req.headers.origin;
   if (isAllowedOrigin(origin)) { res.setHeader('Access-Control-Allow-Origin', origin); res.setHeader('Vary', 'Origin'); }
-  else res.removeHeader('Access-Control-Allow-Origin');
+  else if (typeof res.removeHeader === 'function') res.removeHeader('Access-Control-Allow-Origin');
   res.setHeader('Access-Control-Allow-Methods', options.methods || 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', options.headers || 'Content-Type, Authorization, X-Admin-Token, X-Firebase-AppCheck, Idempotency-Key, X-Request-Id');
   return isAllowedOrigin(origin);
