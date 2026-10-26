@@ -29,6 +29,7 @@
 // body: { displayName, whatsapp, payoutAccount:{bank,bankCode,accountNumber,accountName,needsManualVerification}, targetReach }
 
 const { getAuthAdmin, getDb, isAdminEmail, FieldValue } = require('./shared');
+const { queueEmailBackground } = require('../email-shared');
 
 module.exports = async function handler(req, res) {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -103,6 +104,15 @@ module.exports = async function handler(req, res) {
     const doc = { ...baseDoc, status, autoApprove };
     if (status === 'active') doc.approvedAt = FieldValue.serverTimestamp();
     await db.collection('affiliates').doc(uid).set(doc);
+    queueEmailBackground({
+      templateKey: 'affiliate_welcome_status',
+      to: { email, name: displayName },
+      params: {
+        FIRSTNAME: displayName.split(' ')[0] || undefined,
+        status,
+        affiliate_url: 'https://lexdendigital.github.io/LEXDEN-NOVA/affiliate/'
+      }
+    });
     return res.status(200).json({ ok: true, status, reason: autoApprove.ok ? null : autoApprove.reason });
   } catch (e) {
     console.error('affiliate-signup write failed, retrying as pending:', e.message);
@@ -112,6 +122,15 @@ module.exports = async function handler(req, res) {
       await db.collection('affiliates').doc(uid).set({
         ...baseDoc, status: 'pending',
         autoApprove: { ok: false, reason: 'WRITE_FAILED', detail: e.message },
+      });
+      queueEmailBackground({
+        templateKey: 'affiliate_welcome_status',
+        to: { email, name: displayName },
+        params: {
+          FIRSTNAME: displayName.split(' ')[0] || undefined,
+          status: 'pending',
+          affiliate_url: 'https://lexdendigital.github.io/LEXDEN-NOVA/affiliate/'
+        }
       });
       return res.status(200).json({ ok: true, status: 'pending', reason: 'WRITE_FAILED' });
     } catch (e2) {
