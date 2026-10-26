@@ -54,7 +54,14 @@ function priceInfo(product, settings) {
   if (currency !== 'USD') {
     const updatedAt = Date.parse(c.ratesUpdatedAt || '');
     const age = Date.now() - updatedAt;
-    if (!Number.isFinite(updatedAt) || age < 0 || age > 7 * 24 * 60 * 60 * 1000) return null;
+    // The product catalog's canonical amounts are USD. If the local display
+    // conversion is stale, publish the accurate base USD price, explicitly
+    // labelled, rather than hiding the product or fabricating a local total.
+    if (!Number.isFinite(updatedAt) || age < 0 || age > 7 * 24 * 60 * 60 * 1000) {
+      const usdAmount = Number(base.toFixed(2));
+      const usdLabel = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(usdAmount);
+      return { amount: usdAmount, currency: 'USD', label: usdLabel + ' USD · local conversion pending', localConversionPending: true };
+    }
   }
   if (!/^[A-Z]{3}$/.test(currency) || !Number.isFinite(rate) || rate <= 0) return null;
   const amount = base * rate;
