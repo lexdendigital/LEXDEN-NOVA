@@ -2,7 +2,7 @@
 
 /* ---------------- HOME ---------------- */
 function screenHome(){
-  const products = DB.products.filter(p=>p.status!=='draft');
+  const products = DB.products.filter(p=>p.status==='published' && p.active!==false);
   // Dynamic, signal-driven Trending / personalized Featured — see
   // computeTrendingProducts / computeFeaturedForYou. Both gracefully fall
   // back to the admin's static featured:true/trending:true flags until
@@ -256,7 +256,7 @@ function screenFeedDetail(id){
 /* ---------------- PRODUCTS (catalog) ---------------- */
 function filteredProducts(){
   const f = appState.productFilters;
-  let list = DB.products.filter(p=>p.status!=='draft');
+  let list = DB.products.filter(p=>p.status==='published' && p.active!==false);
   if(f.category !== 'all') list = list.filter(p=>p.categoryId===f.category || p.category===f.category);
   if(f.kind==='digital') list = list.filter(p=>productKind(p)!=='physical');
   if(f.kind==='physical') list = list.filter(p=>productKind(p)==='physical');
