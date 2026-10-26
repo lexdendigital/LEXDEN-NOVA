@@ -1,10 +1,10 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { findPurchasableVariant, effectivePrice, resolveProductSelection, selectionAvailability } = require('../api/product-variants');
+const { findPurchasableVariant, effectivePrice, isSuspiciousSale, resolveProductSelection, selectionAvailability } = require('../api/product-variants');
 
 const product = {
-  id: 'tablet', name: 'Nova Tablet', price: 100,
+  status: 'published', id: 'tablet', name: 'Nova Tablet', price: 100,
   options: [{ id: 'color', name: 'Color', values: [{ id: 'black', label: 'Black' }, { id: 'blue', label: 'Blue' }] }],
   variants: [
     { id: 'black', optionValues: { color: 'black' }, price: 100, salePrice: 80, stock: 2, active: true },
@@ -33,8 +33,16 @@ test('backend converts the selected sale price using server-owned currency setti
 });
 
 test('legacy single-price products remain payable and physical out-of-stock items are blocked', () => {
-  assert.equal(resolveProductSelection({ price: 20 }, null, 'USD', {}).price, 20);
-  const out = { productType: 'PHYSICAL', price: 30, physical: { stockStatus: 'out_of_stock' } };
+  assert.equal(resolveProductSelection({ status: 'published', price: 20 }, null, 'USD', {}).price, 20);
+  const out = { status: 'published', productType: 'PHYSICAL', price: 30, physical: { stockStatus: 'out_of_stock' } };
   assert.equal(selectionAvailability(out, null), false);
   assert.equal(resolveProductSelection(out, null, 'USD', {}), null);
+});
+
+test('USD values preserve cents and suspicious sale prices fail closed', () => {
+  const p = { status: 'published', price: 8.695, salePrice: 6.613 };
+  assert.equal(resolveProductSelection(p, null, 'USD', {}).price, 6.61);
+  assert.equal(effectivePrice({ price: 8.69, salePrice: 0.037 }, null), null);
+  assert.equal(isSuspiciousSale(8.69, 0.037), true);
+  assert.equal(resolveProductSelection({ status: 'published', price: 8.69, salePrice: 0.037 }, null, 'NGN', { exchangeRates: { NGN: 1330 } }), null);
 });
