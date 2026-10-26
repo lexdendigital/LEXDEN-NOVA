@@ -1,3 +1,4 @@
+const { applyCors } = require('./cors');
 // Generic Brevo transactional-email sender for LEXDEN NOVA.
 //
 // WHY THIS EXISTS: Brevo's send API requires BREVO_API_KEY on every call.
@@ -63,12 +64,7 @@ const TEMPLATE_ENV_KEY = {
 };
 
 function setCors(req, res) {
-  const origin = req.headers.origin;
-  if (origin && ALLOWED_ORIGINS.includes(origin)) {
-    res.setHeader("Access-Control-Allow-Origin", origin);
-  }
-  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  applyCors(req, res, { methods: 'POST, OPTIONS', headers: 'Content-Type' });
 }
 
 module.exports = async function handler(req, res) {
