@@ -72,12 +72,15 @@ test('physical products require explicit stock and delivery; digital products re
   assert.equal(report.excluded.digital_delivery_incomplete, 1);
 });
 
-test('stale exchange rates block a non-USD feed instead of exporting false prices', () => {
+test('agent feed uses canonical USD prices when local display-currency rates are stale', () => {
   const staleSettings = { content: { displayCurrency: 'NGN', exchangeRates: { NGN: 1330 }, ratesUpdatedAt: '2026-09-01T00:00:00Z' } };
   const report = buildAgentFeed({ products: [makeProduct()], settings: staleSettings, now });
-  assert.equal(report.rows.length, 0);
-  assert.equal(report.excluded.exchange_rate_stale, 1);
-  assert.equal(report.rateCurrent, false);
+  assert.equal(report.rows.length, 1);
+  assert.equal(report.rows[0].price, '8.69 USD');
+  assert.equal(report.rows[0].sale_price, '6.61 USD');
+  assert.equal(report.currency, 'USD');
+  assert.equal(report.rateCurrent, true);
+  assert.equal(report.localCurrencyRateCurrent, false);
 });
 
 test('JSONL and CSV encoders safely quote text values', () => {
