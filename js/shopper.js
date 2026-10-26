@@ -1079,6 +1079,40 @@ function logAffiliateProductView(productId){
 //     matches, so returning shoppers get a small personalized boost —
 //     this is the "(i) user's own data" half of the algorithm, alongside
 //     the global text/price/category signal that applies to everyone.
+
+// Generic lifecycle-event logger used by checkout + sign-up recovery.
+// Client can only CREATE these docs; the backend is the only code allowed
+// to read, update, suppress, or send from them. Session de-duping prevents
+// repeated re-renders / OTP resends from creating a pile of identical events.
+window.__novaLifecycleLogged = window.__novaLifecycleLogged || new Set();
+window.logLifecycleEvent = function(eventType, email, data){
+  try{
+    const normalizedEmail = String(email||'').trim().toLowerCase();
+    if(!normalizedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail) || !window.__fb) return;
+    data = data || {};
+    const dedupeKey = [eventType, normalizedEmail, data.productId||''].join('|');
+    if(window.__novaLifecycleLogged.has(dedupeKey)) return;
+    window.__novaLifecycleLogged.add(dedupeKey);
+    const { fbDb, doc, setDoc, collection } = window.__fb;
+    setDoc(doc(collection(fbDb, "productViewEvents")), {
+      eventType: String(eventType||'').slice(0,40),
+      uid: window.__fbUid || null,
+      email: normalizedEmail,
+      name: data.name || (window.__fbShopper && window.__fbShopper.name) || null,
+      productId: data.productId || null,
+      productName: data.productName || null,
+      productUrl: data.productUrl || null,
+      checkoutUrl: data.checkoutUrl || null,
+      signupUrl: data.signupUrl || null,
+      variant: data.variant || null,
+      amount: data.amount || null,
+      ts: new Date(),
+      stage: 0,
+      emailed: false,
+    }).catch(()=>{ window.__novaLifecycleLogged.delete(dedupeKey); });
+  }catch(e){}
+};
+
 function computeRelatedProducts(anchor, allProducts, opts){
   opts = opts || {};
   const limit = opts.limit || 6;
@@ -2021,6 +2055,12 @@ async function sendSignupOtp(){
   const errEl = $('#signupErr');
   if(!isValidEmailStr(email)){ if(errEl) errEl.textContent = 'Enter a valid, actual email address.'; return; }
   if(errEl) errEl.textContent = '';
+  try{
+    window.logLifecycleEvent && window.logLifecycleEvent('signup_started', email, {
+      name: [signupWizard.firstName, signupWizard.lastName].filter(Boolean).join(' '),
+      signupUrl: location.origin + location.pathname + '#signup'
+    });
+  }catch(e){}
   if(Date.now() < signupWizard.otpCooldownUntil){
     signupWizard.otpError = `Wait ${Math.ceil((signupWizard.otpCooldownUntil-Date.now())/1000)}s before requesting another code.`;
     rerenderSignup(); return;
