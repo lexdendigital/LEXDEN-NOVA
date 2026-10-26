@@ -12,11 +12,11 @@
     "build:policies": "node scripts/build-policies.js"
   },
   "dependencies": {
-    "express": "^4.19.2",
+    "@modelcontextprotocol/node": "2.0.0",
+    "@modelcontextprotocol/server": "2.4.0",
     "cors": "^2.8.5",
-    "firebase-admin": "^12.6.0",
-    "zod": "^4.6.5",
-    "@modelcontextprotocol/server": "2.0.0",
-    "@modelcontextprotocol/node": "2.0.0"
+    "express": "^4.19.2",
+    "firebase-admin": "13.10.0",
+    "zod": "^4.6.5"
   }
 }
