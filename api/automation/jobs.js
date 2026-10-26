@@ -291,6 +291,56 @@ async function holdsJob(db, ctx) {
   return releaseDueHolds(db, ctx.nowMs, ctx.limit || 200);
 }
 
+
+// ---------------------------------------------------- creator weekly report
+async function creatorWeeklyEmailJob(db, ctx) {
+  const { generateWeeklyEmailReport } = require('../creator-ai');
+  const { queueEmailBackground } = require('../email-shared');
+  const creators = await db.collection('creators').where('status', '==', 'ACTIVE').limit(ctx.limit || 500).get();
+  const out = { creators: creators.size, sent: 0, skipped: 0, errors: 0, ai: 0, fallback: 0 };
+  for (const d of creators.docs) {
+    try {
+      const priv = await db.collection('creatorPrivate').doc(d.id).get();
+      const email = priv.exists && priv.data().email;
+      if (!email) { out.skipped += 1; continue; }
+
+      const report = await generateWeeklyEmailReport(db, d.id, ctx.nowMs, ctx.deps || {});
+      const h = report.home; const r = h.report;
+      const displayName = (h.creator && h.creator.displayName) || 'Creator';
+      const trend = r.earnedChangePct == null
+        ? 'First earnings in this comparison window'
+        : r.earnedChangePct > 0 ? ('Up ' + r.earnedChangePct + '% vs previous 7 days')
+        : r.earnedChangePct < 0 ? ('Down ' + Math.abs(r.earnedChangePct) + '% vs previous 7 days')
+        : 'Level with the previous 7 days';
+      const actionCount = h.ordersNeedingAction.length + (h.products.needAttention || 0);
+      const top = r.topProducts && r.topProducts[0];
+
+      queueEmailBackground({
+        templateKey: 'creator_weekly_report',
+        to: { email, name: displayName },
+        params: {
+          FIRSTNAME: String(displayName).split(' ')[0] || undefined,
+          period_label: 'Last 7 days compared with the previous 7 days',
+          sales: String(r.sales || 0),
+          previous_sales: String(r.previousSales || 0),
+          earned: String(r.earned || 0),
+          earnings_trend: trend,
+          gross: String(r.gross || 0),
+          action_count: String(actionCount),
+          ai_summary: report.text,
+          top_product: top ? ((top.title || top.productId) + ' — ' + top.sales + ' sale' + (top.sales === 1 ? '' : 's')) : ''
+        }
+      });
+      out.sent += 1;
+      if (report.ai) out.ai += 1; else out.fallback += 1;
+    } catch (e) {
+      out.errors += 1;
+      console.warn('creator weekly report skipped for', d.id, e.message);
+    }
+  }
+  return out;
+}
+
 // ------------------------------------------------------------- email queue
 // Releases checkout holds whose payment window passed so abandoned checkouts never lock stock.
 async function reservationsJob(db, ctx) {
@@ -343,6 +393,7 @@ const JOBS = {
   reservations: { run: reservationsJob, minIntervalMs: 5 * 60 * 1000 },
   channelSync: { run: channelSyncJob, minIntervalMs: 5 * 60 * 1000 },
   emailQueue: { run: emailQueueJob, minIntervalMs: 5 * 60 * 1000 },
+  creatorWeeklyEmail: { run: creatorWeeklyEmailJob, minIntervalMs: 7 * DAY },
 };
 
-module.exports = { JOBS, supplierHealthJob, cjOrderJob, linkHealthJob, slaJob, reconciliationJob, holdsJob, reservationsJob, channelSyncJob, emailQueueJob, checkProductLink, pauseProduct };
+module.exports = { JOBS, supplierHealthJob, cjOrderJob, linkHealthJob, slaJob, reconciliationJob, holdsJob, reservationsJob, channelSyncJob, emailQueueJob, creatorWeeklyEmailJob, checkProductLink, pauseProduct };
