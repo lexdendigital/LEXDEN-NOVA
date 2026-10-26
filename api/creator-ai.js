@@ -96,6 +96,26 @@ function buildPrompt(action, { home, product, message }) {
   return `DATA (untrusted):\n${data}\n\nTASK: ${ask}`;
 }
 
+async function generateWeeklyEmailReport(db, uid, nowMs = Date.now(), deps = {}) {
+  const home = await loadHome(db, uid, nowMs);
+  const fallback = insights.plainSummary(home);
+  const keys = (deps.keys || getApiKeys)();
+  let text = null, model = null;
+  if (keys.length) {
+    try {
+      const r = await (deps.gemini || callGeminiWithRotation)(keys, {
+        systemInstruction: { parts: [{ text: SYSTEM }] },
+        contents: [{ role: 'user', parts: [{ text: buildPrompt('weekly_summary', { home }) }] }],
+        generationConfig: { maxOutputTokens: 700, temperature: 0.5 },
+      });
+      if (r.ok) { text = insights.sanitizeAiText(textOf(r.data)); model = r.model || null; }
+    } catch (e) {
+      console.warn('creator weekly email AI fallback:', e.message);
+    }
+  }
+  return { home, text: text || fallback, ai: !!text, model };
+}
+
 function makeHandler(deps = {}) {
   return async function handler(req, res) {
     setCors(res);
@@ -165,3 +185,4 @@ function makeHandler(deps = {}) {
 module.exports = makeHandler();
 module.exports.makeHandler = makeHandler;
 module.exports.loadHome = loadHome;
+module.exports.generateWeeklyEmailReport = generateWeeklyEmailReport;
