@@ -93,7 +93,7 @@ function buildProductPage({ id, product, settings, listing, baseUrl = API_BASE }
     && String(product.category || product.categoryId || '').toLowerCase() === 'courses';
   const indexable = listing
     ? !!(listing.title && details.length >= 40 && realImage && validPrice)
-    : (isIndexableCatalogProduct(product) && !typeConflict);
+    : (isIndexableCatalogProduct(product) && !typeConflict && (!!price || !!external));
   const productType = String(product.productType || '').toUpperCase();
   const stock = listing
     ? (listing.inStock ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock')
