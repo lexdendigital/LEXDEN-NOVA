@@ -286,3 +286,26 @@ if (process.env.CREATOR_CRON_IN_PROCESS === 'true') {
   }, TICK_MS).unref();
   console.log('Creator scheduler: in-process timer enabled (every 10 min).');
 }
+
+
+// Lifecycle recovery scheduler — deliberately runs inside the existing web
+// service so LEXDEN NOVA can keep abandoned-checkout / signup recovery on
+// the free Render plan. Free web services may sleep when idle, so timing is
+// best-effort while asleep; normal NOVA traffic wakes the backend, and the
+// first sweep runs shortly after startup. Suppression checks happen again
+// inside the processor before every email.
+if (process.env.LIFECYCLE_CRON_IN_PROCESS === 'true') {
+  const lifecycleUrl = `http://127.0.0.1:${PORT}/api/process-abandon-emails`;
+  const runLifecycleSweep = () => {
+    fetch(lifecycleUrl, { headers: { 'cache-control': 'no-cache' } })
+      .then(async (r) => {
+        const body = await r.text();
+        if (!r.ok) throw new Error(`HTTP ${r.status}: ${body.slice(0, 300)}`);
+        console.log('Lifecycle email sweep:', body.slice(0, 500));
+      })
+      .catch((e) => console.error('Lifecycle email sweep failed:', e.message));
+  };
+  setTimeout(runLifecycleSweep, 30 * 1000).unref();
+  setInterval(runLifecycleSweep, 15 * 60 * 1000).unref();
+  console.log('Lifecycle email scheduler: in-process timer enabled (every 15 min while awake).');
+}
