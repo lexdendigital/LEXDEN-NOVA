@@ -25,7 +25,10 @@ test('agent feed emits the expected fields and preserves USD cents', () => {
   const report = buildAgentFeed({ products: [makeProduct()], settings: settingsUSD, now });
   assert.equal(report.rows.length, 1);
   assert.deepEqual(Object.keys(report.rows[0]), FIELDS);
-  assert.equal(report.rows[0].price, '6.61 USD');
+  assert.equal(report.rows[0].price, '8.69 USD');
+  assert.equal(report.rows[0].sale_price, '6.61 USD');
+  assert.equal(report.rows[0].is_eligible_search, true);
+  assert.equal(report.rows[0].is_eligible_checkout, false);
   assert.match(report.rows[0].url, /\/product\/course-101$/);
   assert.equal(report.rows[0].availability, 'in_stock');
 });
