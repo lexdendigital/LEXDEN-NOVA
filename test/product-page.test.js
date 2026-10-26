@@ -3,7 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   buildProductPage, isIndexableCatalogProduct, isPublicCatalogProduct,
-  isSuspiciousDiscount, effectiveCatalogPrice,
+  isSuspiciousDiscount, effectiveCatalogPrice, priceInfo,
 } = require('../api/product-page');
 
 const makeProduct = (overrides = {}) => ({
@@ -61,4 +61,10 @@ test('untrusted product title markup is stripped before rendering', () => {
   });
   assert.doesNotMatch(html, /<img src=x onerror=/);
   assert.match(html, /Trusted Course/);
+});
+
+test('stale foreign-exchange rates never produce a converted storefront price', () => {
+  const stale = { content: { displayCurrency: 'NGN', exchangeRates: { NGN: 1330 }, ratesUpdatedAt: '2026-09-01T00:00:00Z' } };
+  assert.equal(priceInfo(makeProduct(), stale), null);
+  assert.equal(priceInfo(makeProduct(), settings).currency, 'USD');
 });
