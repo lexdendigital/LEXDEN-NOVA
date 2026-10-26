@@ -1,78 +1,136 @@
 // /api/affiliate/abandon-emails.js
 //
-// Requirement #14: if a known user views a product page and doesn't buy,
-// send them a reminder. Cron-callable (GET/POST, no auth — same "own
-// queue only" safety reasoning as process-email-queue.js). Point an
-// external cron at this every 30 minutes.
-//
-// Reads `productViewEvents` docs written client-side by index.html's
-// logAffiliateProductView(), each shaped:
-//   { uid?, email, productId, productName, ts, emailed:false }
-// (NOT the `productViews` collection — that one is your existing public
-// view-count aggregate with a different {count} shape; kept deliberately
-// separate so the two can never collide.)
-// Only fires for views older than ABANDON_DELAY_MS with no matching paid
-// order for that email+productId, and only ever once per view doc.
+// Lifecycle recovery processor for product views, started checkouts and
+// started sign-ups. Cron-callable. It never trusts "email sent" alone:
+// before each send it checks whether the shopper has already completed
+// the purchase/account so completed actions suppress stale reminders.
 
 const { getDb } = require('./shared');
 const { queueEmailBackground } = require('../email-shared');
+const { getAuth } = require('firebase-admin/auth');
 
-const ABANDON_DELAY_MS = 60 * 60 * 1000; // 1 hour
-const BATCH_LIMIT = 100;
+const HOUR = 60 * 60 * 1000;
+const BATCH_LIMIT = 150;
+
+function toMs(v){
+  if(!v) return 0;
+  if(typeof v.toMillis === 'function') return v.toMillis();
+  if(v instanceof Date) return v.getTime();
+  const n = new Date(v).getTime();
+  return Number.isFinite(n) ? n : 0;
+}
+function due(v, waitMs, now){ return toMs(v.ts) > 0 && now - toMs(v.ts) >= waitMs; }
+
+async function hasBought(db, v){
+  if(!v.email || !v.productId) return false;
+  const snap = await db.collection('orders')
+    .where('email','==',v.email)
+    .where('productId','==',v.productId)
+    .limit(1).get();
+  return !snap.empty;
+}
+async function accountExists(email){
+  if(!email) return false;
+  try{ await getAuth().getUserByEmail(email); return true; }
+  catch(e){
+    if(e && e.code === 'auth/user-not-found') return false;
+    throw e;
+  }
+}
 
 module.exports = async (req, res) => {
-  res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Content-Type','application/json; charset=utf-8');
+  res.setHeader('Cache-Control','no-store');
 
   let db;
-  try {
-    db = getDb();
-  } catch (e) {
-    return res.status(500).json({ ok: false, error: e.message });
-  }
+  try{ db = getDb(); }
+  catch(e){ return res.status(500).json({ok:false,error:e.message}); }
 
-  const cutoff = new Date(Date.now() - ABANDON_DELAY_MS);
   let snap;
-  try {
+  try{
+    // Single-field query avoids requiring a new composite Firestore index.
+    // Per-event timing is checked in JS below.
     snap = await db.collection('productViewEvents')
-      .where('emailed', '==', false)
-      .where('ts', '<=', cutoff)
-      .limit(BATCH_LIMIT)
-      .get();
-  } catch (e) {
-    return res.status(500).json({ ok: false, error: 'Query failed: ' + e.message });
+      .where('emailed','==',false)
+      .limit(BATCH_LIMIT).get();
+  }catch(e){
+    return res.status(500).json({ok:false,error:'Query failed: '+e.message});
   }
 
-  let sent = 0, skipped = 0;
-  for (const doc of snap.docs) {
-    const v = doc.data();
-    try {
-      if (!v.email || !v.productId) { await doc.ref.update({ emailed: true }); skipped++; continue; }
+  const now = Date.now();
+  let sent=0, skipped=0, waiting=0, errors=0;
 
-      // Did they buy it already, by any order matching this email+product
-      // placed after the view? If so, skip — this is a real, common case
-      // (they bought it right after browsing) and must never send a
-      // "did you forget" email to someone who already checked out.
-      const orderSnap = await db.collection('orders')
-        .where('email', '==', v.email)
-        .where('productId', '==', v.productId)
-        .limit(1).get();
-      if (!orderSnap.empty) { await doc.ref.update({ emailed: true }); skipped++; continue; }
+  for(const doc of snap.docs){
+    const v=doc.data()||{};
+    const type=v.eventType || 'product_view';
+    try{
+      if(!v.email){ await doc.ref.update({emailed:true,skipReason:'missing_email'}); skipped++; continue; }
 
+      if(type === 'checkout_started'){
+        const stage=Number(v.stage||0);
+        const waitMs=stage===0 ? 2*HOUR : 22*HOUR; // ~2h, then ~24h total
+        if(!due(v,waitMs,now)){ waiting++; continue; }
+        if(await hasBought(db,v)){
+          await doc.ref.update({emailed:true,completed:true,skipReason:'order_completed'});
+          skipped++; continue;
+        }
+        queueEmailBackground({
+          templateKey: stage===0 ? 'checkout_recovery_1' : 'checkout_recovery_2',
+          to:{email:v.email,name:v.name||undefined},
+          params:{
+            FIRSTNAME:(v.name||'').split(' ')[0]||undefined,
+            product_name:v.productName||'your selected item',
+            product_url:v.productUrl||'https://lexdendigital.github.io/LEXDEN-NOVA/index.html#products',
+            checkout_url:v.checkoutUrl||v.productUrl||'https://lexdendigital.github.io/LEXDEN-NOVA/index.html#products',
+            variant:v.variant||undefined,
+            amount:v.amount||undefined,
+          }
+        });
+        if(stage===0) await doc.ref.update({stage:1,ts:new Date(),emailed:false,lastEmail:'checkout_recovery_1'});
+        else await doc.ref.update({stage:2,emailed:true,lastEmail:'checkout_recovery_2'});
+        sent++; continue;
+      }
+
+      if(type === 'signup_started'){
+        if(!due(v,6*HOUR,now)){ waiting++; continue; }
+        if(await accountExists(v.email)){
+          await doc.ref.update({emailed:true,completed:true,skipReason:'account_created'});
+          skipped++; continue;
+        }
+        queueEmailBackground({
+          templateKey:'signup_recovery',
+          to:{email:v.email,name:v.name||undefined},
+          params:{
+            FIRSTNAME:(v.name||'').split(' ')[0]||undefined,
+            signup_url:v.signupUrl||'https://lexdendigital.github.io/LEXDEN-NOVA/index.html#signup'
+          }
+        });
+        await doc.ref.update({emailed:true,lastEmail:'signup_recovery'});
+        sent++; continue;
+      }
+
+      // Legacy/normal product-view abandonment remains exactly one reminder.
+      if(!due(v,1*HOUR,now)){ waiting++; continue; }
+      if(!v.productId){ await doc.ref.update({emailed:true,skipReason:'missing_product'}); skipped++; continue; }
+      if(await hasBought(db,v)){
+        await doc.ref.update({emailed:true,completed:true,skipReason:'order_completed'});
+        skipped++; continue;
+      }
       queueEmailBackground({
-        templateKey: 'abandoned_product',
-        to: { email: v.email, name: v.name || undefined },
-        params: {
-          product_name: v.productName || 'that product',
-          product_url: v.productUrl || 'https://lexdendigital.github.io/LEXDEN-NOVA/index.html',
-        },
+        templateKey:'abandoned_product',
+        to:{email:v.email,name:v.name||undefined},
+        params:{
+          product_name:v.productName||'that product',
+          product_url:v.productUrl||'https://lexdendigital.github.io/LEXDEN-NOVA/index.html'
+        }
       });
-      await doc.ref.update({ emailed: true });
+      await doc.ref.update({emailed:true,lastEmail:'abandoned_product'});
       sent++;
-    } catch (e) {
-      console.error(`abandon-email failed for view ${doc.id}:`, e.message);
+    }catch(e){
+      errors++;
+      console.error('lifecycle email failed for '+doc.id+':',e.message);
     }
   }
 
-  return res.status(200).json({ ok: true, sent, skipped, checked: snap.size });
+  return res.status(200).json({ok:true,sent,skipped,waiting,errors,checked:snap.size});
 };
