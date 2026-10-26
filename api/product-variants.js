@@ -21,15 +21,21 @@ function findPurchasableVariant(product, variantId) {
   return { variant, label };
 }
 
+function isSuspiciousSale(base, sale) {
+  return typeof base === 'number' && Number.isFinite(base) && base > 0 && typeof sale === 'number' && Number.isFinite(sale) && sale > 0 && sale < base * 0.05;
+}
+
 function effectivePrice(product, variant) {
   const base = variant && typeof variant.price === 'number' ? variant.price : product && product.price;
   if (typeof base !== 'number' || !Number.isFinite(base) || base < 0) return null;
   const sale = variant && typeof variant.salePrice === 'number' ? variant.salePrice : (!variant && product && product.salePrice);
+  if (isSuspiciousSale(base, sale)) return null; // extreme discount must be reviewed, never charged automatically
   return typeof sale === 'number' && Number.isFinite(sale) && sale >= 0 && sale < base ? sale : base;
 }
 
 function resolveProductSelection(product, variantId, currency, settings) {
-  if (!product) return null;
+  if (!product || product.status !== 'published' || product.active === false) return null;
+  if (String(product.productType || '').toUpperCase() === 'PHYSICAL' && String(product.category || product.categoryId || '').toLowerCase() === 'courses') return null;
   const match = findPurchasableVariant(product, variantId);
   if (!match || !selectionAvailability(product, match.variant)) return null;
   const basePrice = effectivePrice(product, match.variant);
@@ -40,7 +46,7 @@ function resolveProductSelection(product, variantId, currency, settings) {
     variant: match.variant,
     variantId: match.variant ? String(match.variant.id) : null,
     variantName: match.label,
-    price: Math.round(basePrice * rate),
+    price: String(currency || '').toUpperCase() === 'USD' ? Math.round(basePrice * rate * 100) / 100 : Math.round(basePrice * rate),
     basePrice,
     currency,
   };
@@ -53,4 +59,4 @@ function selectionAvailability(product, variant) {
   return true;
 }
 
-module.exports = { listVariants, findPurchasableVariant, effectivePrice, resolveProductSelection, selectionAvailability };
+module.exports = { listVariants, findPurchasableVariant, effectivePrice, isSuspiciousSale, resolveProductSelection, selectionAvailability };
