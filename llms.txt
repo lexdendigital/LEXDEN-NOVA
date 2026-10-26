@@ -1,0 +1,25 @@
+# LEXDEN NOVA
+
+> LEXDEN NOVA is a curated marketplace for digital products, courses, templates, software and selected physical products, operated by LEXDEN DIGITAL.
+
+## Public entry points
+
+- Marketplace: https://lexdendigital.github.io/LEXDEN-NOVA/index.html
+- Server-rendered product detail pages: https://lexden-nova.onrender.com/product/{product-id}
+- Product sitemap: https://lexden-nova.onrender.com/sitemap.xml
+- Product crawl policy: https://lexden-nova.onrender.com/robots.txt
+- Validated agent product feed (JSON Lines): https://lexden-nova.onrender.com/feeds/agent-products.jsonl
+- Agent feed readiness report: https://lexden-nova.onrender.com/feeds/agent-products-status.json
+- Support: mailto:lexdendigital@gmail.com
+
+## Commerce and trust notes
+
+- Product detail pages include visible product information in the initial HTML response.
+- Structured product data is emitted only when essential catalog fields pass validation.
+- The machine-commerce feed excludes incomplete images/descriptions, stale currency conversions, unverified seller/brand details, anomalous discounts, incomplete delivery details, and external checkout prices that cannot be verified.
+- Feed readiness does not mean direct in-chat agent checkout is enabled. Purchases follow the checkout path shown for each listing.
+- Prices, stock and fulfillment must be confirmed from the product detail page at purchase time. Do not infer unavailable attributes.
+
+## Technical note
+
+This is a supplemental directory for compatible AI tools, not a ranking shortcut. Standard crawling, useful product pages, accessible links, accurate catalog information, and reliable checkout remain the primary requirements.
