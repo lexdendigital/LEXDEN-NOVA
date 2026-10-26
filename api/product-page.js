@@ -36,6 +36,7 @@ function isPublicCatalogProduct(product) {
 function isIndexableCatalogProduct(product) {
   if (!isPublicCatalogProduct(product) || product.pricingReviewRequired === true) return false;
   if (!String(product.name || '').trim() || plainText(product.description).length < 40 || !httpsUrl(product.image)) return false;
+  if (!plainText(product.sellerName || product.seller, 120)) return false;
   if (effectiveCatalogPrice(product) === null) return false;
   if (String(product.productType || '').toUpperCase() === 'PHYSICAL'
       && String(product.category || product.categoryId || '').toLowerCase() === 'courses') return false;
@@ -48,7 +49,15 @@ function priceInfo(product, settings) {
   const c = contentOf(settings);
   const currency = String(c.displayCurrency || 'NGN').toUpperCase();
   const rate = Number(c.exchangeRates && c.exchangeRates[currency]);
-  const amount = base * (Number.isFinite(rate) && rate > 0 ? rate : 1);
+  // Product base prices are USD. Never show a converted price based on an
+  // old FX snapshot; that creates a trust and underpayment risk.
+  if (currency !== 'USD') {
+    const updatedAt = Date.parse(c.ratesUpdatedAt || '');
+    const age = Date.now() - updatedAt;
+    if (!Number.isFinite(updatedAt) || age < 0 || age > 7 * 24 * 60 * 60 * 1000) return null;
+  }
+  if (!/^[A-Z]{3}$/.test(currency) || !Number.isFinite(rate) || rate <= 0) return null;
+  const amount = base * rate;
   if (!Number.isFinite(amount) || amount < 0) return null;
   const displayed = amount >= 100 ? Math.round(amount) : Number(amount.toFixed(2));
   let label;
@@ -125,6 +134,26 @@ function buildProductPage({ id, product, settings, listing, baseUrl = API_BASE }
     ? '<p class="note">Review product details and delivery information before completing a purchase.</p>'
     : '<p class="note warning">Some listing information is incomplete or undergoing verification. Rich product data is withheld until details can be trusted.</p>';
   const schemaTag = schema ? '<script type="application/ld+json">' + safeJson(schema) + '</script>' : '';
+  const sellerName = plainText(listing ? listing.sellerName : (product.sellerName || product.seller), 120);
+  const sellerLine = sellerName
+    ? '<p class="trust-line"><strong>Seller</strong><span>' + esc(sellerName) + '</span></p>'
+    : '<p class="trust-line"><strong>Seller</strong><span>Identity being verified</span></p>';
+  const productType = String(listing ? (listing.physical ? 'PHYSICAL' : 'DIGITAL') : product.productType || '').toUpperCase();
+  const deliveryText = listing
+    ? plainText(listing.deliveryEstimate || listing.fulfillmentText, 180)
+    : (productType === 'PHYSICAL'
+      ? plainText(product.physical && product.physical.deliveryEstimate, 180)
+      : plainText(product.accessDelivery || product.deliveryFormat || product.format, 180));
+  const shippingText = !listing && productType === 'PHYSICAL' && product.physical && Array.isArray(product.physical.shippingCountries)
+    ? product.physical.shippingCountries.map(x => plainText(x, 40)).filter(Boolean).join(', ')
+    : '';
+  const returnsText = plainText(listing ? listing.refundPolicy : (product.refundPolicy || product.returnPolicy || (product.physical && product.physical.returnPolicy)), 220);
+  const trustHtml = '<section class="trust-grid" aria-label="Seller and purchase information">' + sellerLine +
+    (deliveryText ? '<p class="trust-line"><strong>' + (productType === 'PHYSICAL' ? 'Delivery estimate' : 'Digital access') + '</strong><span>' + esc(deliveryText) + '</span></p>' : '') +
+    (shippingText ? '<p class="trust-line"><strong>Ships to</strong><span>' + esc(shippingText) + '</span></p>' : '') +
+    (returnsText ? '<p class="trust-line"><strong>Returns / refunds</strong><span>' + esc(returnsText) + '</span></p>' : '<p class="trust-line"><strong>Policies</strong><span>Review the published <a href="https://lexdendigital.github.io/LEXDEN-NOVA/legal/refunds.html">refunds policy</a> and <a href="https://lexdendigital.github.io/LEXDEN-NOVA/legal/terms.html">terms</a>.</span></p>') +
+    (external ? '<p class="trust-line"><strong>Checkout</strong><span>Payment and final total are confirmed by the external seller.</span></p>' : '<p class="trust-line"><strong>Checkout</strong><span>Final price and availability are rechecked during checkout.</span></p>') +
+    '</section>';
   const tagItems = Array.isArray(product && product.tags) ? product.tags.slice(0, 8).map(t => '<span class="tag">' + esc(String(t).slice(0, 40)) + '</span>').join('') : '';
   const pageTitle = name + ' | LEXDEN NOVA';
   const socialImage = realImage ? ogImage(image) : FALLBACK_IMAGE;
@@ -138,11 +167,11 @@ function buildProductPage({ id, product, settings, listing, baseUrl = API_BASE }
     '<meta property="og:image" content="' + esc(socialImage) + '"><meta property="og:url" content="' + esc(canonical) + '">' +
     '<meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="' + esc(name) + '">' +
     '<meta name="twitter:description" content="' + esc(description) + '"><meta name="twitter:image" content="' + esc(socialImage) + '">' + schemaTag +
-    '<style>:root{color-scheme:dark;--bg:#080b1c;--line:#26304e;--text:#f4f7ff;--muted:#aab5cd;--cyan:#00d9ff;--green:#a3e367}*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 15% 0%,#13234a 0,transparent 38%),var(--bg);color:var(--text);font:16px/1.65 system-ui,-apple-system,Segoe UI,sans-serif}a{color:inherit}a:focus-visible{outline:3px solid var(--cyan);outline-offset:4px}.wrap{width:min(1080px,calc(100% - 32px));margin:auto}.top{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:20px 0;border-bottom:1px solid var(--line)}.brand{font-weight:850;letter-spacing:.06em;text-decoration:none}.brand span{color:var(--cyan)}.muted,.note{color:var(--muted);font-size:13px}.hero{display:grid;grid-template-columns:minmax(0,1fr) minmax(240px,.8fr);gap:clamp(24px,5vw,64px);align-items:start;padding:clamp(28px,6vw,70px) 0}.art{background:#111a34;border:1px solid var(--line);border-radius:22px;overflow:hidden;aspect-ratio:4/3;display:grid;place-items:center}.art img{width:100%;height:100%;object-fit:contain}.kicker{color:var(--green);font-size:12px;font-weight:800;letter-spacing:.12em;text-transform:uppercase}.crumb{font-size:13px;color:var(--muted);padding-top:18px}h1{font-size:clamp(30px,5vw,48px);line-height:1.12;letter-spacing:-.035em;margin:14px 0 16px}.pill,.tag{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:5px 10px;color:var(--muted);font-size:12px}.price{font-size:clamp(25px,4vw,34px);font-weight:800;margin:20px 0 14px}.pending{font-size:16px;color:#ffdda0}.button{display:inline-flex;align-items:center;justify-content:center;min-height:48px;border-radius:12px;padding:12px 18px;text-decoration:none;font-weight:800;border:1px solid var(--line)}.primary{background:linear-gradient(105deg,var(--cyan),var(--green));color:#07101b;border:0}.disabled{opacity:.6}.warning{border-left:3px solid #f4bd54;padding-left:12px;color:#ffdda0}.tags{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}.details{border-top:1px solid var(--line);padding:24px 0 46px}.details h2{font-size:20px}.desc{color:#d1daeb}.foot{border-top:1px solid var(--line);padding:18px 0 26px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;color:var(--muted);font-size:13px}.foot a{color:#9ceeff}@media(max-width:720px){.hero{grid-template-columns:1fr;padding:26px 0 36px;gap:24px}.art{order:-1;aspect-ratio:1.3}.wrap{width:calc(100% - 24px)}}@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;animation:none!important;transition:none!important}}</style>' +
+    '<style>:root{color-scheme:dark;--bg:#080b1c;--line:#26304e;--text:#f4f7ff;--muted:#aab5cd;--cyan:#00d9ff;--green:#a3e367}*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 15% 0%,#13234a 0,transparent 38%),var(--bg);color:var(--text);font:16px/1.65 system-ui,-apple-system,Segoe UI,sans-serif}a{color:inherit}a:focus-visible{outline:3px solid var(--cyan);outline-offset:4px}.wrap{width:min(1080px,calc(100% - 32px));margin:auto}.top{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:20px 0;border-bottom:1px solid var(--line)}.brand{font-weight:850;letter-spacing:.06em;text-decoration:none}.brand span{color:var(--cyan)}.muted,.note{color:var(--muted);font-size:13px}.hero{display:grid;grid-template-columns:minmax(0,1fr) minmax(240px,.8fr);gap:clamp(24px,5vw,64px);align-items:start;padding:clamp(28px,6vw,70px) 0}.art{background:#111a34;border:1px solid var(--line);border-radius:22px;overflow:hidden;aspect-ratio:4/3;display:grid;place-items:center}.art img{width:100%;height:100%;object-fit:contain}.kicker{color:var(--green);font-size:12px;font-weight:800;letter-spacing:.12em;text-transform:uppercase}.crumb{font-size:13px;color:var(--muted);padding-top:18px}h1{font-size:clamp(30px,5vw,48px);line-height:1.12;letter-spacing:-.035em;margin:14px 0 16px}.pill,.tag{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:5px 10px;color:var(--muted);font-size:12px}.price{font-size:clamp(25px,4vw,34px);font-weight:800;margin:20px 0 14px}.pending{font-size:16px;color:#ffdda0}.button{display:inline-flex;align-items:center;justify-content:center;min-height:48px;border-radius:12px;padding:12px 18px;text-decoration:none;font-weight:800;border:1px solid var(--line)}.primary{background:linear-gradient(105deg,var(--cyan),var(--green));color:#07101b;border:0}.disabled{opacity:.6}.warning{border-left:3px solid #f4bd54;padding-left:12px;color:#ffdda0}.tags{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}.trust-grid{display:grid;gap:0;margin:20px 0 8px;border:1px solid var(--line);border-radius:14px;padding:2px 14px;background:rgba(16,22,44,.62)}.trust-line{display:grid;grid-template-columns:minmax(95px,.65fr) minmax(0,1fr);gap:12px;padding:10px 0;margin:0;border-bottom:1px solid var(--line);font-size:13px}.trust-line:last-child{border-bottom:0}.trust-line strong{color:#eef4ff}.trust-line span{color:var(--muted);overflow-wrap:anywhere}.trust-line a{color:#9ceeff}.details{border-top:1px solid var(--line);padding:24px 0 46px}.details h2{font-size:20px}.desc{color:#d1daeb}.foot{border-top:1px solid var(--line);padding:18px 0 26px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;color:var(--muted);font-size:13px}.foot a{color:#9ceeff}@media(max-width:720px){.hero{grid-template-columns:1fr;padding:26px 0 36px;gap:24px}.art{order:-1;aspect-ratio:1.3}.wrap{width:calc(100% - 24px)}}@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;animation:none!important;transition:none!important}}</style>' +
     '</head><body><div class="wrap"><header class="top"><a class="brand" href="' + esc(SITE_URL) + '">LEXDEN <span>NOVA</span></a><a class="muted" href="' + esc(SITE_URL) + '">Browse marketplace ↗</a></header><main>' +
     '<nav class="crumb" aria-label="Breadcrumb"><a href="' + esc(SITE_URL) + '">Home</a> / ' + esc(category) + '</nav>' +
     '<section class="hero" aria-labelledby="product-title"><div><div class="kicker">' + esc(APP_NAME) + ' marketplace</div><h1 id="product-title">' + esc(name) + '</h1><div class="pill">' + esc(category) + '</div>' +
-    priceHtml + action + warning + '<div class="tags">' + tagItems + '</div></div><div class="art">' +
+    priceHtml + action + warning + trustHtml + '<div class="tags">' + tagItems + '</div></div><div class="art">' +
     (realImage ? '<img src="' + esc(image) + '" alt="' + esc(name) + '" fetchpriority="high" decoding="async">' : '<span class="note">Product image is being added.</span>') +
     '</div></section><section class="details"><h2>Product details</h2><p class="desc">' + esc(details || FALLBACK_DESCRIPTION) + '</p>' +
     '<p class="note">Confirm the seller, final price, availability and delivery terms before payment. Third-party offers can change independently.</p></section></main>' +
