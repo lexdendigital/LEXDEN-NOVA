@@ -470,7 +470,7 @@ function updateSeoForRoute(hash){
 // from the page source (window.NOVA_CATALOG) or from the #catalogSchema
 // JSON-LD block, without needing to click through every product page.
 function updateCatalogSchema(){
-  const products = DB.products.filter(p=>p.status!=='draft');
+  const products = DB.products.filter(p=>p.status==='published' && p.active!==false);
   window.NOVA_CATALOG = {
     organization:{name:DB.content.appName, email:DB.content.contactEmail, whatsapp:DB.content.whatsappDisplay},
     productCount: products.length,
