@@ -92,3 +92,9 @@ test('JSONL and CSV encoders safely quote text values', () => {
   assert.match(csv, /"Course, ""Pro"""/);
   assert.match(csv, /"Line one\nLine two"/);
 });
+
+test('variant products are excluded until each purchasable variant has a stable feed row', () => {
+  const report = buildAgentFeed({ products: [makeProduct({ variants: [{ id: 'blue', title: 'Blue', price: 6.61, stock: 5 }] })], settings: settingsUSD, now });
+  assert.equal(report.rows.length, 0);
+  assert.equal(report.excluded.variant_rows_need_explicit_mapping, 1);
+});
