@@ -25,6 +25,7 @@ function currencyState(settings, now = Date.now()) {
 function exclusionReason(p, settings, now = Date.now()) {
   if (!p || !String(p.id || '').trim()) return 'missing_id';
   if (!isPublicCatalogProduct(p)) return 'not_explicitly_published';
+  if (Array.isArray(p.variants) && p.variants.length) return 'variant_rows_need_explicit_mapping';
   if (p.pricingReviewRequired === true || isSuspiciousDiscount(p)) return 'price_requires_review';
   if (effectiveCatalogPrice(p) === null) return 'invalid_price';
   if (!plain(p.name, 150) || plain(p.description).length < 40) return 'missing_product_content';
