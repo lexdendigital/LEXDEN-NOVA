@@ -40,6 +40,14 @@ function round2(n){ return Math.round(n*100)/100; }
 function fmtPrice(usdAmount){
   const c = DB.content;
   const code = currentCurrency();
+  // Catalog base prices are USD. Converted prices must not be shown when the
+  // saved FX snapshot is stale; this prevents shoppers and agents relying on
+  // a misleading local-currency price.
+  if(code !== 'USD'){
+    const updatedAt = Date.parse(c.ratesUpdatedAt || '');
+    const age = Date.now() - updatedAt;
+    if(!Number.isFinite(updatedAt) || age < 0 || age > 7*24*60*60*1000) return 'Price temporarily unavailable';
+  }
   const rate = (c.exchangeRates && c.exchangeRates[code]) || 1;
   const symbol = (c.currencySymbols && c.currencySymbols[code]) || code+' ';
   const converted = Number(usdAmount) * rate;
