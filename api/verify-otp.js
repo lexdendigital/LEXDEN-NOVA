@@ -1,3 +1,4 @@
+const { applyCors } = require('./cors');
 // Checks a 6-digit code (from send-otp.js) against Firestore, and — on a
 // match — issues a short-lived signed token proving "this email address
 // was verified at this moment". The sign-up wizard hands that token to
@@ -25,10 +26,7 @@ const ALLOWED_ORIGINS = [
 const MAX_ATTEMPTS = 5;
 
 function setCors(req, res) {
-  const origin = req.headers.origin;
-  if (origin && ALLOWED_ORIGINS.includes(origin)) res.setHeader("Access-Control-Allow-Origin", origin);
-  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  applyCors(req, res, { methods: 'POST, OPTIONS', headers: 'Content-Type' });
 }
 
 function initAdmin() {
