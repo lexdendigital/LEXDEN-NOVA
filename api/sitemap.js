@@ -45,7 +45,7 @@ async function handler(req, res) {
 }
 function robots(req, res) {
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-  res.status(200).send(`User-agent: *\nAllow: /\n\nSitemap: ${BASE}/sitemap.xml\n`);
+  res.status(200).send(`User-agent: OAI-SearchBot\nAllow: /\n\nUser-agent: ChatGPT-User\nAllow: /\n\nUser-agent: GPTBot\nDisallow: /\n\nUser-agent: *\nAllow: /\n\nSitemap: ${BASE}/sitemap.xml\n`);
 }
 
 module.exports = handler;
