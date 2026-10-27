@@ -21,6 +21,7 @@ const DEFAULT_POLICY = Object.freeze({
 });
 
 function finiteNonNegative(value) {
+  if (value === null || value === undefined || value === '') return null;
   const n = Number(value);
   return Number.isFinite(n) && n >= 0 ? n : null;
 }
