@@ -65,8 +65,8 @@ module.exports = async (req, res) => {
       sourceData: d,
       supplierId: d.supplierId || null,
       sku: d.productSku || d.sku || d.spu || null,
-      sellPrice: numberOrNull(d.sellPrice ?? d.productSellPrice ?? d.price),
-      suggestedSellPrice: numberOrNull(d.suggestSellPrice ?? d.suggestedSellPrice ?? d.suggestPrice),
+      sellPrice: firstNumericOrNull(d.sellPrice, d.productSellPrice, d.price),
+      suggestedSellPrice: firstNumericOrNull(d.suggestSellPrice, d.suggestedSellPrice, d.suggestPrice),
       productType: d.productType || null,
       unit: d.productUnit || d.unit || null,
       sourceCountry: d.sourceCountry || '',
@@ -112,7 +112,7 @@ function normalizeVariant(v) {
     sku: v.variantSku || v.sku,
     name: v.variantNameEn || v.variantKey || v.name || '',
     image: v.variantImage || v.image || null,
-    sellPrice: numberOrNull(v.variantSellPrice ?? v.sellPrice),
+    sellPrice: firstNumericOrNull(v.variantSellPrice, v.sellPrice),
     weight: numberOrNull(v.variantWeight),
     length: numberOrNull(v.variantLength),
     width: numberOrNull(v.variantWidth),
@@ -120,7 +120,7 @@ function normalizeVariant(v) {
     barcode: v.barcode || null,
     unit: v.variantUnit || null,
     standard: v.variantStandard || null,
-    suggestedSellPrice: numberOrNull(v.variantSugSellPrice ?? v.suggestSellPrice ?? v.suggestedSellPrice),
+    suggestedSellPrice: firstNumericOrNull(v.variantSugSellPrice, v.suggestSellPrice, v.suggestedSellPrice),
     sellPriceCurrency: String(v.variantCurrency || v.variantSellPriceCurrency || v.sellPriceCurrency || v.currencyCode || v.priceCurrency || v.currency || ''),
     sourceData: v,
     inventories: Array.isArray(v.inventories) ? v.inventories : [],
@@ -133,6 +133,14 @@ function normalizeImages(value) {
   const values = Array.isArray(value) ? value : (typeof value === 'string' ? value.split(',') : []);
   return [...new Set(values.map(item => typeof item === 'string' ? item : item && (item.url || item.imageUrl || item.img)).filter(url => typeof url === 'string' && /^https?:\/\//i.test(url.trim())).map(url => url.trim()))];
 }
+function firstNumericOrNull(...values) {
+  for (const value of values) {
+    const parsed = numberOrNull(value);
+    if (parsed != null) return parsed;
+  }
+  return null;
+}
+
 function numberOrNull(value) {
   if (value == null || (typeof value === 'string' && value.trim() === '')) return null;
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;
