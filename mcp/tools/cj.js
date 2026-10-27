@@ -15,6 +15,19 @@ const cjOrderHandler = require('../../api/cj-order');
 const cjShippingHandler = require('../../api/cj-shipping');
 const cjTrackingHandler = require('../../api/cj-tracking');
 
+function nextProductShareId(products){
+  const used=new Set();
+  for(const p of products||[]){
+    if(!p) continue;
+    const primary=String(p.id||'');
+    const alias=String(p.shareId||'');
+    if(/^p\d{1,4}$/.test(primary)) used.add(primary);
+    if(/^p\d{1,4}$/.test(alias)) used.add(alias);
+  }
+  let n=1; while(used.has('p'+n)) n++;
+  return 'p'+n;
+}
+
 function register(server) {
   server.registerTool('nova_cj_connection_status', {
     title: 'Check CJ Dropshipping connection',
@@ -85,6 +98,17 @@ function register(server) {
     const duplicate = current.find(p => String(p.physical?.cj?.productId || '') === productId);
     if (duplicate) throw Object.assign(new Error(`CJ product already imported as ${duplicate.id}.`), { status: 409 });
 
+    const localCategories = await listCatalogDoc(db, 'categories');
+    const requestedCategoryName = String(categoryName || source.categoryName || '').trim().toLowerCase();
+    // categoryId belongs to CJ's supplier taxonomy, not NOVA's local catalog.
+    // Resolve the human-readable category name against NOVA's own categories;
+    // if it has no exact match, keep physical imports out of Courses.
+    const matchedLocalCategory = localCategories.find(c => String(c.id || '').trim().toLowerCase() === requestedCategoryName || String(c.name || '').trim().toLowerCase() === requestedCategoryName);
+    const supplierLooksFashion = /\b(fashion|bags?|clothing|apparel|shoes?|footwear|wearables?)\b/i.test(requestedCategoryName);
+    const fashionCategory = localCategories.find(c => /\b(fashion|apparel|clothing)\b/i.test(String(c.id || '') + ' ' + String(c.name || '')));
+    const supplierLooksHardware = /\b(gadget|electronics?|hardware|computers?|phones?|mobile|charger|power bank|earbuds|headphones?|smartwatch|tablet|laptop|USB)\b/i.test(requestedCategoryName + ' ' + name);
+    const physicalCategory = supplierLooksHardware ? localCategories.find(c => /\b(gadget|electronics?|hardware)\b/i.test(String(c.id || '') + ' ' + String(c.name || ''))) : null;
+    const localCategory = matchedLocalCategory || (supplierLooksFashion ? fashionCategory : null) || physicalCategory || null;
     const variants = Array.isArray(response.variants) ? response.variants.filter(Boolean) : [];
     const variantIds = variants.map(v => v.vid).filter(Boolean).slice(0, 20);
     let stockResult = { body: { ok: false, error: 'No variant identifiers were returned.' } };
@@ -104,10 +128,12 @@ function register(server) {
     const specs = buildProductSpecs(source);
     const draft = {
       id,
+      shareId: nextProductShareId(current),
       name: name.slice(0, 200),
       description: String(source.description || ''),
-      categoryId: categoryId || '',
-      categoryName: categoryName || source.categoryName || '',
+      categoryId: localCategory ? localCategory.id : '',
+      category: localCategory ? localCategory.id : '',
+      categoryName: categoryName || source.categoryName || (localCategory && localCategory.name) || '',
       itemCode: `CJ-${productId.slice(-8).toUpperCase()}`,
       productType: 'PHYSICAL',
       format: 'Physical item',

@@ -267,6 +267,20 @@ function adminProducts(){
     </table>
     </div>`;
 }
+function nextProductShareId(excludeId){
+  const products=DB.legacyProducts||DB.products||[];
+  const used=new Set();
+  products.forEach(p=>{
+    if(!p || String(p.id||'')===String(excludeId||'')) return;
+    const id=String(p.id||'');
+    const alias=String(p.shareId||'');
+    if(/^p\d{1,4}$/.test(id)) used.add(id);
+    if(/^p\d{1,4}$/.test(alias)) used.add(alias);
+  });
+  let n=1;
+  while(used.has('p'+n)) n++;
+  return 'p'+n;
+}
 function openProductForm(id){
   const p = id ? findProduct(id) : null;
   const cats = DB.categories.filter(c=>c.id!=='all');
@@ -276,7 +290,7 @@ function openProductForm(id){
   const specs = (p && p.specs) || {};
   window.__adminExistingVariants = p && Array.isArray(p.variants) ? JSON.parse(JSON.stringify(p.variants)) : [];
   window.__adminExistingOptions = p && Array.isArray(p.options) ? JSON.parse(JSON.stringify(p.options)) : [];
-  const isHardware = HARDWARE_CATEGORY_IDS.includes(p ? p.category : cats[0]?.id);
+  const isPhysicalCategorySelected = isPhysicalCategory(p ? p.category : cats[0]?.id);
   wrap.innerHTML = `
   <div class="card" style="padding:18px;margin-bottom:20px;">
     <h3>${p?'Edit':'Add'} Product</h3>
@@ -289,7 +303,7 @@ function openProductForm(id){
       <div class="form-field"><label>Item code</label><input id="f_itemCode" value="${p?p.itemCode:'LX-'+Math.random().toString(36).slice(2,7).toUpperCase()}"></div>
       <div class="form-field">
         <label>Product type</label>
-        ${customSelect('f_productType', p&&p.productType || (isHardware?'PHYSICAL':'DIGITAL'), [
+        ${customSelect('f_productType', p&&p.productType || (isPhysicalCategorySelected?'PHYSICAL':'DIGITAL'), [
           {value:'DIGITAL',label:'Digital (instant download)'},
           {value:'PHYSICAL',label:'Physical (shipped item)'},
           {value:'SERVICE',label:'Service'},
@@ -319,9 +333,9 @@ function openProductForm(id){
     <div class="divider"></div>
     <h4 style="font-size:13px;margin-bottom:8px;">Details</h4>
     <div class="form-grid">
-      <div class="form-field"><label>Format</label><input id="f_format" placeholder="e.g. Video course (6h), PDF, Physical item" value="${escapeHtml(specs['Format']||'')}"></div>
-      <div class="form-field"><label>Level</label><input id="f_level" placeholder="e.g. Beginner, Intermediate (courses only)" value="${escapeHtml(specs['Level']||'')}"></div>
-      <div class="form-field" id="f_conditionWrap" style="display:${isHardware?'block':'none'};">
+      <div class="form-field" id="f_formatWrap"><label>Format</label><input id="f_format" placeholder="e.g. Video course (6h), PDF, Physical item" value="${escapeHtml(specs['Format']||'')}"></div>
+      <div class="form-field" id="f_levelWrap"><label>Level</label><input id="f_level" placeholder="e.g. Beginner, Intermediate (courses only)" value="${escapeHtml(specs['Level']||'')}"></div>
+      <div class="form-field" id="f_conditionWrap" style="display:${isPhysicalCategorySelected?'block':'none'};">
         <label>Condition</label>
         ${customSelect('f_condition', specs['Condition']||'', [
           {value:'',label:'—'},
@@ -331,7 +345,7 @@ function openProductForm(id){
           {value:'Refurbished',label:'Refurbished'}
         ], '—')}
       </div>
-      <div class="form-field" id="f_warrantyWrap" style="display:${isHardware?'block':'none'};">
+      <div class="form-field" id="f_warrantyWrap" style="display:${isPhysicalCategorySelected?'block':'none'};">
         <label>Warranty</label><input id="f_warranty" placeholder="e.g. 6 months, No warranty" value="${escapeHtml(specs['Warranty']||'')}">
       </div>
     </div>
@@ -342,7 +356,7 @@ function openProductForm(id){
          extends the existing digital-first data model rather than
          replacing it, per "adapt to the existing NOVA architecture rather
          than blindly replacing existing structures." -->
-    <div id="physicalFieldsWrap" style="display:${(p&&p.productType==='PHYSICAL')||(!p&&isHardware)?'block':'none'};">
+    <div id="physicalFieldsWrap" style="display:${(p&&p.productType==='PHYSICAL')||(!p&&isPhysicalCategorySelected)?'block':'none'};">
       <div class="divider"></div>
       <h4 style="font-size:13px;margin-bottom:8px;">Physical product details</h4>
       <div class="form-grid">
@@ -405,7 +419,7 @@ function openProductForm(id){
       <h4 style="font-size:13px;">Additional specs (shown as a list on the product page — e.g. Brand, RAM, Storage, Access, Certificate)</h4>
     </div>
     <div id="specRows">
-      ${Object.entries(specs).filter(([k])=>!['Format','Level','Condition','Warranty'].includes(k)).map(([k,v],i)=>specRowHtml(i,k,v)).join('')}
+      ${Object.entries(specs).filter(([k])=>!['format','level','condition','warranty'].includes(String(k).trim().toLowerCase())).map(([k,v],i)=>specRowHtml(i,k,v)).join('')}
     </div>
     <button type="button" class="btn btn-outline btn-sm" style="margin:8px 0 4px;" onclick="addSpecRow()">+ Add spec row</button>
     <div class="divider"></div>
@@ -451,12 +465,12 @@ function openProductForm(id){
     <div class="form-grid">
       <div class="form-field"><label>Short description</label><textarea id="f_shortDescription" maxlength="240" placeholder="Concise summary for cards and search snippets">${p?escapeHtml(p.shortDescription||''):''}</textarea></div>
       <div class="form-field"><label>Hero copy</label><textarea id="f_heroCopy" maxlength="220" placeholder="One strong product promise, without unsupported claims">${p?escapeHtml(p.heroCopy||''):''}</textarea></div>
-      <div class="form-field"><label>SEO slug</label><input id="f_slug" maxlength="120" placeholder="affiliate-marketing-professional-programme" value="${p?escapeHtml(p.slug||''):''}"><span class="text-2 small">Stored as metadata. Existing Nova product URLs still route by product ID.</span></div>
+      <div class="form-field"><label>SEO slug</label><input id="f_slug" maxlength="120" placeholder="affiliate-marketing-professional-programme" value="${p?escapeHtml(p.slug||''):''}"><span class="text-2 small">Stored as metadata. Public links use short IDs; existing product links remain supported.</span></div>
       <div class="form-field"><label>SEO title</label><input id="f_seoTitle" maxlength="60" placeholder="Recommended: about 50–60 characters" value="${p?escapeHtml(p.seoTitle||''):''}"></div>
       <div class="form-field"><label>Meta description</label><textarea id="f_metaDescription" maxlength="160" placeholder="Recommended: up to 160 characters">${p?escapeHtml(p.metaDescription||''):''}</textarea></div>
       <div class="form-field"><label>Search keywords</label><input id="f_searchKeywords" placeholder="Comma separated" value="${p?escapeHtml((p.searchKeywords||[]).join(', ')):''}"></div>
     </div>
-    <div class="form-grid">
+    <div id="courseFieldsWrap" class="form-grid" style="display:none;">
       <div class="form-field"><label>Who it is for</label><textarea id="f_audienceFor">${p?escapeHtml(p.audienceFor||''):''}</textarea></div>
       <div class="form-field"><label>Who it is NOT for</label><textarea id="f_audienceNotFor">${p?escapeHtml(p.audienceNotFor||''):''}</textarea></div>
       <div class="form-field"><label>Learning outcomes</label><textarea id="f_learningOutcomes" placeholder="One outcome per line">${p?escapeHtml(p.learningOutcomes||''):''}</textarea></div>
@@ -468,6 +482,8 @@ function openProductForm(id){
       <div class="form-field"><label>Certificate / completion</label><textarea id="f_certificateDetails">${p?escapeHtml(p.certificateDetails||''):''}</textarea></div>
       <div class="form-field"><label>Assignments / assessment</label><textarea id="f_assignmentsDetails">${p?escapeHtml(p.assignmentsDetails||''):''}</textarea></div>
       <div class="form-field"><label>Capstone / final project</label><textarea id="f_capstoneDetails">${p?escapeHtml(p.capstoneDetails||''):''}</textarea></div>
+    </div>
+    <div class="form-grid">
       <div class="form-field"><label>Access and delivery wording</label><textarea id="f_accessDelivery">${p?escapeHtml(p.accessDelivery||''):''}</textarea></div>
       <div class="form-field"><label>Support wording</label><textarea id="f_supportWording">${p?escapeHtml(p.supportWording||''):''}</textarea></div>
       <div class="form-field"><label>Refund policy</label><textarea id="f_refundPolicy" placeholder="Product-specific refund/return policy">${p?escapeHtml(p.refundPolicy||''):''}</textarea></div>
@@ -485,6 +501,7 @@ function openProductForm(id){
     </div>
   </div>`;
   renderVariantMatrix(window.__adminExistingVariants);
+  updateProductFieldVisibility();
   wrap.scrollIntoView({behavior:'smooth'});
 }
 function variantSlug(value){return String(value||'').trim().toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,48)||'value';}
@@ -659,15 +676,42 @@ function clearProductFile(){
   if(statusEl) statusEl.textContent = '';
   toast('File removed — click Save to apply.');
 }
-function toggleHardwareFields(){
-  const isHw = HARDWARE_CATEGORY_IDS.includes($('#f_category').value);
-  $('#f_conditionWrap').style.display = isHw ? 'block' : 'none';
-  $('#f_warrantyWrap').style.display = isHw ? 'block' : 'none';
+function productCategoryRecord(categoryId){
+  const id=String(categoryId||'').trim().toLowerCase();
+  return (DB.categories||[]).find(c=>String(c.id||'').trim().toLowerCase()===id || String(c.name||'').trim().toLowerCase()===id) || {id:categoryId||'',name:categoryId||''};
 }
-function togglePhysicalFields(){
-  const wrap = $('#physicalFieldsWrap');
-  if(wrap) wrap.style.display = ($('#f_productType')?.value === 'PHYSICAL') ? 'block' : 'none';
+function isCourseCategory(categoryId){
+  const c=productCategoryRecord(categoryId);
+  return /\b(course|courses|training|learning|education|academy|masterclass|programme|program)\b/i.test(String(c.id||'')+' '+String(c.name||''));
 }
+function isHardwareCategory(categoryId){
+  const c=productCategoryRecord(categoryId);
+  return HARDWARE_CATEGORY_IDS.includes(String(c.id||categoryId||'')) || /\b(gadget|gadgets|electronics?|hardware|computers?|phones?|mobile|accessories)\b/i.test(String(c.id||'')+' '+String(c.name||''));
+}
+function isPhysicalCategory(categoryId){
+  const c=productCategoryRecord(categoryId);
+  return isHardwareCategory(categoryId) || /\b(fashion|clothing|apparel|bags?|shoes?|footwear|wearables?)\b/i.test(String(c.id||'')+' '+String(c.name||''));
+}
+function isDigitalDetailsCategory(categoryId){
+  const c=productCategoryRecord(categoryId);
+  return isCourseCategory(categoryId) || /\b(template|templates|software|bundles?|ebooks?|digital|resources?|tools?|apps?)\b/i.test(String(c.id||'')+' '+String(c.name||''));
+}
+function updateProductFieldVisibility(){
+  const categoryId=$('#f_category')?.value||'';
+  const productType=$('#f_productType')?.value||'DIGITAL';
+  const isPhysical=productType==='PHYSICAL';
+  const isCourse=!isPhysical && productType!=='SERVICE' && isCourseCategory(categoryId);
+  const showFormat=!isPhysical && productType!=='SERVICE' && isDigitalDetailsCategory(categoryId);
+  const setDisplay=(selector,visible,displayValue='block')=>{const el=$(selector);if(el)el.style.display=visible?displayValue:'none';};
+  setDisplay('#f_formatWrap',showFormat);
+  setDisplay('#f_levelWrap',isCourse);
+  setDisplay('#f_conditionWrap',isPhysical);
+  setDisplay('#f_warrantyWrap',isPhysical);
+  setDisplay('#courseFieldsWrap',isCourse,'grid');
+  setDisplay('#physicalFieldsWrap',isPhysical);
+}
+function toggleHardwareFields(){ updateProductFieldVisibility(); }
+function togglePhysicalFields(){ updateProductFieldVisibility(); }
 function updateDiscountPreview(){
   const reg = parseFloat($('#f_price')?.value);
   const sale = parseFloat($('#f_salePrice')?.value);
@@ -710,6 +754,9 @@ async function saveProduct(id){
   const variantPrices=variantData.variants.map(variant=>variant.price).filter(value=>typeof value==='number'&&Number.isFinite(value));
   if(variantPrices.length)price=Math.min(...variantPrices);
   const productType=$('#f_productType')?.value||'DIGITAL';
+  const categoryId=$('#f_category')?.value||'';
+  const courseDetailsRelevant=isCourseCategory(categoryId) && productType!=='PHYSICAL' && productType!=='SERVICE';
+  const formatRelevant=isDigitalDetailsCategory(categoryId) && productType!=='PHYSICAL' && productType!=='SERVICE';
   const publishing=$('#f_status')?.value==='published';
   if(publishing&&productType==='PHYSICAL'){
     const badVariant=variantData.variants.find(variant=>typeof variant.price!=='number'||variant.price<=0);
@@ -717,22 +764,25 @@ async function saveProduct(id){
     if(!variantData.variants.length&&(!Number.isFinite(price)||price<=0)){toast('Set a positive selling price before publishing a physical product.','error');return;}
   }
   const specs = {};
-  const fmt = $('#f_format')?.value.trim(); if(fmt) specs['Format'] = fmt;
-  const lvl = $('#f_level')?.value.trim(); if(lvl) specs['Level'] = lvl;
-  const cond = $('#f_condition')?.value.trim(); if(cond) specs['Condition'] = cond;
-  const warr = $('#f_warranty')?.value.trim(); if(warr) specs['Warranty'] = warr;
+  const fmt = $('#f_format')?.value.trim(); if(formatRelevant && fmt) specs['Format'] = fmt;
+  const lvl = $('#f_level')?.value.trim(); if(courseDetailsRelevant && lvl) specs['Level'] = lvl;
+  const cond = $('#f_condition')?.value.trim(); if(productType==='PHYSICAL' && cond) specs['Condition'] = cond;
+  const warr = $('#f_warranty')?.value.trim(); if(productType==='PHYSICAL' && warr) specs['Warranty'] = warr;
   $all('#specRows [data-spec-row]').forEach(row=>{
     const k = row.querySelector('.spec-key')?.value.trim();
     const v = row.querySelector('.spec-val')?.value.trim();
-    if(k && v) specs[k] = v;
+    const key=String(k||'').trim().toLowerCase();
+    const builtInIrrelevant=(key==='level'&&!courseDetailsRelevant)||(key==='format'&&!formatRelevant)||(key==='condition'&&productType!=='PHYSICAL')||(key==='warranty'&&productType!=='PHYSICAL');
+    if(k && v && !builtInIrrelevant) specs[k] = v;
   });
   const data = {
-    name, category:$('#f_category').value, price,
+    name, category:categoryId, price,
     salePrice: variantData.variants.length ? null : ((nairaSale && nairaSale>0) ? nairaSale / ngnRate : null),
     options: variantData.options,
     variants: variantData.variants,
     pricingReviewRequired: publishing ? false : !!(id&&findProduct(id)?.pricingReviewRequired),
     itemCode:$('#f_itemCode').value, seller:$('#f_seller').value,
+    shareId: (id && findProduct(id)?.shareId) || (/^p\d{1,4}$/.test(String(id||'')) ? String(id) : nextProductShareId(id)),
     image: coverImage,
     gallery: gallery.length?gallery:[{url:coverImage,type:'image'}], affiliateLink:$('#f_link').value || '#',
     fileUrl: $('#f_fileUrl')?.value.trim() || '',
@@ -746,17 +796,17 @@ async function saveProduct(id){
     seoTitle: $('#f_seoTitle')?.value.trim() || '',
     metaDescription: $('#f_metaDescription')?.value.trim() || '',
     searchKeywords: ($('#f_searchKeywords')?.value || '').split(',').map(v=>v.trim()).filter(Boolean),
-    audienceFor: $('#f_audienceFor')?.value.trim() || '',
-    audienceNotFor: $('#f_audienceNotFor')?.value.trim() || '',
-    learningOutcomes: $('#f_learningOutcomes')?.value.trim() || '',
-    courseContents: $('#f_courseContents')?.value.trim() || '',
-    deliveryFormat: $('#f_deliveryFormat')?.value.trim() || '',
-    durationNote: $('#f_durationNote')?.value.trim() || '',
-    requirements: $('#f_requirements')?.value.trim() || '',
-    tools: $('#f_tools')?.value.trim() || '',
-    certificateDetails: $('#f_certificateDetails')?.value.trim() || '',
-    assignmentsDetails: $('#f_assignmentsDetails')?.value.trim() || '',
-    capstoneDetails: $('#f_capstoneDetails')?.value.trim() || '',
+    audienceFor: courseDetailsRelevant ? ($('#f_audienceFor')?.value.trim() || '') : '',
+    audienceNotFor: courseDetailsRelevant ? ($('#f_audienceNotFor')?.value.trim() || '') : '',
+    learningOutcomes: courseDetailsRelevant ? ($('#f_learningOutcomes')?.value.trim() || '') : '',
+    courseContents: courseDetailsRelevant ? ($('#f_courseContents')?.value.trim() || '') : '',
+    deliveryFormat: courseDetailsRelevant ? ($('#f_deliveryFormat')?.value.trim() || '') : '',
+    durationNote: courseDetailsRelevant ? ($('#f_durationNote')?.value.trim() || '') : '',
+    requirements: courseDetailsRelevant ? ($('#f_requirements')?.value.trim() || '') : '',
+    tools: courseDetailsRelevant ? ($('#f_tools')?.value.trim() || '') : '',
+    certificateDetails: courseDetailsRelevant ? ($('#f_certificateDetails')?.value.trim() || '') : '',
+    assignmentsDetails: courseDetailsRelevant ? ($('#f_assignmentsDetails')?.value.trim() || '') : '',
+    capstoneDetails: courseDetailsRelevant ? ($('#f_capstoneDetails')?.value.trim() || '') : '',
     accessDelivery: $('#f_accessDelivery')?.value.trim() || '',
     supportWording: $('#f_supportWording')?.value.trim() || '',
     refundPolicy: $('#f_refundPolicy')?.value.trim() || '',
@@ -768,7 +818,7 @@ async function saveProduct(id){
     }).filter(f=>f.q&&f.a),
     specs, rating:(id&&findProduct(id)?.rating)||4.5,
     reviewCount:(id&&findProduct(id)?.reviewCount)||0, featured:(id&&findProduct(id)?.featured)||false, trending:(id&&findProduct(id)?.trending)||false,
-    productType: $('#f_productType')?.value || 'DIGITAL',
+    productType,
     affiliateEnabled: $('#f_affiliateEnabled')?.checked || false,
     affiliateCommissionPct: $('#f_affiliateCommissionPct')?.value !== '' ? Number($('#f_affiliateCommissionPct').value) : null,
   };
@@ -1599,7 +1649,7 @@ function buildSitemapEntries(){
   return [
     {loc:SITE_URL, freq:'daily', pri:'1.0', note:'/ — home'},
     {loc:SITE_URL+'#products', freq:'daily', pri:'0.9', note:'/products — hash route, real page'},
-    ...DB.products.filter(p=>p.status!=='draft').map(p=>({loc:NOVA_LINKS_BASE+'/product/'+p.id, freq:'weekly', pri:'0.9', note:'/product/'+p.id+' — real server page'})),
+    ...DB.products.filter(p=>p.status!=='draft').map(p=>({loc:NOVA_LINKS_BASE+'/product/'+(p.shareId||p.id), freq:'weekly', pri:'0.9', note:'/product/'+(p.shareId||p.id)+' — real server page'})),
     {loc:SITE_URL+'#service', freq:'weekly', pri:'0.6', note:'/services — hash route, real page'},
     ...DB.feed.map(f=>({loc:NOVA_LINKS_BASE+'/feed/'+f.id, freq:'monthly', pri:'0.5', note:'/feed/'+f.id+' — real server page'})),
     {loc:SITE_URL+'#about', freq:'monthly', pri:'0.5', note:'/about — hash route, real page'},
@@ -2047,11 +2097,20 @@ async function importCjProduct(pid){
   const w = firstVariant.weight!=null ? firstVariant.weight : product.weight;
   const dim = (firstVariant.length||firstVariant.width||firstVariant.height) ? [firstVariant.length,firstVariant.width,firstVariant.height].map(v=>v==null?'?':(Number(v)/10)).join(' × ')+' cm' : '';
   const cats = DB.categories.filter(c=>c.id!=='all');
+  const supplierCategoryName=String(product.categoryName||'').trim().toLowerCase();
+  const exactCategory=cats.find(c=>String(c.id||'').trim().toLowerCase()===supplierCategoryName || String(c.name||'').trim().toLowerCase()===supplierCategoryName);
+  const supplierLooksFashion=/\b(fashion|bags?|clothing|apparel|shoes?|footwear|wearables?)\b/i.test(supplierCategoryName);
+  const fashionFallback=cats.find(c=>/\b(fashion|apparel|clothing)\b/i.test(String(c.id||'')+' '+String(c.name||'')));
+  const matchedCategory=exactCategory||(supplierLooksFashion?fashionFallback:null);
+  const supplierLooksHardware=/\b(gadget|electronics?|hardware|computers?|phones?|mobile|charger|power bank|earbuds|headphones?|smartwatch|tablet|laptop|USB)\b/i.test(supplierCategoryName+' '+String(product.name||''));
+  const physicalFallback=supplierLooksHardware?cats.find(c=>/\b(gadget|electronics?|hardware)\b/i.test(String(c.id||'')+' '+String(c.name||''))):null;
+  const chosenCategory=matchedCategory||physicalFallback;
   const data = {
     id: 'p'+Date.now(),
+    shareId: nextProductShareId(),
     name: (product.name||'Imported CJ product').slice(0,200),
-    category: cats[0]?.id || 'general',
-    categoryName: product.categoryName || '',
+    category: chosenCategory?.id || '',
+    categoryName: product.categoryName || chosenCategory?.name || '',
     price: 0, // supplier cost is not a shopper price; leave selling price for admin review
     salePrice: null,
     itemCode: 'CJ-'+String(pid).slice(-8).toUpperCase(),

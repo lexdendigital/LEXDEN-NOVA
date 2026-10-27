@@ -14,6 +14,8 @@ const DEFAULT_CATEGORIES = [
   {id:'software', name:'Software'},
   {id:'bundles', name:'Bundles'},
   {id:'ebooks', name:'eBooks'},
+  {id:'gadgets', name:'Gadgets'},
+  {id:'fashion', name:'Fashion'},
   {id:'computers', name:'Computers'},
   {id:'phones', name:'Phones'},
   {id:'accessories', name:'Accessories'},
@@ -21,7 +23,7 @@ const DEFAULT_CATEGORIES = [
 // Categories whose products are physical hardware rather than digital
 // downloads. Used to show hardware-relevant fields (condition, warranty,
 // brand/model) on the admin product form instead of digital-only fields.
-const HARDWARE_CATEGORY_IDS = ['computers','phones','accessories'];
+const HARDWARE_CATEGORY_IDS = ['computers','phones','accessories','gadgets'];
 
 // NOTE: the rating/reviewCount values below are historical placeholders
 // only — DB.products' getter (see STATE/STORAGE section) always overwrites

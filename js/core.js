@@ -307,7 +307,7 @@ function syncWishIcons(){
     btn.innerHTML = icon(wished?'heartFill':'heart');
   });
 }
-function findProduct(id){ return DB.products.find(p=>p.id===id); }
+function findProduct(id){ return DB.products.find(p=>String(p.id)===String(id)) || DB.products.find(p=>String(p.shareId||'')===String(id)); }
 
 /* ---------------- AI/SEO STRUCTURED DATA ----------------
    Keeps <title>, meta description/OG/Twitter tags, canonical URL, and
@@ -349,6 +349,17 @@ function setJsonLd(id, obj){
   tag.textContent = JSON.stringify(obj);
 }
 const SITE_URL = 'https://lexdendigital.github.io/LEXDEN-NOVA/index.html';
+// Preserve internal catalog IDs for orders/reviews, but use short public IDs in URLs.
+function publicProductId(p){
+  const shareId = String(p && p.shareId || '').trim();
+  const id = String(p && p.id || '').trim();
+  if(/^p\d{1,4}$/.test(shareId)) return shareId;
+  if(/^p\d{1,4}$/.test(id)) return id;
+  return id;
+}
+function publicProductUrl(p){
+  return NOVA_LINKS_BASE + '/product/' + encodeURIComponent(publicProductId(p));
+}
 function productToSchema(p){
   const stats = liveRatingStats(p);
   return {
@@ -360,7 +371,7 @@ function productToSchema(p){
       price: isFreeProduct(p) ? '0.00' : (p.salePrice||p.price).toFixed(2),
       priceCurrency:'USD',
       availability: isFreeProduct(p) ? 'https://schema.org/InStock' : 'https://schema.org/InStock',
-      url: NOVA_LINKS_BASE+'/product/'+p.id,
+      url: publicProductUrl(p),
     },
   };
 }
@@ -382,7 +393,7 @@ function updateSeoForRoute(hash){
     if(p){
       const desc = (p.metaDescription || p.shortDescription || p.description || '').slice(0,160);
       const seoTitle = (p.seoTitle || p.name || '').trim();
-      const url = NOVA_LINKS_BASE+'/product/'+p.id;
+      const url = publicProductUrl(p);
       const cat = DB.categories.find(x=>x.id===p.category);
       document.title = seoTitle ? `${seoTitle} — ${appName}` : appName;
       setMeta('description', desc);
