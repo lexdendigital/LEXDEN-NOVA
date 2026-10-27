@@ -109,12 +109,14 @@ function sortShippingOptions(options, settings = {}) {
   const preferred = String(policy.preferredMethod || '').toLowerCase();
   const fallbacks = (policy.fallbackMethods || []).map(v => String(v).toLowerCase());
   const express = (policy.expressMethods || []).map(v => String(v).toLowerCase());
+  const isExpressMethod = name => express.some(v => name === v || name.includes(v))
+    || /(^|\\s)(dhl|fedex|ups|express|priority)(\\s|$)/i.test(name);
   const rank = (option) => {
     const name = String(option.logisticName || '').toLowerCase();
     if (preferred && name === preferred) return 0;
     const fallbackIndex = fallbacks.indexOf(name);
     if (fallbackIndex !== -1) return 10 + fallbackIndex;
-    if (express.some(v => name === v || name.includes(v))) return 100;
+    if (isExpressMethod(name)) return 100;
     return 50;
   };
   return (options || []).slice().sort((a, b) => {
@@ -124,7 +126,7 @@ function sortShippingOptions(options, settings = {}) {
   }).map((option, index) => ({
     ...option,
     isPreferred: String(option.logisticName || '').toLowerCase() === preferred,
-    isExpress: express.some(v => String(option.logisticName || '').toLowerCase().includes(v)),
+    isExpress: isExpressMethod(String(option.logisticName || '').toLowerCase()),
     sortOrder: index + 1,
   }));
 }
