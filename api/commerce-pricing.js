@@ -76,10 +76,13 @@ function calculateRetailPriceUSD(supplierCostUSD, settings = {}) {
   const policy = getCommercePricingPolicy(settings);
   const rate = rateForCurrency(settings, 'NGN');
   if (!rate) return null;
+  // Retail pricing covers the highest supported gateway fee so USD
+  // customers do not quietly consume the margin reserved for maintenance.
+  const worstCasePaymentFeePct = Math.max(policy.paystackPercentFeePct, policy.paystackUsdPercentFeePct);
   const denominator = 1
     - policy.targetNetMarginPct / 100
     - policy.websiteMaintenanceReservePct / 100
-    - policy.paystackPercentFeePct / 100;
+    - worstCasePaymentFeePct / 100;
   if (denominator <= 0.05) return null;
   const bufferedCostUSD = cost * (1 + policy.fxSafetyBufferPct / 100);
   const fixedFeeUSD = policy.paystackFixedFeeNGN / rate;
