@@ -625,6 +625,9 @@ module.exports = async function handler(req, res) {
       || Math.round((quotePrice + quoteShipping) * 100) !== Math.round(quoteTotal * 100)) {
       return res.status(200).json({ ok: false, error: 'The saved shipping total failed validation. No shipment was created; contact support with your payment reference.' });
     }
+    if (shippingQuote.blockedByPricingPolicy === true) {
+      return res.status(200).json({ ok: false, error: 'The selected shipping route exceeds the product affordability limit. The order was not fulfilled. Contact support with your payment reference.' });
+    }
     shippingQuoteValidated = true;
     deliveryDetails.shippingQuoteId = quoteId;
     deliveryDetails.shippingMethod = String(shippingQuote.logisticName);
