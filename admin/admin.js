@@ -1646,7 +1646,7 @@ function buildSitemapEntries(){
   return [
     {loc:SITE_URL, freq:'daily', pri:'1.0', note:'/ — home'},
     {loc:SITE_URL+'#products', freq:'daily', pri:'0.9', note:'/products — hash route, real page'},
-    ...DB.products.filter(p=>p.status!=='draft').map(p=>({loc:NOVA_LINKS_BASE+'/product/'+p.id, freq:'weekly', pri:'0.9', note:'/product/'+p.id+' — real server page'})),
+    ...DB.products.filter(p=>p.status!=='draft').map(p=>({loc:NOVA_LINKS_BASE+'/product/'+(p.shareId||p.id), freq:'weekly', pri:'0.9', note:'/product/'+(p.shareId||p.id)+' — real server page'})),
     {loc:SITE_URL+'#service', freq:'weekly', pri:'0.6', note:'/services — hash route, real page'},
     ...DB.feed.map(f=>({loc:NOVA_LINKS_BASE+'/feed/'+f.id, freq:'monthly', pri:'0.5', note:'/feed/'+f.id+' — real server page'})),
     {loc:SITE_URL+'#about', freq:'monthly', pri:'0.5', note:'/about — hash route, real page'},
