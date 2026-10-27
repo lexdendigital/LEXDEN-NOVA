@@ -14,6 +14,8 @@ const DEFAULT_CATEGORIES = [
   {id:'software', name:'Software'},
   {id:'bundles', name:'Bundles'},
   {id:'ebooks', name:'eBooks'},
+  {id:'gadgets', name:'Gadgets'},
+  {id:'fashion', name:'Fashion'},
   {id:'computers', name:'Computers'},
   {id:'phones', name:'Phones'},
   {id:'accessories', name:'Accessories'},
