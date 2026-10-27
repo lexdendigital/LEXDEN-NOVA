@@ -567,7 +567,7 @@ function startPaystackCheckout(productId, variantId, deliveryDetails, confirmed)
   // fire twice, and so every DIGITAL/SERVICE product's checkout runs
   // through the untouched original path below with zero behavior change.
   if(p.productType === 'PHYSICAL' && deliveryDetails === undefined){
-    openDeliveryDetailsModal(p, (deliveryDetails)=>{
+    openDeliveryDetailsModal(p, selectedVariant, (deliveryDetails)=>{
       startPaystackCheckout(productId, selectedVariant&&selectedVariant.id||null, deliveryDetails);
     });
     return;
@@ -612,12 +612,21 @@ function startPaystackCheckout(productId, variantId, deliveryDetails, confirmed)
     : PAYSTACK_FALLBACK_CURRENCY);
   const proceedWithEmail = (email) => {
     const rate = (c.exchangeRates && c.exchangeRates[chargeCode]) || 1;
-    // Paystack expects every currency's amount in its smallest subunit
-    // (kobo for NGN, cents for USD, etc.) — always base amount * 100,
-    // per Paystack's own "Supported currency" docs.
+    // Item prices are stored in USD. NGN is rounded to whole naira; USD retains cents.
     const variantPrice=effectiveVariantPrice(p,selectedVariant);
-    const amountMajor = creatorInfo ? creatorInfo.price : Math.round((variantPrice==null?(p.salePrice || p.price):variantPrice) * rate);
-    const amountSubunit = amountMajor * 100;
+    const itemAmountMajor = creatorInfo ? creatorInfo.price : (chargeCode === 'NGN'
+      ? Math.round((variantPrice==null?(p.salePrice || p.price):variantPrice) * rate)
+      : Math.round((variantPrice==null?(p.salePrice || p.price):variantPrice) * rate * 100) / 100);
+    const cjPhysical = p.productType === 'PHYSICAL' && p.physical && p.physical.cj && p.physical.cj.variantId;
+    const shippingQuoteId = cjPhysical && deliveryDetails ? String(deliveryDetails.shippingQuoteId || '') : '';
+    const shippingCurrency = cjPhysical && deliveryDetails ? String(deliveryDetails.shippingCurrency || '') : '';
+    const shippingAmountMajor = cjPhysical && deliveryDetails ? Number(deliveryDetails.shippingAmountMajor) : 0;
+    if(cjPhysical && (!shippingQuoteId || shippingCurrency !== chargeCode || !Number.isFinite(shippingAmountMajor) || shippingAmountMajor < 0)){
+      toast('Shipping must be recalculated before payment. No payment has been taken.', 'error');
+      return;
+    }
+    const amountMajor = creatorInfo ? creatorInfo.price : itemAmountMajor + (cjPhysical ? shippingAmountMajor : 0);
+    const amountSubunit = Math.round(amountMajor * 100);
     const reference = 'LN-' + Date.now() + '-' + Math.random().toString(36).slice(2,8);
     try{
       window.logLifecycleEvent && window.logLifecycleEvent('checkout_started', email, {
@@ -651,6 +660,7 @@ function startPaystackCheckout(productId, variantId, deliveryDetails, confirmed)
         // in addition to being stored on the order doc server-side (see
         // verify-paystack.js).
         ...(deliveryDetails ? { delivery: deliveryDetails } : {}),
+        ...(shippingQuoteId ? { shippingQuoteId } : {}),
       },
       callback: function(response){
         // Record this payment as "pending" the instant Paystack confirms
@@ -691,22 +701,65 @@ function startPaystackCheckout(productId, variantId, deliveryDetails, confirmed)
   }
 }
 
+
+function checkoutChargeCurrency(){
+  const selected = currentCurrency();
+  return PAYSTACK_CHARGEABLE_CURRENCIES.includes(selected) ? selected : PAYSTACK_FALLBACK_CURRENCY;
+}
+function formatChargeMajor(amount,currency){
+  const value = Number(amount);
+  if(!Number.isFinite(value)) return 'Price unavailable';
+  const c = DB.content || {};
+  const symbol = (c.currencySymbols && c.currencySymbols[currency]) || (currency === 'NGN' ? '₦' : currency + ' ');
+  const decimals = currency === 'NGN' ? 0 : 2;
+  return symbol + value.toLocaleString(undefined,{minimumFractionDigits:decimals,maximumFractionDigits:decimals});
+}
+function checkoutItemAmountMajor(product,variant,currency){
+  const c = DB.content || {};
+  const rate = (c.exchangeRates && c.exchangeRates[currency]) || 1;
+  const base = effectiveVariantPrice(product,variant);
+  if(base == null) return null;
+  return currency === 'NGN' ? Math.round(base * rate) : Math.round(base * rate * 100) / 100;
+}
+function isCjPhysicalProduct(product){
+  return !!(product && product.productType === 'PHYSICAL' && product.physical && product.physical.cj && product.physical.cj.variantId);
+}
+
 function openCheckoutReviewModal(product,variant,delivery,onContinue,external=false){
   if($('#checkoutReviewOverlay'))return;
   const overlay=document.createElement('div');overlay.id='checkoutReviewOverlay';overlay.className='modal-backdrop';overlay.setAttribute('role','presentation');
   const amount=effectiveVariantPrice(product,variant);
   const selectedName=variantLabel(product,variant);
-  const deliveryCopy=external?'You will continue to the seller’s payment page to complete this order.':product.productType==='PHYSICAL'
-    ? `Ships to ${escapeHtml(delivery&&delivery.country||'your delivery address')}${product.physical&&product.physical.deliveryEstimate?` · ${escapeHtml(product.physical.deliveryEstimate)}`:''}`
-    : 'Digital access or download after payment verification';
-  overlay.innerHTML=`<section class="modal-box checkout-review" role="dialog" aria-modal="true" aria-labelledby="checkoutReviewTitle" aria-describedby="checkoutReviewDelivery">
-    <h2 id="checkoutReviewTitle">Review your selection</h2>
-    <p class="text-2">${escapeHtml(product.name)}</p>
-    ${selectedName?`<div class="checkout-review-variant">${escapeHtml(selectedName)}</div>`:''}
-    <div class="checkout-review-price"><span>Price</span><strong>${amount===0?'Free':fmtPrice(amount)}</strong></div>
-    <p id="checkoutReviewDelivery" class="text-2 small">${deliveryCopy}</p>
-    <div class="checkout-review-actions"><button type="button" class="btn btn-ghost" data-review-cancel>Change selection</button><button type="button" class="btn btn-primary" data-review-continue>Continue to payment</button></div>
-  </section>`;
+  const chargeCurrency=checkoutChargeCurrency();
+  const itemMajor=checkoutItemAmountMajor(product,variant,chargeCurrency);
+  const hasShippingQuote=!external && isCjPhysicalProduct(product) && delivery && delivery.shippingQuoteId;
+  const shippingMajor=hasShippingQuote?Number(delivery.shippingAmountMajor):0;
+  const totalMajor=hasShippingQuote?itemMajor+shippingMajor:itemMajor;
+  let deliveryCopy;
+  if(external) deliveryCopy='You will continue to the seller’s payment page to complete this order.';
+  else if(product.productType==='PHYSICAL'){
+    deliveryCopy='Ships to '+escapeHtml(delivery&&delivery.country||'your delivery address');
+    if(hasShippingQuote && delivery.shippingMethod) deliveryCopy+=' · '+escapeHtml(delivery.shippingMethod);
+    if(hasShippingQuote && delivery.shippingETA) deliveryCopy+=' · estimated '+escapeHtml(delivery.shippingETA);
+    if(!hasShippingQuote && isCjPhysicalProduct(product)) deliveryCopy+=' · a valid shipping quote is required before payment';
+    if(!hasShippingQuote && !isCjPhysicalProduct(product) && product.physical && product.physical.deliveryEstimate) deliveryCopy+=' · '+escapeHtml(product.physical.deliveryEstimate);
+  } else deliveryCopy='Digital access or download after payment verification';
+  let priceRows;
+  if(hasShippingQuote){
+    priceRows='<div class="checkout-review-price"><span>Product price</span><strong>'+formatChargeMajor(itemMajor,chargeCurrency)+'</strong></div>'
+      +'<div class="checkout-review-price"><span>Shipping ('+escapeHtml(delivery.shippingMethod||'selected route')+')</span><strong>'+formatChargeMajor(shippingMajor,chargeCurrency)+'</strong></div>'
+      +'<div class="checkout-review-price" style="border-top:1px solid var(--border);padding-top:10px;margin-top:4px;"><span>Total due now</span><strong>'+formatChargeMajor(totalMajor,chargeCurrency)+'</strong></div>';
+  } else {
+    priceRows='<div class="checkout-review-price"><span>Price</span><strong>'+(amount===0?'Free':fmtPrice(amount))+'</strong></div>';
+  }
+  overlay.innerHTML='<section class="modal-box checkout-review" role="dialog" aria-modal="true" aria-labelledby="checkoutReviewTitle" aria-describedby="checkoutReviewDelivery">'
+    +'<h2 id="checkoutReviewTitle">Review your selection</h2>'
+    +'<p class="text-2">'+escapeHtml(product.name)+'</p>'
+    +(selectedName?'<div class="checkout-review-variant">'+escapeHtml(selectedName)+'</div>':'')
+    +priceRows
+    +'<p id="checkoutReviewDelivery" class="text-2 small">'+deliveryCopy+'</p>'
+    +'<div class="checkout-review-actions"><button type="button" class="btn btn-ghost" data-review-cancel>Change selection</button><button type="button" class="btn btn-primary" data-review-continue>Continue to payment</button></div>'
+    +'</section>';
   document.body.appendChild(overlay);
   const close=()=>overlay.remove();
   overlay.querySelector('[data-review-cancel]')?.addEventListener('click',close);
@@ -1173,6 +1226,7 @@ async function verifyPaystackPayment(reference, product, email, showResult, deli
       productId: product.id, productName: product.name,
       ...(variantId?{variantId}:{}),
       ...(delivery ? { delivery } : {}),
+      ...(delivery && delivery.shippingQuoteId ? { shippingQuoteId: delivery.shippingQuoteId } : {}),
       ...(window.__resByRef && window.__resByRef[reference] ? { reservationId: window.__resByRef[reference] } : {}),
       ...resolveAffiliateAttribution(product.id),
     });
