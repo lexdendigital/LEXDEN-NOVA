@@ -138,7 +138,7 @@ function numberOrNull(value) {
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;
   // CJ sometimes includes a currency symbol or thousands separators in price fields.
   // Accept one unambiguous number; ranges/multiple numbers stay blank for review.
-  const matches = String(value).replace(/,/g, '').match(/-?\\d+(?:\\.\\d+)?/g);
+  const matches = String(value).replace(/,/g, '').match(/-?\d+(?:\.\d+)?/g);
   if (!matches || matches.length !== 1) return null;
   const n = Number(matches[0]);
   return Number.isFinite(n) ? n : null;
