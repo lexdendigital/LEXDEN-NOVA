@@ -87,6 +87,24 @@ const PAYSTACK_CHARGEABLE_CURRENCIES = ['NGN', 'USD'];
 // api/_shared.js) and rejects underpayment before writing the order.
 const FIRESTORE_PROJECT = 'lexden-nova';
 
+function countryCodeForShipping(value) {
+  const text = String(value || '').trim();
+  if (/^[A-Z]{2}$/.test(text)) return text;
+  return ({ nigeria: 'NG', 'united states': 'US', 'united kingdom': 'GB', ghana: 'GH', kenya: 'KE', 'south africa': 'ZA' })[text.toLowerCase()] || null;
+}
+function timestampMillis(value) {
+  if (value && typeof value.toMillis === 'function') return value.toMillis();
+  if (value && typeof value.toDate === 'function') return value.toDate().getTime();
+  if (value instanceof Date) return value.getTime();
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  const parsed = Date.parse(value || '');
+  return Number.isFinite(parsed) ? parsed : null;
+}
+function samePaidMinorUnits(paidMinor, majorAmount) {
+  return Number.isFinite(Number(majorAmount)) && Number(paidMinor) === Math.round(Number(majorAmount) * 100);
+}
+
+
 function fsValue(v) {
   if (v == null) return null;
   if ('stringValue' in v) return v.stringValue;
@@ -407,7 +425,7 @@ module.exports = async function handler(req, res) {
     return res.status(405).json({ ok: false, error: 'Method not allowed — use POST.' });
   }
 
-  const { reference, uid, email, productId, productName, variantId, delivery, affiliateRef, affiliateRefSource, reservationId } = req.body || {};
+  const { reference, uid, email, productId, productName, variantId, delivery, shippingQuoteId: requestShippingQuoteId, affiliateRef, affiliateRefSource, reservationId } = req.body || {};
   const safeReservationId = typeof reservationId === 'string' && /^[A-Za-z0-9_\-]{8,200}$/.test(reservationId) ? reservationId : null;
 
   if (!reference || typeof reference !== 'string') {
@@ -567,7 +585,56 @@ module.exports = async function handler(req, res) {
     // Maybe the product was added/changed within the cache window.
     selection = await getExpectedAmount(productId, paidCurrency, variantId, { fresh: true });
   }
-  const expectedAmount = selection && selection.price;
+  let shippingQuote = null;
+  let shippingQuoteValidated = false;
+  const resolvedProduct = selection && selection.product;
+  const isLegacyCjPhysical = !!(!selection?.creator && resolvedProduct && resolvedProduct.productType === 'PHYSICAL' && resolvedProduct.physical && resolvedProduct.physical.cj && resolvedProduct.physical.cj.variantId);
+  const quoteId = String(requestShippingQuoteId || (delivery && delivery.shippingQuoteId) || '').trim();
+  if (isLegacyCjPhysical) {
+    if (!quoteId || !deliveryDetails) {
+      console.warn(`CJ physical checkout has no validated shipping quote: ref=${reference} product=${productId}`);
+      return res.status(200).json({ ok: false, error: 'This physical order has no valid shipping quote. It has not been fulfilled. Please contact support with your payment reference.' });
+    }
+    if (!/^[0-9a-f-]{36}$/i.test(quoteId)) {
+      return res.status(200).json({ ok: false, error: 'The shipping quote is invalid. This order was not fulfilled; contact support with your payment reference.' });
+    }
+    const quoteRef = db.collection('shippingQuotes').doc(quoteId);
+    const quoteSnap = await quoteRef.get();
+    shippingQuote = quoteSnap.exists ? quoteSnap.data() : null;
+    const payTime = timestampMillis(paystackData.paid_at) || timestampMillis(paystackData.created_at) || Date.now();
+    const quoteCreatedAt = timestampMillis(shippingQuote && shippingQuote.createdAt);
+    const quoteExpiresAt = timestampMillis(shippingQuote && shippingQuote.expiresAt);
+    const countryCode = countryCodeForShipping(deliveryDetails.country);
+    const currentPrice = Number(selection.price);
+    const quotePrice = Number(shippingQuote && shippingQuote.productAmountMajor);
+    if (!shippingQuote || !['open', 'reserved'].includes(shippingQuote.status) || (shippingQuote.status === 'reserved' && shippingQuote.usedBy !== reference)
+      || String(shippingQuote.productId) !== String(productId)
+      || String(shippingQuote.variantId || '') !== String(selection.variantId || '')
+      || String(shippingQuote.currency) !== String(paidCurrency)
+      || String(shippingQuote.endCountryCode) !== String(countryCode || '')
+      || !shippingQuote.logisticName
+      || !Number.isFinite(quoteCreatedAt) || !Number.isFinite(quoteExpiresAt)
+      || payTime < quoteCreatedAt - 60_000 || payTime > quoteExpiresAt
+      || !Number.isFinite(quotePrice) || Math.round(quotePrice * 100) !== Math.round(currentPrice * 100)) {
+      console.warn(`CJ shipping quote validation failed: ref=${reference} quote=${quoteId} product=${productId}`);
+      return res.status(200).json({ ok: false, error: 'The shipping quote expired or no longer matches this item, option, country or price. No shipment was created. Contact support with your payment reference.' });
+    }
+    const quoteTotal = Number(shippingQuote.totalAmountMajor);
+    const quoteShipping = Number(shippingQuote.shippingAmountMajor);
+    if (!Number.isFinite(quoteTotal) || !Number.isFinite(quoteShipping) || quoteShipping < 0
+      || Math.round((quotePrice + quoteShipping) * 100) !== Math.round(quoteTotal * 100)) {
+      return res.status(200).json({ ok: false, error: 'The saved shipping total failed validation. No shipment was created; contact support with your payment reference.' });
+    }
+    shippingQuoteValidated = true;
+    deliveryDetails.shippingQuoteId = quoteId;
+    deliveryDetails.shippingMethod = String(shippingQuote.logisticName);
+    deliveryDetails.shippingAmountMajor = quoteShipping;
+    deliveryDetails.shippingCurrency = String(shippingQuote.currency);
+    deliveryDetails.shippingAmountUSD = Number(shippingQuote.shippingAmountUSD);
+    deliveryDetails.shippingETA = shippingQuote.logisticAging || null;
+    deliveryDetails.shippingQuoteExpiresAt = new Date(quoteExpiresAt).toISOString();
+  }
+  const expectedAmount = shippingQuoteValidated ? Number(shippingQuote.totalAmountMajor) : selection && selection.price;
   // Creator products: the amount must match OUR price EXACTLY (integer minor units). A mismatch is
   // never fulfilled and never silently accepted; it is recorded so an admin can refund it.
   if (selection && selection.creator && expectedAmount !== null && expectedAmount !== undefined) {
@@ -582,10 +649,12 @@ module.exports = async function handler(req, res) {
     }
   }
   if (expectedAmount !== null && expectedAmount !== undefined) {
-    const tolerance = Math.max(1, Math.ceil(expectedAmount * 0.02)); // 2%, min 1 unit
-    // (legacy admin-curated catalogue keeps its existing tolerance; creator products were exact-checked above)
-    let blocked = selection.creator ? false : amountMajor < expectedAmount - tolerance;
-    if (blocked && !selection.creator) {
+    const tolerance = shippingQuoteValidated ? 0 : Math.max(1, Math.ceil(expectedAmount * 0.02)); // existing legacy tolerance; exact for live shipping quotes
+    // CJ shipping quotes bind item + freight into one exact amount. Ordinary legacy/digital prices retain their prior tolerance.
+    let blocked = shippingQuoteValidated
+      ? !samePaidMinorUnits(paystackData.amount, expectedAmount)
+      : selection.creator ? false : amountMajor < expectedAmount - tolerance;
+    if (blocked && !selection.creator && !shippingQuoteValidated) {
       // Re-read the catalog FRESH before rejecting: the cached price may be
       // up to 20s old (e.g. the admin just lowered it). Never reject on a stale read.
       const fresh = await getExpectedAmount(productId, paidCurrency, variantId, { fresh: true });
@@ -611,6 +680,30 @@ module.exports = async function handler(req, res) {
       ok: false,
       error: 'Could not confirm this product\'s price yet — this will retry automatically. Contact support if it doesn\'t resolve shortly.',
     });
+  }
+
+  if (shippingQuoteValidated && shippingQuote) {
+    const quoteRef = db.collection('shippingQuotes').doc(quoteId);
+    try {
+      await db.runTransaction(async tx => {
+        const snap = await tx.get(quoteRef);
+        if (!snap.exists) throw new Error('shipping_quote_missing');
+        const current = snap.data();
+        if (current.status === 'reserved' && current.usedBy === reference) return;
+        if (current.status !== 'open') throw new Error('shipping_quote_already_used');
+        const expiresAt = timestampMillis(current.expiresAt);
+        const paidAt = timestampMillis(paystackData.paid_at) || timestampMillis(paystackData.created_at) || Date.now();
+        if (!Number.isFinite(expiresAt) || paidAt > expiresAt) throw new Error('shipping_quote_expired');
+        tx.update(quoteRef, {
+          status: 'reserved',
+          usedBy: reference,
+          reservedAt: FieldValue.serverTimestamp(),
+        });
+      });
+    } catch (e) {
+      console.warn(`CJ shipping quote could not be reserved: ref=${reference} quote=${quoteId} reason=${e.message}`);
+      return res.status(200).json({ ok: false, error: 'This shipping quote was already used or expired. No shipment was created. Contact support with your payment reference.' });
+    }
   }
 
   const orderProductName = selection.variantName
@@ -643,6 +736,17 @@ module.exports = async function handler(req, res) {
       variantName: selection.variantName || null,
       paystackReference: reference,
       amount: amountMajor,
+      productAmount: shippingQuoteValidated ? Number(shippingQuote.productAmountMajor) : amountMajor,
+      shippingAmount: shippingQuoteValidated ? Number(shippingQuote.shippingAmountMajor) : 0,
+      shippingMethod: shippingQuoteValidated ? String(shippingQuote.logisticName) : null,
+      priceBreakdown: shippingQuoteValidated ? {
+        productAmount: Number(shippingQuote.productAmountMajor),
+        shippingAmount: Number(shippingQuote.shippingAmountMajor),
+        currency: paidCurrency,
+        shippingMethod: String(shippingQuote.logisticName),
+        shippingQuoteId: quoteId,
+        shippingETA: shippingQuote.logisticAging || null,
+      } : null,
       currency: paidCurrency,
       status: 'paid',
       timestamp: FieldValue.serverTimestamp(),
@@ -757,7 +861,8 @@ module.exports = async function handler(req, res) {
   // pattern as the CJ order + emails above — never delays or risks the
   // already-successful payment response.
   attributeAffiliateCommission(db, {
-    reference, buyerUid: uid, productId, variantId: selection.variantId, productName: orderProductName, amountMajor,
+    reference, buyerUid: uid, productId, variantId: selection.variantId, productName: orderProductName,
+    amountMajor: shippingQuoteValidated ? Number(shippingQuote.productAmountMajor) : amountMajor,
     currency: paidCurrency, affiliateRef, affiliateRefSource,
   }).catch(e => console.error('affiliate commission attribution failed:', e.message));
 
