@@ -909,10 +909,18 @@ async function cjRefreshShippingEstimate(product,selectedVariant){
       elOption.value=option.quoteId;
       const eta=option.logisticAging?(' · estimated '+option.logisticAging):'';
       const badge=option.isPreferred?' (preferred)':(option.isExpress?' (express)':'');
-      elOption.textContent=option.logisticName+badge+' · '+formatChargeMajor(option.shippingAmountMajor,currency)+eta;
+      const blocked=option.blockedByPricingPolicy===true;
+      elOption.disabled=blocked;
+      elOption.textContent=option.logisticName+badge+' · '+formatChargeMajor(option.shippingAmountMajor,currency)+eta+(blocked?' · unavailable at this delivery cost':'');
       routeSelect.appendChild(elOption);
     });
-    if(routeSelect){routeSelect.disabled=false;if(!routeSelect.options.length){routeSelect.disabled=true;if(el)el.textContent='CJ returned no usable route prices. No payment has been taken.';if(btn)btn.disabled=true;return;}}
+    if(routeSelect){
+      routeSelect.disabled=false;
+      if(!routeSelect.options.length){routeSelect.disabled=true;if(el)el.textContent='CJ returned no usable route prices. No payment has been taken.';if(btn)btn.disabled=true;return;}
+      const firstEligible=Array.from(routeSelect.options).find(option=>!option.disabled);
+      if(!firstEligible){routeSelect.value='';if(el)el.textContent='None of the available routes meets LEXDEN NOVA’s affordability limit for this item. Please choose a locally stocked alternative or try a bundle.';if(btn)btn.disabled=true;return;}
+      routeSelect.value=firstEligible.value;
+    }
     updateCjShippingChoice(product,selectedVariant);
   }catch(error){
     if(requestSeq!==__cjShippingQuoteRequestSeq)return;
@@ -937,8 +945,15 @@ function updateCjShippingChoice(product,selectedVariant){
   if(quote.logisticAging)message+=' Estimated transit: '+quote.logisticAging+'. This is an estimate, not a guarantee.';
   const policy=(DB.content&&DB.content.commercePricingPolicy&&DB.content.commercePricingPolicy.shipping)||{};
   const warningRatio=Number(policy.highShippingItemPriceRatioWarning)||0.6;
-  if(ratio!==null&&ratio>=1.5)message+=' Shipping costs more than the product; compare another route or a locally stocked alternative.';
-  else if(ratio!==null&&ratio>=warningRatio)message+=' Shipping is high relative to this item price, so compare routes before paying.';
+  const blockRatio=Number(policy.highShippingItemPriceRatioBlock)||1.5;
+  if(ratio!==null&&ratio>=blockRatio){
+    message+=' This route exceeds the shipping-to-item affordability limit.';
+    if(policy.enforceShippingRatioBlock===true){
+      el.textContent=message+' Select another route or a locally stocked/bundled alternative.';
+      btn.disabled=true;
+      return;
+    }
+  } else if(ratio!==null&&ratio>=warningRatio)message+=' Shipping is high relative to this item price, so compare routes before paying.';
   el.textContent=message;
   btn.disabled=false;
 }
