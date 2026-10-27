@@ -1,72 +1,187 @@
 // /api/cj-shipping.js
-//
-// LEXDEN NOVA × CJ — freight calculation for checkout (README §19).
-// Called from openDeliveryDetailsModal's flow BEFORE Paystack is opened,
-// so the customer picks a real shipping method/price instead of a
-// hard-coded guess. Never trust a client-supplied shipping price at
-// cj-order.js time — this route's job is only to help the browser show
-// honest numbers; cj-order.js re-derives the final amount server-side.
-//
-// CONTRACT
-// POST { startCountryCode?: 'CN', endCountryCode: 'NG', products:[{ vid, quantity }] }
-// Response: { ok:true, options:[{ logisticName, logisticPrice, currency,
-//                                  aging, logisticAging }] }
+// CJ freight calculation. Public generic quotes remain available to admin/MCP;
+// storefront quotes are persisted server-side and must be validated at payment verification.
+'use strict';
 
+const crypto = require('node:crypto');
 const { setCors, cjFetch, writeSyncLog } = require('./cj-shared');
+const { getDb } = require('./affiliate/shared');
+const { resolveProductSelection } = require('./product-variants');
+const { getCommercePricingPolicy, calculateShippingCharge, sortShippingOptions } = require('./commerce-pricing');
+
+function countryToIso2(value) {
+  const text = String(value || '').trim();
+  if (/^[A-Z]{2}$/.test(text)) return text;
+  return ({ nigeria: 'NG', 'united states': 'US', 'united kingdom': 'GB', ghana: 'GH', kenya: 'KE', 'south africa': 'ZA' })[text.toLowerCase()] || null;
+}
+
+function roundTotal(value, currency) {
+  return currency === 'NGN' ? Math.ceil(value) : Math.round(value * 100) / 100;
+}
 
 module.exports = async (req, res) => {
   setCors(req, res);
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-store');
   if (req.method === 'OPTIONS') return res.status(204).end();
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'Method not allowed' });
 
   const body = req.body || {};
-  const endCountryCode = String(body.endCountryCode || body.destinationCountry || 'NG').toUpperCase();
-  const startCountryCode = String(body.startCountryCode || 'CN').toUpperCase();
+  const endCountryCode = countryToIso2(body.endCountryCode || body.destinationCountry || 'NG');
+  const startCountryCode = countryToIso2(body.startCountryCode || 'CN');
   const products = Array.isArray(body.products) ? body.products.slice(0, 20) : [];
+  const checkoutQuote = typeof body.productId === 'string' && body.productId.length > 0;
+  const currency = String(body.currency || 'NGN').toUpperCase();
 
-  if (!products.length || products.some(p => !p.vid)) {
-    return res.status(200).json({ ok: false, error: 'Provide at least one product with a vid.' });
+  if (!endCountryCode || !startCountryCode) {
+    return res.status(200).json({ ok: false, error: 'Choose a supported delivery country before checking shipping.' });
+  }
+  if (!products.length || products.some(p => !p || !p.vid)) {
+    return res.status(200).json({ ok: false, error: 'Provide at least one product with a variant id.' });
+  }
+  if (checkoutQuote && (!['NGN', 'USD'].includes(currency) || products.length !== 1)) {
+    return res.status(200).json({ ok: false, error: 'The checkout shipping request is invalid. Refresh and try again.' });
   }
 
   const started = Date.now();
   try {
+    let db = null;
+    let settingsDoc = {};
+    let product = null;
+    let selection = null;
+    let productVariantId = null;
+    let policy = getCommercePricingPolicy({});
+    if (checkoutQuote) {
+      db = getDb();
+      const [productsSnap, settingsSnap] = await Promise.all([
+        db.doc('catalog/products').get(),
+        db.doc('catalog/settings').get(),
+      ]);
+      const productsData = productsSnap.exists ? productsSnap.data() || {} : {};
+      settingsDoc = settingsSnap.exists ? settingsSnap.data() || {} : {};
+      const catalogList = Array.isArray(productsData.list) ? productsData.list : [];
+      product = catalogList.find(p => p && String(p.id) === String(body.productId));
+      if (!product || product.status !== 'published' || product.productType !== 'PHYSICAL' || !product.physical || !product.physical.cj) {
+        return res.status(200).json({ ok: false, error: 'This physical item is not available for supplier shipping checkout.' });
+      }
+      const variantId = body.variantId == null ? null : String(body.variantId);
+      selection = resolveProductSelection(product, variantId, currency, settingsDoc);
+      if (!selection) {
+        return res.status(200).json({ ok: false, error: 'Choose an available product option and refresh shipping.' });
+      }
+      productVariantId = selection.variant && selection.variant.cjVariantId
+        ? String(selection.variant.cjVariantId)
+        : String(product.physical.cj.variantId || '');
+      if (!productVariantId || String(products[0].vid) !== productVariantId) {
+        return res.status(200).json({ ok: false, error: 'The selected product option changed. Refresh the shipping quote.' });
+      }
+      const mappedCountry = new Set((product.physical.shippingCountries || []).map(countryToIso2).filter(Boolean));
+      if (mappedCountry.size && !mappedCountry.has(endCountryCode)) {
+        return res.status(200).json({ ok: false, error: 'This product is not configured for delivery to that country.' });
+      }
+      policy = getCommercePricingPolicy(settingsDoc);
+    }
+
     const r = await cjFetch('/logistic/freightCalculate', {
       method: 'POST',
       body: {
         startCountryCode,
         endCountryCode,
-        products: products.map(p => ({ vid: String(p.vid), quantity: Math.max(1, parseInt(p.quantity, 10) || 1) })),
+        products: products.map(p => ({
+          vid: String(p.vid),
+          quantity: Math.max(1, parseInt(p.quantity, 10) || 1),
+        })),
       },
     });
     const tookMs = Date.now() - started;
 
     if (!r.ok) {
-      await writeSyncLog({ event: 'shipping.calc', success: false, message: r.message, tookMs, detail: { endCountryCode, products } });
+      await writeSyncLog({ event: 'shipping.calc', success: false, message: r.message, tookMs, detail: { endCountryCode, products, checkoutQuote } });
       return res.status(200).json({
         ok: false,
         error: r.code === 'RATE_LIMITED'
-          ? 'Shipping is busy right now — try again in a moment.'
+          ? 'Shipping is busy right now. Please try again in a moment.'
           : 'No valid shipping method was returned for this destination.',
       });
     }
 
     const raw = Array.isArray(r.data) ? r.data : (r.data && r.data.list) || [];
-    const options = raw.map(o => ({
-      logisticName: o.logisticName || o.logisticNameEn || 'Standard Shipping',
+    let options = raw.map(o => ({
+      logisticName: String(o.logisticName || o.logisticNameEn || ''),
       logisticPrice: o.logisticPrice != null ? Number(o.logisticPrice) : null,
       currency: 'USD',
       logisticAging: o.logisticAging || o.aging || null,
-    })).filter(o => o.logisticPrice != null);
-
-    await writeSyncLog({ event: 'shipping.calc', success: true, message: `${options.length} options`, tookMs, detail: { endCountryCode } });
+    })).filter(o => o.logisticName && o.logisticPrice != null && Number.isFinite(o.logisticPrice) && o.logisticPrice >= 0);
 
     if (!options.length) {
+      await writeSyncLog({ event: 'shipping.calc', success: true, message: '0 valid options', tookMs, detail: { endCountryCode } });
       return res.status(200).json({ ok: false, error: 'No valid shipping method was returned for this destination.' });
     }
+
+    if (checkoutQuote) {
+      const quoteTtlMs = policy.shipping.quoteTtlMinutes * 60 * 1000;
+      const createdAt = new Date();
+      const expiresAt = new Date(createdAt.getTime() + quoteTtlMs);
+      options = sortShippingOptions(options, settingsDoc);
+      const quoteOptions = [];
+      for (const option of options) {
+        const shippingAmountMajor = calculateShippingCharge(option.logisticPrice, currency, settingsDoc);
+        if (shippingAmountMajor == null) continue;
+        const quoteId = crypto.randomUUID();
+        const productAmountMajor = Number(selection.price);
+        const totalAmountMajor = roundTotal(productAmountMajor + shippingAmountMajor, currency);
+        const quoteData = {
+          quoteId,
+          status: 'open',
+          productId: String(product.id),
+          variantId: selection.variantId || null,
+          cjVariantId: productVariantId,
+          quantity: 1,
+          currency,
+          productAmountMajor,
+          shippingAmountMajor,
+          totalAmountMajor,
+          shippingAmountUSD: option.logisticPrice,
+          logisticName: option.logisticName,
+          logisticAging: option.logisticAging,
+          startCountryCode,
+          endCountryCode,
+          createdAt,
+          expiresAt,
+        };
+        await db.collection('shippingQuotes').doc(quoteId).create(quoteData);
+        quoteOptions.push({
+          ...option,
+          quoteId,
+          currency,
+          productAmountMajor,
+          shippingAmountMajor,
+          totalAmountMajor,
+          shippingRatio: productAmountMajor > 0 ? shippingAmountMajor / productAmountMajor : null,
+          quoteExpiresAt: expiresAt.toISOString(),
+        });
+      }
+      if (!quoteOptions.length) {
+        return res.status(200).json({ ok: false, error: 'The shipping quote could not be converted into a checkout total. Please try again.' });
+      }
+      await writeSyncLog({
+        event: 'shipping.calc',
+        success: true,
+        message: `${quoteOptions.length} checkout options quoted`,
+        tookMs: Date.now() - started,
+        detail: { endCountryCode, productId: product.id, currency, quoteCount: quoteOptions.length },
+      });
+      return res.status(200).json({ ok: true, currency, productAmountMajor: selection.price, quoteExpiresAt: expiresAt.toISOString(), options: quoteOptions });
+    }
+
+    const genericSettings = (() => {
+      try { return settingsDoc; } catch { return {}; }
+    })();
+    options = sortShippingOptions(options, genericSettings);
+    await writeSyncLog({ event: 'shipping.calc', success: true, message: `${options.length} options`, tookMs: Date.now() - started, detail: { endCountryCode } });
     return res.status(200).json({ ok: true, options });
   } catch (e) {
     await writeSyncLog({ event: 'shipping.calc', success: false, message: e.message, tookMs: Date.now() - started });
-    return res.status(200).json({ ok: false, error: 'Shipping calculation failed.' });
+    return res.status(200).json({ ok: false, error: 'Shipping calculation failed. No payment has been taken.' });
   }
 };
