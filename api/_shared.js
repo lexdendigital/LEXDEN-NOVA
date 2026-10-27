@@ -83,7 +83,9 @@ function ogImage(url) {
   const marker = '/upload/';
   const idx = url.indexOf(marker);
   if (!url.includes('res.cloudinary.com') || idx === -1) return url;
-  return url.slice(0, idx + marker.length) + 'c_fill,w_1200,h_630,f_jpg,q_auto/' + url.slice(idx + marker.length);
+  const secureUrl = url.replace(/^http:\/\/res\.cloudinary\.com\//i, 'https://res.cloudinary.com/');
+  const secureIdx = secureUrl.indexOf(marker);
+  return secureUrl.slice(0, secureIdx + marker.length) + 'c_fill,w_1200,h_630,f_jpg,q_auto/' + secureUrl.slice(secureIdx + marker.length);
 }
 
 function renderRedirectPage({ title, description, image, canonicalUrl, destUrl, type }) {
