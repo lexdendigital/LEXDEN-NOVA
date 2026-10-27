@@ -2070,103 +2070,250 @@ async function cjRunImportSearch(){
 async function importCjProduct(pid){
   const already = (DB.products||[]).find(x=>x.physical && x.physical.cj && String(x.physical.cj.productId)===String(pid));
   if(already){ toast(`Already imported as "${already.name}". Open it in Products.`, 'info'); return; }
-  toast('Fetching product from CJ…');
+  toast('Fetching the full product details and variants from CJ…');
   const r = await cjApiGet(`/cj-product?pid=${encodeURIComponent(pid)}`);
   if(!r.ok){ toast(r.error||'Could not fetch product detail.', 'error'); return; }
   const product = r.product || {};
   const variants = (r.variants||[]).filter(Boolean);
   const firstVariant = variants[0] || {};
-  // Live stock for up to 20 variants, same snapshot the AI assistant import takes.
+
+  // Live inventory is a separate query. Unknown/failing stock must stay
+  // unknown; it must not silently turn into "out of stock" or "in stock".
   let stockMap = {}, stockOk = false, stockErr = '';
   const vids = variants.map(v=>v.vid).filter(Boolean).slice(0,20);
   if(vids.length){
-    const sr = await cjApiGet(`/cj-stock?vid=${encodeURIComponent(vids.join(','))}`);
-    if(sr && sr.ok){ stockMap = sr.stock || {}; stockOk = true; } else stockErr = (sr && sr.error) || 'Stock could not be verified.';
+    try{
+      const sr = await cjApiGet(`/cj-stock?vid=${encodeURIComponent(vids.join(','))}`, 30000);
+      if(sr && sr.ok){ stockMap = sr.stock || {}; stockOk = true; }
+      else stockErr = (sr && sr.error) || 'Stock could not be verified.';
+    }catch(error){ stockErr = error.message || 'Stock could not be verified.'; }
   }
-  const inStock = stockOk && Object.values(stockMap).some(x=>x && x.inStock);
-  // Specs: every supplier attribute CJ gave us, as label → value.
-  const specs = {};
-  const addSpec = (label, value)=>{ if(value==null || value==='' ) return; specs[label] = Array.isArray(value) ? value.filter(Boolean).join(', ') : String(value); };
-  addSpec('Supplier category', product.categoryName); addSpec('Product options', product.productOptions);
-  addSpec('Material', product.materials); addSpec('Package weight (g)', product.packageWeight);
-  addSpec('Package materials', product.packageMaterials); addSpec('Shipping attributes', product.logisticsAttributes);
-  addSpec('Customs code', product.customsCode); addSpec('Customs description', product.customsName);
-  addSpec('Supplier suggested price (USD)', product.suggestedSellPrice);
-  if(product.specifications && typeof product.specifications==='object') Object.entries(product.specifications).forEach(([k,v])=>addSpec(k,v));
-  const images = [...new Set([...(product.images||[]), ...variants.map(v=>v.image)].filter(u=>typeof u==='string' && /^https?:\/\//i.test(u)))];
-  const w = firstVariant.weight!=null ? firstVariant.weight : product.weight;
-  const dim = (firstVariant.length||firstVariant.width||firstVariant.height) ? [firstVariant.length,firstVariant.width,firstVariant.height].map(v=>v==null?'?':(Number(v)/10)).join(' × ')+' cm' : '';
+  const stockStates = Object.values(stockMap).filter(x=>x && typeof x.inStock==='boolean');
+  const stockStatus = stockOk && stockStates.length
+    ? (stockStates.some(x=>x.inStock) ? 'in_stock' : 'out_of_stock')
+    : '';
+
+  // A CJ suggested selling price is the regular price; the sale price is
+  // 40% off. Supplier cost is never substituted for a missing suggestion.
+  const validSuggestedPrice = value => {
+    if(value==null || value==='') return null;
+    const n = Number(value);
+    return Number.isFinite(n) && n>0 ? n : null;
+  };
+  const variantSuggestedPrices = variants.map(v=>validSuggestedPrice(v.suggestedSellPrice)).filter(v=>v!=null);
+  const regularPrice = validSuggestedPrice(product.suggestedSellPrice)
+    ?? (variantSuggestedPrices.length ? Math.min(...variantSuggestedPrices) : null);
+  const salePrice = regularPrice==null ? null : Number((regularPrice*0.6).toFixed(2));
+  const discount = regularPrice==null ? null : 40;
+
+  // Map CJ's category only on an exact local-category match. Preserve the
+  // original supplier category label separately and never infer from title.
   const cats = DB.categories.filter(c=>c.id!=='all');
-  const supplierCategoryName=String(product.categoryName||'').trim().toLowerCase();
-  const exactCategory=cats.find(c=>String(c.id||'').trim().toLowerCase()===supplierCategoryName || String(c.name||'').trim().toLowerCase()===supplierCategoryName);
-  const supplierLooksFashion=/\b(fashion|bags?|clothing|apparel|shoes?|footwear|wearables?)\b/i.test(supplierCategoryName);
-  const fashionFallback=cats.find(c=>/\b(fashion|apparel|clothing)\b/i.test(String(c.id||'')+' '+String(c.name||'')));
-  const matchedCategory=exactCategory||(supplierLooksFashion?fashionFallback:null);
-  const supplierLooksHardware=/\b(gadget|electronics?|hardware|computers?|phones?|mobile|charger|power bank|earbuds|headphones?|smartwatch|tablet|laptop|USB)\b/i.test(supplierCategoryName+' '+String(product.name||''));
-  const physicalFallback=supplierLooksHardware?cats.find(c=>/\b(gadget|electronics?|hardware)\b/i.test(String(c.id||'')+' '+String(c.name||''))):null;
-  const chosenCategory=matchedCategory||physicalFallback;
+  const supplierCategoryName = String(product.categoryName||'').trim();
+  const normalizedCategoryName = supplierCategoryName.toLowerCase();
+  const chosenCategory = normalizedCategoryName
+    ? cats.find(c=>String(c.id||'').trim().toLowerCase()===normalizedCategoryName
+        || String(c.name||'').trim().toLowerCase()===normalizedCategoryName)
+    : null;
+
+  // Structured specs are human-readable; the complete, untouched CJ
+  // payload is also preserved below so no unrecognized source property is lost.
+  const specs = {};
+  const addSpec = (label, value)=>{
+    if(value==null || value==='') return;
+    const normalized = Array.isArray(value)
+      ? value.filter(v=>v!=null && v!=='').map(v=>typeof v==='object'?JSON.stringify(v):String(v)).join(', ')
+      : (typeof value==='object'?JSON.stringify(value):String(value));
+    if(normalized!=='') specs[label] = normalized;
+  };
+  addSpec('Supplier product ID', product.pid);
+  addSpec('Supplier name', product.supplierName);
+  addSpec('Supplier ID', product.supplierId);
+  addSpec('Supplier SKU', product.sku);
+  addSpec('Supplier category', product.categoryName);
+  addSpec('Supplier product type', product.productType);
+  addSpec('Source country', product.sourceCountry);
+  addSpec('Unit', product.unit);
+  addSpec('Product options', product.productOptions);
+  addSpec('Material', product.materials);
+  addSpec('Package weight (g)', product.packageWeight);
+  addSpec('Package materials', product.packageMaterials);
+  addSpec('Shipping attributes', product.logisticsAttributes);
+  addSpec('Customs code', product.customsCode);
+  addSpec('Customs description', product.customsName);
+  addSpec('Supplier suggested price', product.suggestedSellPrice);
+  addSpec('Listed quantity', product.listedNum);
+  addSpec('Product dimensions', product.dimensions);
+  addSpec('Source currency', product.supplierCurrency);
+  if(product.specifications && typeof product.specifications==='object')
+    Object.entries(product.specifications).forEach(([k,v])=>addSpec(k,v));
+
+  const usableUrl = value => typeof value==='string' && /^https?:\/\//i.test(value.trim());
+  const imageUrls = [...new Set([
+    ...(Array.isArray(product.images)?product.images:[]),
+    ...variants.map(v=>v.image),
+  ].filter(usableUrl).map(url=>url.trim()))];
+  const rawVideoValues = Array.isArray(product.video) ? product.video : [product.video];
+  const videoUrls = rawVideoValues.filter(usableUrl).map(url=>url.trim());
+  const mediaUrls = [...new Set([...imageUrls,...videoUrls])].slice(0,8);
+  const images = mediaUrls.filter(url=>guessMediaType(url)==='image');
+  const weightValue = firstVariant.weight!=null ? firstVariant.weight : product.weight;
+  const weight = weightValue!=null && weightValue!==''
+    ? `${(Number(weightValue)/1000).toFixed(3)} kg` : '';
+  const dimensionSource = [firstVariant.length,firstVariant.width,firstVariant.height].some(v=>v!=null && v!=='')
+    ? firstVariant : (product.dimensions || {});
+  const dimensionParts = [
+    ['L',dimensionSource.length],['W',dimensionSource.width],['H',dimensionSource.height],
+  ].filter(([,value])=>value!=null && value!=='')
+   .map(([label,value])=>`${label} ${(Number(value)/10).toString()} cm`);
+  const dimensions = dimensionParts.join(' × ');
+  const optionName = Array.isArray(product.productOptions)
+    ? product.productOptions.filter(Boolean).join(', ')
+    : (product.productOptions==null ? '' : String(product.productOptions));
+  const optionId = 'cj-variant';
+  const rootVariants = variants.map((variant,index)=>{
+    const id = String(variant.vid || index);
+    const suggested = validSuggestedPrice(variant.suggestedSellPrice);
+    const title = String(variant.name || variant.variantKey || variant.sku || '');
+    return {
+      id:`cj-${id}`,
+      title,
+      optionValues:{[optionId]:`cj-${id}`},
+      price:suggested,
+      salePrice:suggested==null ? null : Number((suggested*0.6).toFixed(2)),
+      stock:stockMap[variant.vid] && stockMap[variant.vid].total!=null ? stockMap[variant.vid].total : null,
+      sku:variant.sku || '',
+      image:variant.image || '',
+      cjVariantId:variant.vid || '',
+      active:true,
+      sourceData:variant.sourceData || variant,
+    };
+  });
+  const importedAt = new Date().toISOString();
   const data = {
-    id: 'p'+Date.now(),
-    shareId: nextProductShareId(),
-    name: (product.name||'Imported CJ product').slice(0,200),
-    category: chosenCategory?.id || '',
-    categoryName: product.categoryName || chosenCategory?.name || '',
-    price: 0, // supplier cost is not a shopper price; leave selling price for admin review
-    salePrice: null,
-    itemCode: 'CJ-'+String(pid).slice(-8).toUpperCase(),
-    seller: 'Lexden Digital',
-    image: images[0] || '',
-    gallery: images.map((url,i)=>({url, type:'image', alt:`${product.name||'Product'} image ${i+1}`})),
-    affiliateLink: '#',
-    fileUrl: '', deliveryLink: '', externalPaymentLink: '',
-    status: 'draft', // README §29 — never auto-publish an import
-    tags: ['cj-import','physical'],
-    description: product.description || '',
+    id:'p'+Date.now(),
+    shareId:nextProductShareId(),
+    name:String(product.name||'').slice(0,200),
+    category:chosenCategory ? chosenCategory.id : '',
+    categoryName:supplierCategoryName,
+    price:regularPrice,
+    salePrice,
+    discount,
+    itemCode:'',
+    seller:'',
+    image:images[0] || '',
+    gallery:mediaUrls.map(url=>({url,type:guessMediaType(url),alt:''})),
+    images,
+    affiliateLink:'',
+    fileUrl:'',
+    deliveryLink:'',
+    externalPaymentLink:'',
+    status:'draft',
+    tags:[],
+    description:String(product.description||''),
+    shortDescription:'',
+    heroCopy:'',
+    slug:'',
+    seoTitle:'',
+    metaDescription:'',
+    searchKeywords:[],
+    audienceFor:'',
+    audienceNotFor:'',
+    learningOutcomes:'',
+    courseContents:'',
+    deliveryFormat:'',
+    durationNote:'',
+    requirements:'',
+    tools:'',
+    certificateDetails:'',
+    assignmentsDetails:'',
+    capstoneDetails:'',
+    accessDelivery:'',
+    supportWording:'',
+    refundPolicy:'',
+    complianceDisclaimer:'',
+    earningsDisclaimer:'',
+    productFaqs:[],
     specs,
-    rating: 4.5, reviewCount: 0, featured: false, trending: false,
-    productType: 'PHYSICAL',
-    options: variants.length ? [{
-      id:'cj-variant', name:'Supplier variant', values:variants.map((variant,index)=>({id:`cj-${variant.vid||index}`,label:variant.name||variant.variantKey||variant.sku||`Option ${index+1}`})),
+    rating:null,
+    reviewCount:null,
+    featured:false,
+    trending:false,
+    productType:'PHYSICAL',
+    affiliateEnabled:false,
+    affiliateCommissionPct:null,
+    options:variants.length ? [{
+      id:optionId,
+      name:optionName,
+      values:variants.map((variant,index)=>({
+        id:`cj-${String(variant.vid||index)}`,
+        label:String(variant.name||variant.variantKey||variant.sku||''),
+      })),
     }] : [],
-    variants: variants.map((variant,index)=>({
-      id:`cj-${variant.vid||index}`,title:variant.name||variant.variantKey||variant.sku||`Option ${index+1}`,
-      optionValues:{'cj-variant':`cj-${variant.vid||index}`},price:null,salePrice:null,
-      stock: stockMap[variant.vid] ? stockMap[variant.vid].total : null,
-      sku:variant.sku||'',image:variant.image||'',cjVariantId:variant.vid||'',active:true,
-    })),
-    pricingReviewRequired: true,
-    physical: {
-      stockMode: 'SUPPLIER_STOCK',
-      stockStatus: inStock ? 'in_stock' : 'out_of_stock',
-      deliveryEstimate: product.deliveryCycle ? `${product.deliveryCycle} days (supplier estimate; confirm destination)` : '7–20 business days',
-      shippingCountries: [DB.content.cjTargetCountry||'Nigeria'],
-      weight: w!=null ? `${(Number(w)/1000).toFixed(3)} kg` : '',
-      dimensions: dim,
-      returnPolicy: '',
-      supplier: 'CJ Dropshipping',
-      supplierId: '', supplierSku: firstVariant.sku || product.sku || '',
-      supplierCost: firstVariant.sellPrice ?? product.sellPrice ?? null,
-      supplierCurrency: 'USD',
-      routing: null,
-      cj: {
-        productId: product.pid || pid,
-        variantId: firstVariant.vid || '',
-        sku: firstVariant.sku || product.sku || '',
-        syncEnabled: true,
-        lastSyncedAt: new Date().toISOString(),
-        lastImportedAt: new Date().toISOString(),
-        stockCheckError: stockOk ? null : (stockErr || 'Stock could not be verified; refresh inventory before publishing.'),
-        videoIds: product.videoIds || [],
-        variants: variants.map(v=>({ id:v.vid||'', sku:v.sku||'', name:v.name||'', optionKey:v.variantKey||'', barcode:v.barcode||'', standard:v.standard||'', unit:v.unit||'', image:v.image||'', sellPrice:v.sellPrice??null, suggestedSellPrice:v.suggestedSellPrice??null, weight:v.weight??null, length:v.length??null, width:v.width??null, height:v.height??null, stock: stockMap[v.vid]||null, supplierInventories:v.inventories||[] })),
+    variants:rootVariants,
+    pricingReviewRequired:true,
+    physical:{
+      stockMode:'SUPPLIER_STOCK',
+      stockStatus,
+      deliveryEstimate:product.deliveryCycle==null ? '' : String(product.deliveryCycle),
+      shippingCountries:[],
+      weight,
+      dimensions,
+      returnPolicy:'',
+      supplier:product.supplierName || 'CJ Dropshipping',
+      supplierId:product.supplierId || '',
+      supplierSku:firstVariant.sku || product.sku || '',
+      supplierCost:firstVariant.sellPrice ?? product.sellPrice ?? null,
+      supplierCurrency:firstVariant.sellPriceCurrency || product.supplierCurrency || '',
+      routing:null,
+      cj:{
+        productId:product.pid || pid,
+        variantId:firstVariant.vid || '',
+        sku:firstVariant.sku || product.sku || '',
+        syncEnabled:true,
+        lastSyncedAt:stockStatus ? importedAt : null,
+        lastImportedAt:importedAt,
+        stockCheckError:stockStatus ? '' : (stockErr || (vids.length ? 'No usable stock state was returned.' : 'No CJ variant IDs were returned for stock lookup.')),
+        videoIds:product.videoIds || [],
+        sourceData:product.sourceData || product,
+        variants:variants.map(v=>({
+          id:v.vid || '',
+          sku:v.sku || '',
+          name:v.name || '',
+          optionKey:v.variantKey || '',
+          barcode:v.barcode || '',
+          standard:v.standard || '',
+          unit:v.unit || '',
+          image:v.image || '',
+          sellPrice:v.sellPrice ?? null,
+          sellPriceCurrency:v.sellPriceCurrency || product.supplierCurrency || '',
+          suggestedSellPrice:v.suggestedSellPrice ?? null,
+          weight:v.weight ?? null,
+          length:v.length ?? null,
+          width:v.width ?? null,
+          height:v.height ?? null,
+          stock:stockMap[v.vid] || null,
+          supplierInventories:v.inventories || [],
+          sourceData:v.sourceData || v,
+        })),
       },
     },
-    importSource: { supplier:'CJ Dropshipping', productId: product.pid || pid, importedAt: new Date().toISOString(), sourceCategoryId: product.categoryId || '' },
+    importSource:{
+      supplier:'CJ Dropshipping',
+      productId:product.pid || pid,
+      importedAt,
+      sourceCategoryId:product.categoryId || '',
+      sourceData:product.sourceData || product,
+    },
   };
   DB.products = [...DB.legacyProducts, data];
   const ok = await pushProductsToCloud();
   if(ok){
     logActivity('Admin', `Imported CJ product "${data.name}"`);
-    toast(images.length ? 'Imported as Draft — review and publish from Products.' : 'Imported as Draft, but CJ gave no usable image — add one before publishing.', images.length?'success':'info');
+    toast(images.length
+      ? 'Imported all returned CJ details as a Draft. Review every field before publishing.'
+      : 'Imported all returned CJ details as a Draft, but CJ returned no usable image. Add verified media before publishing.',
+      images.length?'success':'info');
     updateCatalogSchema();
     renderAdminTab();
   } else {
