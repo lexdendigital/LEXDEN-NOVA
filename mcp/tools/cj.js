@@ -216,7 +216,7 @@ function register(server) {
         dimensions,
         returnPolicy: '',
         supplier: source.supplierName || 'CJ Dropshipping',
-        supplierId: source.supplierId || '',
+        supplierId: '', // CJ's supplierId is preserved in sourceData/specs; it is not a NOVA supplier-record ID.
         supplierSku: firstVariant.sku || source.sku || '',
         supplierCost: firstVariant.sellPrice ?? source.sellPrice ?? null,
         supplierCurrency: firstVariant.sellPriceCurrency || source.supplierCurrency || '',
