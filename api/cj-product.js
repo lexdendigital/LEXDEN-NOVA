@@ -59,9 +59,9 @@ module.exports = async (req, res) => {
       video: d.productVideo || d.video || null,
       categoryId: d.categoryId || null,
       categoryName: d.categoryName || null,
-      weight: d.productWeight != null ? Number(d.productWeight) : null,
+      weight: numberOrNull(d.productWeight),
       supplierName: d.supplierName || '',
-      supplierCurrency: String(d.productCurrency || d.currencyCode || d.priceCurrency || d.currency || ''),
+      supplierCurrency: String(d.productCurrency || d.sellPriceCurrency || d.productSellPriceCurrency || d.currencyCode || d.priceCurrency || d.currency || ''),
       sourceData: d,
       supplierId: d.supplierId || null,
       sku: d.productSku || d.sku || d.spu || null,
@@ -72,7 +72,7 @@ module.exports = async (req, res) => {
       sourceCountry: d.sourceCountry || '',
       deliveryCycle: d.deliveryCycle || null,
       materials: d.materialNameEnSet || d.materialNameEn || d.materialName || [],
-      packageWeight: d.packingWeight != null ? Number(d.packingWeight) : null,
+      packageWeight: numberOrNull(d.packingWeight),
       packageMaterials: d.packingNameEnSet || d.packingNameEn || [],
       productOptions: d.productKeyEn || d.productKeySet || [],
       logisticsAttributes: d.productProEnSet || d.productProEn || [],
@@ -80,10 +80,10 @@ module.exports = async (req, res) => {
       customsName: d.entryNameEn || null,
       videoIds: Array.isArray(d.productVideo) ? d.productVideo : (d.productVideo ? [d.productVideo] : []),
       specifications: d.productPropertyList || d.specifications || {},
-      dimensions: [d.productLength, d.productWidth, d.productHeight].some(value => value != null && value !== '')
-        ? { length: d.productLength ?? null, width: d.productWidth ?? null, height: d.productHeight ?? null }
+      dimensions: [d.productLength, d.productWidth, d.productHeight].some(value => numberOrNull(value) != null)
+        ? { length: numberOrNull(d.productLength), width: numberOrNull(d.productWidth), height: numberOrNull(d.productHeight) }
         : null,
-      listedNum: d.listedNum || null,
+      listedNum: d.listedNum ?? null,
     };
 
     const variantsPayload = variantsR.data && (variantsR.data.data || variantsR.data);
@@ -112,16 +112,16 @@ function normalizeVariant(v) {
     sku: v.variantSku || v.sku,
     name: v.variantNameEn || v.variantKey || v.name || '',
     image: v.variantImage || v.image || null,
-    sellPrice: v.variantSellPrice != null ? Number(v.variantSellPrice) : (v.sellPrice != null ? Number(v.sellPrice) : null),
-    weight: v.variantWeight != null ? Number(v.variantWeight) : null,
-    length: v.variantLength != null ? Number(v.variantLength) : null,
-    width: v.variantWidth != null ? Number(v.variantWidth) : null,
-    height: v.variantHeight != null ? Number(v.variantHeight) : null,
+    sellPrice: numberOrNull(v.variantSellPrice ?? v.sellPrice),
+    weight: numberOrNull(v.variantWeight),
+    length: numberOrNull(v.variantLength),
+    width: numberOrNull(v.variantWidth),
+    height: numberOrNull(v.variantHeight),
     barcode: v.barcode || null,
     unit: v.variantUnit || null,
     standard: v.variantStandard || null,
-    suggestedSellPrice: v.variantSugSellPrice != null ? numberOrNull(v.variantSugSellPrice) : null,
-    sellPriceCurrency: String(v.variantCurrency || v.currencyCode || v.priceCurrency || v.currency || ''),
+    suggestedSellPrice: numberOrNull(v.variantSugSellPrice ?? v.suggestSellPrice ?? v.suggestedSellPrice),
+    sellPriceCurrency: String(v.variantCurrency || v.variantSellPriceCurrency || v.sellPriceCurrency || v.currencyCode || v.priceCurrency || v.currency || ''),
     sourceData: v,
     inventories: Array.isArray(v.inventories) ? v.inventories : [],
     // e.g. "Black-128GB" — the human-readable option combination
@@ -134,6 +134,12 @@ function normalizeImages(value) {
   return [...new Set(values.map(item => typeof item === 'string' ? item : item && (item.url || item.imageUrl || item.img)).filter(url => typeof url === 'string' && /^https?:\/\//i.test(url.trim())).map(url => url.trim()))];
 }
 function numberOrNull(value) {
-  const n = Number(value);
+  if (value == null || (typeof value === 'string' && value.trim() === '')) return null;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  // CJ sometimes includes a currency symbol or thousands separators in price fields.
+  // Accept one unambiguous number; ranges/multiple numbers stay blank for review.
+  const matches = String(value).replace(/,/g, '').match(/-?\\d+(?:\\.\\d+)?/g);
+  if (!matches || matches.length !== 1) return null;
+  const n = Number(matches[0]);
   return Number.isFinite(n) ? n : null;
 }
