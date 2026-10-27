@@ -2098,7 +2098,10 @@ async function importCjProduct(pid){
   const dim = (firstVariant.length||firstVariant.width||firstVariant.height) ? [firstVariant.length,firstVariant.width,firstVariant.height].map(v=>v==null?'?':(Number(v)/10)).join(' × ')+' cm' : '';
   const cats = DB.categories.filter(c=>c.id!=='all');
   const supplierCategoryName=String(product.categoryName||'').trim().toLowerCase();
-  const matchedCategory=cats.find(c=>String(c.id||'').trim().toLowerCase()===supplierCategoryName || String(c.name||'').trim().toLowerCase()===supplierCategoryName);
+  const exactCategory=cats.find(c=>String(c.id||'').trim().toLowerCase()===supplierCategoryName || String(c.name||'').trim().toLowerCase()===supplierCategoryName);
+  const supplierLooksFashion=/\b(fashion|bags?|clothing|apparel|shoes?|footwear|wearables?)\b/i.test(supplierCategoryName);
+  const fashionFallback=cats.find(c=>/\b(fashion|apparel|clothing)\b/i.test(String(c.id||'')+' '+String(c.name||'')));
+  const matchedCategory=exactCategory||(supplierLooksFashion?fashionFallback:null);
   const physicalFallback=cats.find(c=>/\b(gadget|electronics?|hardware)\b/i.test(String(c.id||'')+' '+String(c.name||'')));
   const chosenCategory=matchedCategory||physicalFallback;
   const data = {
