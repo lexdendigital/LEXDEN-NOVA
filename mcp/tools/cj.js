@@ -106,7 +106,8 @@ function register(server) {
     const matchedLocalCategory = localCategories.find(c => String(c.id || '').trim().toLowerCase() === requestedCategoryName || String(c.name || '').trim().toLowerCase() === requestedCategoryName);
     const supplierLooksFashion = /\b(fashion|bags?|clothing|apparel|shoes?|footwear|wearables?)\b/i.test(requestedCategoryName);
     const fashionCategory = localCategories.find(c => /\b(fashion|apparel|clothing)\b/i.test(String(c.id || '') + ' ' + String(c.name || '')));
-    const physicalCategory = localCategories.find(c => /\b(gadget|electronics?|hardware)\b/i.test(String(c.id || '') + ' ' + String(c.name || '')));
+    const supplierLooksHardware = /\b(gadget|electronics?|hardware|computers?|phones?|mobile|charger|power bank|earbuds|headphones?|smartwatch|tablet|laptop|USB)\b/i.test(requestedCategoryName + ' ' + name);
+    const physicalCategory = supplierLooksHardware ? localCategories.find(c => /\b(gadget|electronics?|hardware)\b/i.test(String(c.id || '') + ' ' + String(c.name || ''))) : null;
     const localCategory = matchedLocalCategory || (supplierLooksFashion ? fashionCategory : null) || physicalCategory || null;
     const variants = Array.isArray(response.variants) ? response.variants.filter(Boolean) : [];
     const variantIds = variants.map(v => v.vid).filter(Boolean).slice(0, 20);
