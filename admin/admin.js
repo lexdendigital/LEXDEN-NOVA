@@ -690,7 +690,7 @@ function isHardwareCategory(categoryId){
 }
 function isPhysicalCategory(categoryId){
   const c=productCategoryRecord(categoryId);
-  return isHardwareCategory(categoryId) || /\\b(fashion|clothing|apparel|bags?|shoes?|footwear|wearables?)\\b/i.test(String(c.id||'')+' '+String(c.name||''));
+  return isHardwareCategory(categoryId) || /\b(fashion|clothing|apparel|bags?|shoes?|footwear|wearables?)\b/i.test(String(c.id||'')+' '+String(c.name||''));
 }
 function isDigitalDetailsCategory(categoryId){
   const c=productCategoryRecord(categoryId);
