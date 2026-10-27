@@ -90,7 +90,24 @@ module.exports = async (req, res) => {
     const variantsRaw = variantsR.ok
       ? (Array.isArray(variantsPayload) ? variantsPayload : (variantsPayload && (variantsPayload.list || variantsPayload.content || variantsPayload.variants)) || [])
       : [];
-    const variants = variantsRaw.map(normalizeVariant);
+
+    // CJ may return conflicting suggested-retail prices for the same variant:
+    // /product/query can contain the real variantSugSellPrice while
+    // /product/variant/query may echo variantSellPrice into variantSugSellPrice.
+    // Reconcile both payloads by VID and prefer the product-detail suggestion
+    // only when the variant endpoint's suggestion is missing or merely equals
+    // its supplier sell price. This prevents supplier cost from becoming NOVA's
+    // storefront regular price while still preserving a genuinely different
+    // variant-endpoint suggestion when CJ supplies one.
+    const detailVariantsRaw = Array.isArray(d.variants) ? d.variants : [];
+    const detailVariantsById = new Map(detailVariantsRaw.map(v => [
+      String(v && (v.vid || v.variantId) || ''),
+      v,
+    ]));
+    const variants = variantsRaw.map(v => normalizeVariant(reconcileVariantPricing(
+      v,
+      detailVariantsById.get(String(v && (v.vid || v.variantId) || '')),
+    )));
 
     await writeSyncLog({
       event: 'product.detail', objectId: pid, success: true,
@@ -103,6 +120,31 @@ module.exports = async (req, res) => {
     return res.status(200).json({ ok: false, error: 'Product detail lookup failed.' });
   }
 };
+
+function reconcileVariantPricing(variant, detailVariant) {
+  if (!variant || !detailVariant) return variant;
+
+  const endpointSuggested = firstNumericOrNull(
+    variant.variantSugSellPrice,
+    variant.suggestSellPrice,
+    variant.suggestedSellPrice,
+  );
+  const endpointSell = firstNumericOrNull(variant.variantSellPrice, variant.sellPrice);
+  const detailSuggested = firstNumericOrNull(
+    detailVariant.variantSugSellPrice,
+    detailVariant.suggestSellPrice,
+    detailVariant.suggestedSellPrice,
+  );
+
+  const endpointLooksLikeSupplierCost = endpointSuggested != null
+    && endpointSell != null
+    && Math.abs(endpointSuggested - endpointSell) < 1e-9;
+
+  if (detailSuggested != null && (endpointSuggested == null || endpointLooksLikeSupplierCost)) {
+    return { ...variant, variantSugSellPrice: detailSuggested };
+  }
+  return variant;
+}
 
 function normalizeVariant(v) {
   if (!v) return null;
