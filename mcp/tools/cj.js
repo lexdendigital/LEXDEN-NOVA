@@ -75,7 +75,7 @@ function register(server) {
 
   server.registerTool('nova_cj_import_product', {
     title: 'Import CJ product as a complete admin draft',
-    description: 'Fetches the full CJ product detail and all returned variants, preserving the original CJ payload and mapping every known CJ field into NOVA fields/specs. Fields absent from CJ remain blank. Uses the CJ suggested price as regular price and a 40% discount when a suggested price exists; if CJ provides no suggested price, prices stay blank. Never publishes automatically. Duplicate CJ product IDs are rejected.',
+    description: 'Fetches full CJ details and returned variants, preserving the original CJ payload and mapping known fields into NOVA fields/specs. Fields absent from CJ remain blank. Uses supplier cost plus the saved margin, maintenance, payment-fee and FX policy; never treats CJ suggested retail price as supplier cost and never invents a sale discount. Stores CJPacket Postal as the default preferred route, but shipping is recalculated live at checkout and shown separately. Prices remain blank when supplier cost or currency is unknown. Never publishes automatically. Duplicate CJ product IDs are rejected.',
     inputSchema: {
       pid: z.string().min(1),
       categoryId: z.string().optional(),
