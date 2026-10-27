@@ -2273,7 +2273,7 @@ async function importCjProduct(pid){
       dimensions,
       returnPolicy:'',
       supplier:product.supplierName || 'CJ Dropshipping',
-      supplierId:product.supplierId || '',
+      supplierId:'', // Preserve CJ's external supplier ID in specs/sourceData, not as a NOVA supplier-record link.
       supplierSku:firstVariant.sku || product.sku || '',
       supplierCost:firstVariant.sellPrice ?? product.sellPrice ?? null,
       supplierCurrency:firstVariant.sellPriceCurrency || product.supplierCurrency || '',
