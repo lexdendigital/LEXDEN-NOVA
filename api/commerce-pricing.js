@@ -16,6 +16,7 @@ const DEFAULT_POLICY = Object.freeze({
     quoteTtlMinutes: 30,
     chargeCustomerSeparately: true,
     highShippingItemPriceRatioWarning: 0.6,
+    highShippingItemPriceRatioBlock: 1.5,
     enforceShippingRatioBlock: false,
   },
 });
@@ -54,6 +55,7 @@ function getCommercePricingPolicy(settings = {}) {
       quoteTtlMinutes: Math.min(120, Math.max(5, Number(rawShipping.quoteTtlMinutes) || defaults.shipping.quoteTtlMinutes)),
       chargeCustomerSeparately: rawShipping.chargeCustomerSeparately !== false,
       highShippingItemPriceRatioWarning: boundedPct(Number(rawShipping.highShippingItemPriceRatioWarning) * 100, 60, 500) / 100,
+      highShippingItemPriceRatioBlock: boundedPct(Number(rawShipping.highShippingItemPriceRatioBlock) * 100, 150, 500) / 100,
       enforceShippingRatioBlock: rawShipping.enforceShippingRatioBlock === true,
     },
   };
