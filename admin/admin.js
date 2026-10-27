@@ -465,7 +465,7 @@ function openProductForm(id){
     <div class="form-grid">
       <div class="form-field"><label>Short description</label><textarea id="f_shortDescription" maxlength="240" placeholder="Concise summary for cards and search snippets">${p?escapeHtml(p.shortDescription||''):''}</textarea></div>
       <div class="form-field"><label>Hero copy</label><textarea id="f_heroCopy" maxlength="220" placeholder="One strong product promise, without unsupported claims">${p?escapeHtml(p.heroCopy||''):''}</textarea></div>
-      <div class="form-field"><label>SEO slug</label><input id="f_slug" maxlength="120" placeholder="affiliate-marketing-professional-programme" value="${p?escapeHtml(p.slug||''):''}"><span class="text-2 small">Stored as metadata. Existing Nova product URLs still route by product ID.</span></div>
+      <div class="form-field"><label>SEO slug</label><input id="f_slug" maxlength="120" placeholder="affiliate-marketing-professional-programme" value="${p?escapeHtml(p.slug||''):''}"><span class="text-2 small">Stored as metadata. Public links use short IDs; existing product links remain supported.</span></div>
       <div class="form-field"><label>SEO title</label><input id="f_seoTitle" maxlength="60" placeholder="Recommended: about 50–60 characters" value="${p?escapeHtml(p.seoTitle||''):''}"></div>
       <div class="form-field"><label>Meta description</label><textarea id="f_metaDescription" maxlength="160" placeholder="Recommended: up to 160 characters">${p?escapeHtml(p.metaDescription||''):''}</textarea></div>
       <div class="form-field"><label>Search keywords</label><input id="f_searchKeywords" placeholder="Comma separated" value="${p?escapeHtml((p.searchKeywords||[]).join(', ')):''}"></div>
