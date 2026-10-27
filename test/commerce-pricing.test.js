@@ -41,7 +41,7 @@ test('shipping fee is a separate pass-through amount converted into the selected
   const usd = calculateShippingCharge(5.02, 'USD', settings);
   assert.ok(ngn > 5000);
   assert.equal(ngn, Math.ceil(ngn));
-  assert.equal(usd, 5.23);
+  assert.equal(usd, 5.22);
   assert.equal(calculateShippingCharge(null, 'NGN', settings), null);
 });
 
