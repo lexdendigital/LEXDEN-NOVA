@@ -21,7 +21,7 @@ module.exports = async (req, res) => {
     const product = list.find(p => p && String(p.id) === id) || list.find(p => p && String(p.shareId || '') === id);
     if (product) {
       found = true;
-      destinationProductId = String(product.id);
+      destinationProductId = String(product.shareId || product.id);
       canonicalProductId = String(product.shareId || product.id);
       title = product.seoTitle || product.name || title;
       description = firstParagraph(product.metaDescription || product.shortDescription || product.description, 200) || description;
