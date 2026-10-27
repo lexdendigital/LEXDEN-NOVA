@@ -38,3 +38,9 @@ test('legacy single-price products remain payable and physical out-of-stock item
   assert.equal(selectionAvailability(out, null), false);
   assert.equal(resolveProductSelection(out, null, 'USD', {}), null);
 });
+
+test('USD checkout selection preserves cents while NGN checkout rounds to whole naira', () => {
+  const single = { price: 12.345 };
+  assert.equal(resolveProductSelection(single, null, 'USD', { exchangeRates: { USD: 1 } }).price, 12.35);
+  assert.equal(resolveProductSelection(single, null, 'NGN', { exchangeRates: { NGN: 1500 } }).price, 18518);
+});

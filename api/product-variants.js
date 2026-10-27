@@ -40,7 +40,7 @@ function resolveProductSelection(product, variantId, currency, settings) {
     variant: match.variant,
     variantId: match.variant ? String(match.variant.id) : null,
     variantName: match.label,
-    price: Math.round(basePrice * rate),
+    price: currency === 'NGN' ? Math.round(basePrice * rate) : Math.round(basePrice * rate * 100) / 100,
     basePrice,
     currency,
   };

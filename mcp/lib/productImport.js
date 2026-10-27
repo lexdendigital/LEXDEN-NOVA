@@ -65,4 +65,33 @@ function deriveSuggestedPricing(productSuggestedPrice, variants = []) {
   };
 }
 
-module.exports = { uniqueUrls, buildProductSpecs, stockStatusFrom, deriveSuggestedPricing };
+function deriveCostBasedPricing(productCost, variants = [], settings = {}, productCurrency = 'USD') {
+  const currencyIsUsd = value => ['USD', 'US DOLLAR', 'US DOLLARS'].includes(String(value || '').trim().toUpperCase());
+  const numericCost = value => {
+    if (value == null || value === '') return null;
+    const number = Number(value);
+    return Number.isFinite(number) && number > 0 ? number : null;
+  };
+  const priceFor = (cost, currency) => {
+    const amount = numericCost(cost);
+    if (amount == null || !currencyIsUsd(currency)) return null;
+    return require('../../api/commerce-pricing').calculateRetailPriceUSD(amount, settings);
+  };
+  const variantPrices = variants.map(v => priceFor(
+    v && (v.sellPrice ?? v.supplierCostUSD ?? v.costUSD),
+    v && (v.sellPriceCurrency || v.supplierCurrency || productCurrency)
+  ));
+  const knownVariantPrices = variantPrices.filter(v => Number.isFinite(v) && v > 0);
+  const productPrice = knownVariantPrices.length
+    ? Math.min(...knownVariantPrices)
+    : priceFor(productCost, productCurrency);
+  return {
+    price: productPrice == null ? null : productPrice,
+    salePrice: null,
+    discount: 0,
+    pricingModel: 'supplier-cost-plus-v1',
+    variantPrices,
+  };
+}
+
+module.exports = { uniqueUrls, buildProductSpecs, stockStatusFrom, deriveSuggestedPricing, deriveCostBasedPricing };

@@ -567,7 +567,7 @@ function startPaystackCheckout(productId, variantId, deliveryDetails, confirmed)
   // fire twice, and so every DIGITAL/SERVICE product's checkout runs
   // through the untouched original path below with zero behavior change.
   if(p.productType === 'PHYSICAL' && deliveryDetails === undefined){
-    openDeliveryDetailsModal(p, (deliveryDetails)=>{
+    openDeliveryDetailsModal(p, selectedVariant, (deliveryDetails)=>{
       startPaystackCheckout(productId, selectedVariant&&selectedVariant.id||null, deliveryDetails);
     });
     return;
@@ -612,12 +612,21 @@ function startPaystackCheckout(productId, variantId, deliveryDetails, confirmed)
     : PAYSTACK_FALLBACK_CURRENCY);
   const proceedWithEmail = (email) => {
     const rate = (c.exchangeRates && c.exchangeRates[chargeCode]) || 1;
-    // Paystack expects every currency's amount in its smallest subunit
-    // (kobo for NGN, cents for USD, etc.) — always base amount * 100,
-    // per Paystack's own "Supported currency" docs.
+    // Item prices are stored in USD. NGN is rounded to whole naira; USD retains cents.
     const variantPrice=effectiveVariantPrice(p,selectedVariant);
-    const amountMajor = creatorInfo ? creatorInfo.price : Math.round((variantPrice==null?(p.salePrice || p.price):variantPrice) * rate);
-    const amountSubunit = amountMajor * 100;
+    const itemAmountMajor = creatorInfo ? creatorInfo.price : (chargeCode === 'NGN'
+      ? Math.round((variantPrice==null?(p.salePrice || p.price):variantPrice) * rate)
+      : Math.round((variantPrice==null?(p.salePrice || p.price):variantPrice) * rate * 100) / 100);
+    const cjPhysical = p.productType === 'PHYSICAL' && p.physical && p.physical.cj && p.physical.cj.variantId;
+    const shippingQuoteId = cjPhysical && deliveryDetails ? String(deliveryDetails.shippingQuoteId || '') : '';
+    const shippingCurrency = cjPhysical && deliveryDetails ? String(deliveryDetails.shippingCurrency || '') : '';
+    const shippingAmountMajor = cjPhysical && deliveryDetails ? Number(deliveryDetails.shippingAmountMajor) : 0;
+    if(cjPhysical && (!shippingQuoteId || shippingCurrency !== chargeCode || !Number.isFinite(shippingAmountMajor) || shippingAmountMajor < 0)){
+      toast('Shipping must be recalculated before payment. No payment has been taken.', 'error');
+      return;
+    }
+    const amountMajor = creatorInfo ? creatorInfo.price : itemAmountMajor + (cjPhysical ? shippingAmountMajor : 0);
+    const amountSubunit = Math.round(amountMajor * 100);
     const reference = 'LN-' + Date.now() + '-' + Math.random().toString(36).slice(2,8);
     try{
       window.logLifecycleEvent && window.logLifecycleEvent('checkout_started', email, {
@@ -651,6 +660,7 @@ function startPaystackCheckout(productId, variantId, deliveryDetails, confirmed)
         // in addition to being stored on the order doc server-side (see
         // verify-paystack.js).
         ...(deliveryDetails ? { delivery: deliveryDetails } : {}),
+        ...(shippingQuoteId ? { shippingQuoteId } : {}),
       },
       callback: function(response){
         // Record this payment as "pending" the instant Paystack confirms
@@ -691,22 +701,65 @@ function startPaystackCheckout(productId, variantId, deliveryDetails, confirmed)
   }
 }
 
+
+function checkoutChargeCurrency(){
+  const selected = currentCurrency();
+  return PAYSTACK_CHARGEABLE_CURRENCIES.includes(selected) ? selected : PAYSTACK_FALLBACK_CURRENCY;
+}
+function formatChargeMajor(amount,currency){
+  const value = Number(amount);
+  if(!Number.isFinite(value)) return 'Price unavailable';
+  const c = DB.content || {};
+  const symbol = (c.currencySymbols && c.currencySymbols[currency]) || (currency === 'NGN' ? '₦' : currency + ' ');
+  const decimals = currency === 'NGN' ? 0 : 2;
+  return symbol + value.toLocaleString(undefined,{minimumFractionDigits:decimals,maximumFractionDigits:decimals});
+}
+function checkoutItemAmountMajor(product,variant,currency){
+  const c = DB.content || {};
+  const rate = (c.exchangeRates && c.exchangeRates[currency]) || 1;
+  const base = effectiveVariantPrice(product,variant);
+  if(base == null) return null;
+  return currency === 'NGN' ? Math.round(base * rate) : Math.round(base * rate * 100) / 100;
+}
+function isCjPhysicalProduct(product){
+  return !!(product && product.productType === 'PHYSICAL' && product.physical && product.physical.cj && product.physical.cj.variantId);
+}
+
 function openCheckoutReviewModal(product,variant,delivery,onContinue,external=false){
   if($('#checkoutReviewOverlay'))return;
   const overlay=document.createElement('div');overlay.id='checkoutReviewOverlay';overlay.className='modal-backdrop';overlay.setAttribute('role','presentation');
   const amount=effectiveVariantPrice(product,variant);
   const selectedName=variantLabel(product,variant);
-  const deliveryCopy=external?'You will continue to the seller’s payment page to complete this order.':product.productType==='PHYSICAL'
-    ? `Ships to ${escapeHtml(delivery&&delivery.country||'your delivery address')}${product.physical&&product.physical.deliveryEstimate?` · ${escapeHtml(product.physical.deliveryEstimate)}`:''}`
-    : 'Digital access or download after payment verification';
-  overlay.innerHTML=`<section class="modal-box checkout-review" role="dialog" aria-modal="true" aria-labelledby="checkoutReviewTitle" aria-describedby="checkoutReviewDelivery">
-    <h2 id="checkoutReviewTitle">Review your selection</h2>
-    <p class="text-2">${escapeHtml(product.name)}</p>
-    ${selectedName?`<div class="checkout-review-variant">${escapeHtml(selectedName)}</div>`:''}
-    <div class="checkout-review-price"><span>Price</span><strong>${amount===0?'Free':fmtPrice(amount)}</strong></div>
-    <p id="checkoutReviewDelivery" class="text-2 small">${deliveryCopy}</p>
-    <div class="checkout-review-actions"><button type="button" class="btn btn-ghost" data-review-cancel>Change selection</button><button type="button" class="btn btn-primary" data-review-continue>Continue to payment</button></div>
-  </section>`;
+  const chargeCurrency=checkoutChargeCurrency();
+  const itemMajor=checkoutItemAmountMajor(product,variant,chargeCurrency);
+  const hasShippingQuote=!external && isCjPhysicalProduct(product) && delivery && delivery.shippingQuoteId;
+  const shippingMajor=hasShippingQuote?Number(delivery.shippingAmountMajor):0;
+  const totalMajor=hasShippingQuote?itemMajor+shippingMajor:itemMajor;
+  let deliveryCopy;
+  if(external) deliveryCopy='You will continue to the seller’s payment page to complete this order.';
+  else if(product.productType==='PHYSICAL'){
+    deliveryCopy='Ships to '+escapeHtml(delivery&&delivery.country||'your delivery address');
+    if(hasShippingQuote && delivery.shippingMethod) deliveryCopy+=' · '+escapeHtml(delivery.shippingMethod);
+    if(hasShippingQuote && delivery.shippingETA) deliveryCopy+=' · estimated '+escapeHtml(delivery.shippingETA);
+    if(!hasShippingQuote && isCjPhysicalProduct(product)) deliveryCopy+=' · a valid shipping quote is required before payment';
+    if(!hasShippingQuote && !isCjPhysicalProduct(product) && product.physical && product.physical.deliveryEstimate) deliveryCopy+=' · '+escapeHtml(product.physical.deliveryEstimate);
+  } else deliveryCopy='Digital access or download after payment verification';
+  let priceRows;
+  if(hasShippingQuote){
+    priceRows='<div class="checkout-review-price"><span>Product price</span><strong>'+formatChargeMajor(itemMajor,chargeCurrency)+'</strong></div>'
+      +'<div class="checkout-review-price"><span>Shipping ('+escapeHtml(delivery.shippingMethod||'selected route')+')</span><strong>'+formatChargeMajor(shippingMajor,chargeCurrency)+'</strong></div>'
+      +'<div class="checkout-review-price" style="border-top:1px solid var(--border);padding-top:10px;margin-top:4px;"><span>Total due now</span><strong>'+formatChargeMajor(totalMajor,chargeCurrency)+'</strong></div>';
+  } else {
+    priceRows='<div class="checkout-review-price"><span>Price</span><strong>'+(amount===0?'Free':fmtPrice(amount))+'</strong></div>';
+  }
+  overlay.innerHTML='<section class="modal-box checkout-review" role="dialog" aria-modal="true" aria-labelledby="checkoutReviewTitle" aria-describedby="checkoutReviewDelivery">'
+    +'<h2 id="checkoutReviewTitle">Review your selection</h2>'
+    +'<p class="text-2">'+escapeHtml(product.name)+'</p>'
+    +(selectedName?'<div class="checkout-review-variant">'+escapeHtml(selectedName)+'</div>':'')
+    +priceRows
+    +'<p id="checkoutReviewDelivery" class="text-2 small">'+deliveryCopy+'</p>'
+    +'<div class="checkout-review-actions"><button type="button" class="btn btn-ghost" data-review-cancel>Change selection</button><button type="button" class="btn btn-primary" data-review-continue>Continue to payment</button></div>'
+    +'</section>';
   document.body.appendChild(overlay);
   const close=()=>overlay.remove();
   overlay.querySelector('[data-review-cancel]')?.addEventListener('click',close);
@@ -762,78 +815,147 @@ function closeCheckoutEmailModal(){ $('#checkoutEmailOverlay')?.remove(); }
 // "one more thing before Paystack opens" step. Never called for DIGITAL/
 // SERVICE products (see startPaystackCheckout's gate), so it can't affect
 // the existing checkout flow those use.
-function openDeliveryDetailsModal(product, onSubmit){
+function openDeliveryDetailsModal(product, selectedVariant, onSubmit){
   if($('#deliveryDetailsOverlay')) return;
-  const overlay = document.createElement('div');
-  overlay.id = 'deliveryDetailsOverlay';
-  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:900;display:flex;align-items:center;justify-content:center;padding:20px;overflow-y:auto;';
-  const countries = (product.physical && product.physical.shippingCountries && product.physical.shippingCountries.length)
-    ? product.physical.shippingCountries : ['Nigeria'];
-  overlay.innerHTML = `
-    <div class="card" style="max-width:420px;width:100%;padding:20px;max-height:90vh;overflow-y:auto;">
-      <h2 class="font-display" style="margin-bottom:4px;">Where should we ship this?</h2>
-      <p class="text-2 small" style="margin-bottom:14px;">"${escapeHtml(product.name)}" is a physical item — we need a delivery address before payment.</p>
-      <div class="form-field"><label>Full name</label><input id="dd_name" autocomplete="name" placeholder="Full name"></div>
-      <div class="form-field"><label>Phone number</label><input id="dd_phone" type="tel" autocomplete="tel" placeholder="e.g. 0801 234 5678"></div>
-      <div class="form-field"><label>Delivery address</label><input id="dd_address" autocomplete="street-address" placeholder="Street address"></div>
-      <div class="form-field"><label>City</label><input id="dd_city" autocomplete="address-level2" placeholder="City"></div>
-      <div class="form-field"><label>State</label><input id="dd_state" autocomplete="address-level1" placeholder="State/Province"></div>
-      <div class="form-field"><label>Country</label>${customSelect('dd_country', countries[0], countries.map(c=>({value:c,label:c})), '', ()=>cjRefreshShippingEstimate(product))}</div>
-      <p class="small text-2" id="dd_shippingEstimate" style="min-height:14px;"></p>
-      <p class="small text-2" id="deliveryDetailsErr" style="color:var(--error);min-height:16px;"></p>
-      <div class="flex gap-8">
-        <button class="btn btn-primary" id="deliveryDetailsBtn" style="flex:1;">Continue to Payment</button>
-        <button class="btn btn-outline" onclick="closeDeliveryDetailsModal()">Cancel</button>
-      </div>
-    </div>`;
+  const overlay=document.createElement('div');
+  overlay.id='deliveryDetailsOverlay';
+  overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:900;display:flex;align-items:center;justify-content:center;padding:20px;overflow-y:auto;';
+  const countries=(product.physical&&product.physical.shippingCountries&&product.physical.shippingCountries.length)?product.physical.shippingCountries:['Nigeria'];
+  const requiresCjQuote=isCjPhysicalProduct(product);
+  const routeField=requiresCjQuote ? '<div class="form-field"><label for="dd_shippingMethod">Shipping method</label><select id="dd_shippingMethod" style="width:100%;"><option value="">Checking available routes…</option></select></div>' : '';
+  overlay.innerHTML='<div class="card" style="max-width:420px;width:100%;padding:20px;max-height:90vh;overflow-y:auto;">'
+    +'<h2 class="font-display" style="margin-bottom:4px;">Where should we ship this?</h2>'
+    +'<p class="text-2 small" style="margin-bottom:14px;">'+escapeHtml(product.name)+' is a physical item. We will show the shipping fee before you pay.</p>'
+    +'<div class="form-field"><label>Full name</label><input id="dd_name" autocomplete="name" placeholder="Full name"></div>'
+    +'<div class="form-field"><label>Phone number</label><input id="dd_phone" type="tel" autocomplete="tel" placeholder="e.g. 0801 234 5678"></div>'
+    +'<div class="form-field"><label>Delivery address</label><input id="dd_address" autocomplete="street-address" placeholder="Street address"></div>'
+    +'<div class="form-field"><label>City</label><input id="dd_city" autocomplete="address-level2" placeholder="City"></div>'
+    +'<div class="form-field"><label>State</label><input id="dd_state" autocomplete="address-level1" placeholder="State/Province"></div>'
+    +'<div class="form-field"><label>Country</label>'+customSelect('dd_country',countries[0],countries.map(country=>({value:country,label:country})), '', ()=>{ if(requiresCjQuote) cjRefreshShippingEstimate(product,selectedVariant); })+'</div>'
+    +routeField
+    +'<p class="small text-2" id="dd_shippingEstimate" style="min-height:34px;"></p>'
+    +'<p class="small text-2" id="deliveryDetailsErr" style="color:var(--error);min-height:16px;"></p>'
+    +'<div class="flex gap-8"><button class="btn btn-primary" id="deliveryDetailsBtn" style="flex:1;" '+(requiresCjQuote?'disabled':'')+'>Continue to Payment</button><button class="btn btn-outline" id="deliveryDetailsCancel">Cancel</button></div>'
+    +'</div>';
   document.body.appendChild(overlay);
   $('#dd_name').focus();
-  cjRefreshShippingEstimate(product);
-  const submit = ()=>{
-    const errEl = $('#deliveryDetailsErr');
-    const name = $('#dd_name').value.trim();
-    const phone = $('#dd_phone').value.trim();
-    const address = $('#dd_address').value.trim();
-    const city = $('#dd_city').value.trim();
-    const state = $('#dd_state').value.trim();
-    const country = $('#dd_country').value;
-    if(!name || !phone || !address || !country){
-      if(errEl) errEl.textContent = 'Name, phone, address and country are required.';
-      return;
+  const btn=$('#deliveryDetailsBtn');
+  const routeSelect=$('#dd_shippingMethod');
+  if(routeSelect) routeSelect.addEventListener('change',()=>updateCjShippingChoice(product,selectedVariant));
+  $('#deliveryDetailsCancel').addEventListener('click',closeDeliveryDetailsModal);
+  if(requiresCjQuote) cjRefreshShippingEstimate(product,selectedVariant);
+  const submit=()=>{
+    const errEl=$('#deliveryDetailsErr');
+    const name=$('#dd_name').value.trim();
+    const phone=$('#dd_phone').value.trim();
+    const address=$('#dd_address').value.trim();
+    const city=$('#dd_city').value.trim();
+    const state=$('#dd_state').value.trim();
+    const country=$('#dd_country').value;
+    if(!name||!phone||!address||!country){if(errEl)errEl.textContent='Name, phone, address and country are required.';return;}
+    let quoteDetails={};
+    if(requiresCjQuote){
+      const quoteId=routeSelect&&routeSelect.value;
+      const quote=quoteId&&window.__cjShippingQuotes?window.__cjShippingQuotes[quoteId]:null;
+      if(!quote||!quote.quoteExpiresAt||Date.parse(quote.quoteExpiresAt)<=Date.now()){
+        if(errEl)errEl.textContent='Your shipping quote is missing or expired. Please refresh the shipping options.';
+        cjRefreshShippingEstimate(product,selectedVariant);return;
+      }
+      const currency=checkoutChargeCurrency();
+      if(quote.currency!==currency){if(errEl)errEl.textContent='Currency changed. Refresh the shipping options before continuing.';cjRefreshShippingEstimate(product,selectedVariant);return;}
+      quoteDetails={shippingQuoteId:quote.quoteId,shippingMethod:quote.logisticName,shippingAmountMajor:Number(quote.shippingAmountMajor),shippingCurrency:quote.currency,shippingAmountUSD:Number(quote.logisticPrice),shippingETA:quote.logisticAging||null,shippingQuoteExpiresAt:quote.quoteExpiresAt};
     }
     closeDeliveryDetailsModal();
-    onSubmit({ name, phone, address, city, state, country });
+    onSubmit(Object.assign({name,phone,address,city,state,country},quoteDetails));
   };
-  $('#deliveryDetailsBtn').addEventListener('click', submit);
+  btn.addEventListener('click',submit);
 }
 function closeDeliveryDetailsModal(){ $('#deliveryDetailsOverlay')?.remove(); }
 
-// Best-effort, informational-only shipping estimate shown inside the
-// delivery modal for CJ-fulfilled products (README §19). Deliberately
-// silent on any failure — an unreachable/unconfigured CJ backend must
-// never block or alarm a shopper mid-checkout; the authoritative shipping
-// method is still whatever CJ actually ships with once cj-order.js runs
-// server-side right after payment is verified.
-async function cjRefreshShippingEstimate(product){
-  const el = $('#dd_shippingEstimate');
-  const vid = product && product.physical && product.physical.cj && product.physical.cj.variantId;
-  const base = cjBackendUrl();
-  if(!el || !vid || !base) { if(el) el.textContent=''; return; }
-  const countryEl = $('#dd_country');
-  const country = countryEl ? countryEl.value : 'Nigeria';
-  const iso2 = {nigeria:'NG','united states':'US','united kingdom':'GB',ghana:'GH',kenya:'KE','south africa':'ZA'}[String(country).toLowerCase()] || 'NG';
-  el.textContent = 'Checking shipping…';
+let __cjShippingQuoteRequestSeq=0;
+async function cjRefreshShippingEstimate(product,selectedVariant){
+  const el=$('#dd_shippingEstimate');
+  const routeSelect=$('#dd_shippingMethod');
+  const btn=$('#deliveryDetailsBtn');
+  if(!el||!isCjPhysicalProduct(product))return;
+  const vid=selectedVariant&&selectedVariant.cjVariantId?selectedVariant.cjVariantId:product.physical.cj.variantId;
+  if(!vid){el.textContent='This product option has no shipping mapping. Please contact support.';if(btn)btn.disabled=true;return;}
+  const base=cjBackendUrl();
+  if(!base){el.textContent='Shipping is temporarily unavailable. No payment has been taken.';if(btn)btn.disabled=true;return;}
+  const countryEl=$('#dd_country');
+  const country=countryEl?countryEl.value:'Nigeria';
+  const iso2=({nigeria:'NG','united states':'US','united kingdom':'GB',ghana:'GH',kenya:'KE','south africa':'ZA'})[String(country).toLowerCase()];
+  const currency=checkoutChargeCurrency();
+  const requestSeq=++__cjShippingQuoteRequestSeq;
+  if(btn)btn.disabled=true;
+  if(el)el.textContent='Checking live shipping prices…';
+  if(routeSelect){routeSelect.disabled=true;routeSelect.innerHTML='';const opt=document.createElement('option');opt.value='';opt.textContent='Checking available routes…';routeSelect.appendChild(opt);}
+  window.__cjShippingQuotes={};
   try{
-    const r = await withTimeout(cjApiPost('/cj-shipping', {endCountryCode: iso2, products:[{vid, quantity:1}]}), 8000, 'timeout');
-    if(r && r.ok && r.options && r.options[0]){
-      const o = r.options[0];
-      el.textContent = `Estimated shipping: ${o.logisticName} — $${o.logisticPrice}${o.logisticAging?' ('+o.logisticAging+')':''}`;
-    } else {
-      el.textContent = '';
+    const r=await withTimeout(cjApiPost('/cj-shipping',{startCountryCode:'CN',endCountryCode:iso2||'NG',products:[{vid:String(vid),quantity:1}],productId:String(product.id),variantId:selectedVariant&&selectedVariant.id||null,currency}),12000,'Shipping quote timed out.');
+    if(requestSeq!==__cjShippingQuoteRequestSeq)return;
+    if(!r||!r.ok||!Array.isArray(r.options)||!r.options.length){
+      if(el)el.textContent=(r&&r.error)||'No valid shipping route is available for this destination. Try again later or choose another product.';
+      if(routeSelect){routeSelect.innerHTML='';const opt=document.createElement('option');opt.value='';opt.textContent='No valid route available';routeSelect.appendChild(opt);routeSelect.disabled=true;}
+      if(btn)btn.disabled=true;return;
     }
-  }catch{
-    el.textContent = '';
+    window.__cjShippingQuotes={};
+    if(routeSelect)routeSelect.innerHTML='';
+    r.options.forEach(option=>{
+      if(!option.quoteId||!Number.isFinite(Number(option.shippingAmountMajor)))return;
+      window.__cjShippingQuotes[option.quoteId]=option;
+      if(!routeSelect)return;
+      const elOption=document.createElement('option');
+      elOption.value=option.quoteId;
+      const eta=option.logisticAging?(' · estimated '+option.logisticAging):'';
+      const badge=option.isPreferred?' (preferred)':(option.isExpress?' (express)':'');
+      const blocked=option.blockedByPricingPolicy===true;
+      elOption.disabled=blocked;
+      elOption.textContent=option.logisticName+badge+' · '+formatChargeMajor(option.shippingAmountMajor,currency)+eta+(blocked?' · unavailable at this delivery cost':'');
+      routeSelect.appendChild(elOption);
+    });
+    if(routeSelect){
+      routeSelect.disabled=false;
+      if(!routeSelect.options.length){routeSelect.disabled=true;if(el)el.textContent='CJ returned no usable route prices. No payment has been taken.';if(btn)btn.disabled=true;return;}
+      const firstEligible=Array.from(routeSelect.options).find(option=>!option.disabled);
+      if(!firstEligible){routeSelect.value='';if(el)el.textContent='None of the available routes meets LEXDEN NOVA’s affordability limit for this item. Please choose a locally stocked alternative or try a bundle.';if(btn)btn.disabled=true;return;}
+      routeSelect.value=firstEligible.value;
+    }
+    updateCjShippingChoice(product,selectedVariant);
+  }catch(error){
+    if(requestSeq!==__cjShippingQuoteRequestSeq)return;
+    if(el)el.textContent=(error&&error.message?String(error.message):'Shipping lookup failed.')+' No payment has been taken. Please retry.';
+    if(routeSelect){routeSelect.innerHTML='';const opt=document.createElement('option');opt.value='';opt.textContent='Could not calculate shipping';routeSelect.appendChild(opt);routeSelect.disabled=true;}
+    if(btn)btn.disabled=true;
   }
+}
+function updateCjShippingChoice(product,selectedVariant){
+  const el=$('#dd_shippingEstimate');
+  const routeSelect=$('#dd_shippingMethod');
+  const btn=$('#deliveryDetailsBtn');
+  if(!el||!routeSelect||!btn)return;
+  const quote=window.__cjShippingQuotes&&window.__cjShippingQuotes[routeSelect.value];
+  if(!quote){btn.disabled=true;return;}
+  const expires=Date.parse(quote.quoteExpiresAt||'');
+  if(!Number.isFinite(expires)||expires<=Date.now()){el.textContent='The shipping quote has expired. Refresh the options before paying.';btn.disabled=true;return;}
+  const currency=checkoutChargeCurrency();
+  const itemAmount=checkoutItemAmountMajor(product,selectedVariant,currency);
+  const ratio=itemAmount>0?Number(quote.shippingAmountMajor)/itemAmount:null;
+  let message='Shipping: '+formatChargeMajor(quote.shippingAmountMajor,currency)+'. Total before payment: '+formatChargeMajor(Number(quote.productAmountMajor)+Number(quote.shippingAmountMajor),currency)+'.';
+  if(quote.logisticAging)message+=' Estimated transit: '+quote.logisticAging+'. This is an estimate, not a guarantee.';
+  const policy=(DB.content&&DB.content.commercePricingPolicy&&DB.content.commercePricingPolicy.shipping)||{};
+  const warningRatio=Number(policy.highShippingItemPriceRatioWarning)||0.6;
+  const blockRatio=Number(policy.highShippingItemPriceRatioBlock)||1.5;
+  if(ratio!==null&&ratio>=blockRatio){
+    message+=' This route exceeds the shipping-to-item affordability limit.';
+    if(policy.enforceShippingRatioBlock===true){
+      el.textContent=message+' Select another route or a locally stocked/bundled alternative.';
+      btn.disabled=true;
+      return;
+    }
+  } else if(ratio!==null&&ratio>=warningRatio)message+=' Shipping is high relative to this item price, so compare routes before paying.';
+  el.textContent=message;
+  btn.disabled=false;
 }
 
 // Same brief-beat pattern used just before the Paystack iframe opens —
@@ -1173,6 +1295,7 @@ async function verifyPaystackPayment(reference, product, email, showResult, deli
       productId: product.id, productName: product.name,
       ...(variantId?{variantId}:{}),
       ...(delivery ? { delivery } : {}),
+      ...(delivery && delivery.shippingQuoteId ? { shippingQuoteId: delivery.shippingQuoteId } : {}),
       ...(window.__resByRef && window.__resByRef[reference] ? { reservationId: window.__resByRef[reference] } : {}),
       ...resolveAffiliateAttribution(product.id),
     });

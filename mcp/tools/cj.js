@@ -3,7 +3,7 @@ const { z } = require('zod');
 const { callHandler } = require('../lib/callHandler');
 const { getDb } = require('../../api/affiliate/shared');
 const { listCatalogDoc, upsertCatalogItem } = require('../lib/settings');
-const { uniqueUrls, buildProductSpecs, stockStatusFrom, deriveSuggestedPricing } = require('../lib/productImport');
+const { uniqueUrls, buildProductSpecs, stockStatusFrom, deriveCostBasedPricing } = require('../lib/productImport');
 const { rehostAll } = require('../lib/mediaRehost');
 const cjShared = require('../../api/cj-shared');
 
@@ -75,7 +75,7 @@ function register(server) {
 
   server.registerTool('nova_cj_import_product', {
     title: 'Import CJ product as a complete admin draft',
-    description: 'Fetches the full CJ product detail and all returned variants, preserving the original CJ payload and mapping every known CJ field into NOVA fields/specs. Fields absent from CJ remain blank. Uses the CJ suggested price as regular price and a 40% discount when a suggested price exists; if CJ provides no suggested price, prices stay blank. Never publishes automatically. Duplicate CJ product IDs are rejected.',
+    description: 'Fetches full CJ details and returned variants, preserving the original CJ payload and mapping known fields into NOVA fields/specs. Fields absent from CJ remain blank. Uses supplier cost plus the saved margin, maintenance, payment-fee and FX policy; never treats CJ suggested retail price as supplier cost and never invents a sale discount. Stores CJPacket Postal as the default preferred route, but shipping is recalculated live at checkout and shown separately. Prices remain blank when supplier cost or currency is unknown. Never publishes automatically. Duplicate CJ product IDs are rejected.',
     inputSchema: {
       pid: z.string().min(1),
       categoryId: z.string().optional(),
@@ -122,6 +122,8 @@ function register(server) {
     const stockMap = stockResult.body && stockResult.body.stock || {};
     const stockLookupOk = !!(stockResult.body && stockResult.body.ok);
     const firstVariant = variants[0] || {};
+    const settingsSnapshot = await db.doc('catalog/settings').get();
+    const settingsContent = settingsSnapshot.exists ? ((settingsSnapshot.data() || {}).content || {}) : {};
     const supplierImages = uniqueUrls([
       ...(Array.isArray(source.images) ? source.images : []),
       ...variants.map(v => v.image),
@@ -129,13 +131,23 @@ function register(server) {
     const images = supplierImages.length ? await rehostAll(supplierImages) : [];
     const id = `cj-${productId.replace(/[^a-z0-9_-]/gi, '').slice(-48)}`;
     const specs = buildProductSpecs(source);
-    const pricing = deriveSuggestedPricing(source.suggestedSellPrice, variants);
+    const pricing = deriveCostBasedPricing(
+      firstVariant.sellPrice ?? source.sellPrice ?? null,
+      variants,
+      settingsContent,
+      firstVariant.sellPriceCurrency || source.supplierCurrency || ''
+    );
     const optionId = 'cj-variant';
     const optionName = Array.isArray(source.productOptions)
       ? source.productOptions.filter(Boolean).join(', ')
       : (source.productOptions == null ? '' : String(source.productOptions));
     const rootVariants = variants.map((variant, index) => {
-      const variantPrice = deriveSuggestedPricing(variant.suggestedSellPrice, []);
+      const variantPrice = deriveCostBasedPricing(
+        variant.sellPrice ?? null,
+        [],
+        settingsContent,
+        variant.sellPriceCurrency || source.supplierCurrency || ''
+      );
       const variantId = String(variant.vid || index);
       const title = String(variant.name || variant.variantKey || variant.sku || '');
       return {
@@ -223,6 +235,7 @@ function register(server) {
         cj: {
           productId,
           variantId: firstVariant.vid || '',
+          preferredShippingMethod: settingsContent.cjPreferredShippingMethod || 'CJPacket Postal',
           sku: firstVariant.sku || source.sku || '',
           syncEnabled: true,
           lastSyncedAt: stockStatusFrom(stockMap, variantIds.length, stockLookupOk) ? importedAt : null,
