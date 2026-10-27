@@ -757,7 +757,7 @@ async function saveProduct(id){
   try{variantData=readVariantMatrix(ngnRate,$('#f_status')?.value||'draft');}
   catch(error){toast(error.message||'Review the variant values before saving.','error');return;}
   const variantPrices=variantData.variants.map(variant=>variant.price).filter(value=>typeof value==='number'&&Number.isFinite(value));
-  if(variantPrices.length)price=Math.min(...variantPrices);
+  if(variantPrices.length && !(cjImportedExisting && rawNairaPrice!=='')) price=Math.min(...variantPrices);
   const productType=$('#f_productType')?.value||'DIGITAL';
   const categoryId=$('#f_category')?.value||'';
   const courseDetailsRelevant=isCourseCategory(categoryId) && productType!=='PHYSICAL' && productType!=='SERVICE';
@@ -782,7 +782,9 @@ async function saveProduct(id){
   });
   const data = {
     name, category:categoryId, price,
-    salePrice: variantData.variants.length ? null : ((nairaSale && nairaSale>0) ? nairaSale / ngnRate : null),
+    salePrice: cjImportedExisting
+      ? ((nairaSale && nairaSale>0) ? nairaSale / ngnRate : null)
+      : (variantData.variants.length ? null : ((nairaSale && nairaSale>0) ? nairaSale / ngnRate : null)),
     options: variantData.options,
     variants: variantData.variants,
     pricingReviewRequired: publishing ? false : !!(id&&findProduct(id)?.pricingReviewRequired),
