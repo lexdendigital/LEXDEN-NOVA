@@ -104,7 +104,7 @@ function register(server) {
     // Resolve the human-readable category name against NOVA's own categories;
     // if it has no exact match, keep physical imports out of Courses.
     const matchedLocalCategory = localCategories.find(c => String(c.id || '').trim().toLowerCase() === requestedCategoryName || String(c.name || '').trim().toLowerCase() === requestedCategoryName);
-    const physicalCategory = localCategories.find(c => /\\b(gadget|electronics?|hardware)\\b/i.test(String(c.id || '') + ' ' + String(c.name || '')));
+    const physicalCategory = localCategories.find(c => /\b(gadget|electronics?|hardware)\b/i.test(String(c.id || '') + ' ' + String(c.name || '')));
     const localCategory = matchedLocalCategory || physicalCategory || null;
     const variants = Array.isArray(response.variants) ? response.variants.filter(Boolean) : [];
     const variantIds = variants.map(v => v.vid).filter(Boolean).slice(0, 20);
