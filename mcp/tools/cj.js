@@ -3,7 +3,7 @@ const { z } = require('zod');
 const { callHandler } = require('../lib/callHandler');
 const { getDb } = require('../../api/affiliate/shared');
 const { listCatalogDoc, upsertCatalogItem } = require('../lib/settings');
-const { uniqueUrls, buildProductSpecs, stockStatusFrom } = require('../lib/productImport');
+const { uniqueUrls, buildProductSpecs, stockStatusFrom, deriveSuggestedPricing } = require('../lib/productImport');
 const { rehostAll } = require('../lib/mediaRehost');
 const cjShared = require('../../api/cj-shared');
 
