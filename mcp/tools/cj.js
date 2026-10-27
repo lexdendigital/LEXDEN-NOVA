@@ -3,7 +3,7 @@ const { z } = require('zod');
 const { callHandler } = require('../lib/callHandler');
 const { getDb } = require('../../api/affiliate/shared');
 const { listCatalogDoc, upsertCatalogItem } = require('../lib/settings');
-const { uniqueUrls, buildProductSpecs, stockStatusFrom, deriveSuggestedPricing } = require('../lib/productImport');
+const { uniqueUrls, buildProductSpecs, stockStatusFrom, deriveCostBasedPricing } = require('../lib/productImport');
 const { rehostAll } = require('../lib/mediaRehost');
 const cjShared = require('../../api/cj-shared');
 
@@ -122,6 +122,8 @@ function register(server) {
     const stockMap = stockResult.body && stockResult.body.stock || {};
     const stockLookupOk = !!(stockResult.body && stockResult.body.ok);
     const firstVariant = variants[0] || {};
+    const settingsSnapshot = await db.doc('catalog/settings').get();
+    const settingsContent = settingsSnapshot.exists ? ((settingsSnapshot.data() || {}).content || {}) : {};
     const supplierImages = uniqueUrls([
       ...(Array.isArray(source.images) ? source.images : []),
       ...variants.map(v => v.image),
@@ -129,13 +131,23 @@ function register(server) {
     const images = supplierImages.length ? await rehostAll(supplierImages) : [];
     const id = `cj-${productId.replace(/[^a-z0-9_-]/gi, '').slice(-48)}`;
     const specs = buildProductSpecs(source);
-    const pricing = deriveSuggestedPricing(source.suggestedSellPrice, variants);
+    const pricing = deriveCostBasedPricing(
+      firstVariant.sellPrice ?? source.sellPrice ?? null,
+      variants,
+      settingsContent,
+      firstVariant.sellPriceCurrency || source.supplierCurrency || ''
+    );
     const optionId = 'cj-variant';
     const optionName = Array.isArray(source.productOptions)
       ? source.productOptions.filter(Boolean).join(', ')
       : (source.productOptions == null ? '' : String(source.productOptions));
     const rootVariants = variants.map((variant, index) => {
-      const variantPrice = deriveSuggestedPricing(variant.suggestedSellPrice, []);
+      const variantPrice = deriveCostBasedPricing(
+        variant.sellPrice ?? null,
+        [],
+        settingsContent,
+        variant.sellPriceCurrency || source.supplierCurrency || ''
+      );
       const variantId = String(variant.vid || index);
       const title = String(variant.name || variant.variantKey || variant.sku || '');
       return {
@@ -223,6 +235,7 @@ function register(server) {
         cj: {
           productId,
           variantId: firstVariant.vid || '',
+          preferredShippingMethod: settingsContent.cjPreferredShippingMethod || 'CJPacket Postal',
           sku: firstVariant.sku || source.sku || '',
           syncEnabled: true,
           lastSyncedAt: stockStatusFrom(stockMap, variantIds.length, stockLookupOk) ? importedAt : null,
