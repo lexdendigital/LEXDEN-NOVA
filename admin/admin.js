@@ -2198,7 +2198,6 @@ async function importCjProduct(pid){
       image:variant.image || '',
       cjVariantId:variant.vid || '',
       active:true,
-      sourceData:variant.sourceData || variant,
     };
   });
   const importedAt = new Date().toISOString();
@@ -2315,7 +2314,6 @@ async function importCjProduct(pid){
       productId:product.pid || pid,
       importedAt,
       sourceCategoryId:product.categoryId || '',
-      sourceData:product.sourceData || product,
     },
   };
   DB.products = [...DB.legacyProducts, data];
