@@ -35,6 +35,7 @@ function buildCjOrderPayload(orderRef, order, product, cjMapping, qty) {
     shippingAddress: d.address || '',
     shippingCustomerName: d.name || '',
     shippingPhone: d.phone || '',
+    logisticName: d.shippingMethod || '',
     remark: `LEXDEN NOVA order ${orderRef}`,
     fromCountryCode: 'CN',
     products: [
@@ -107,6 +108,24 @@ module.exports = async (req, res) => {
       return res.status(200).json({ ok: false, error: 'invalid_product', message: 'This product has no CJ variant mapping — cannot auto-fulfil.' });
     }
 
+    // Physical orders must use the exact route selected and paid for at checkout.
+    // Never silently let CJ substitute a different (possibly much more expensive) carrier.
+    const routeName = order.delivery.shippingMethod;
+    const quoteId = order.delivery.shippingQuoteId;
+    if (!routeName || !quoteId) {
+      await orderRef.set({ status: 'shipping_quote_issue', shippingQuoteIssue: 'missing_route_or_quote', requiresManualReview: true }, { merge: true });
+      await writeSyncLog({ event: 'order.create', objectId: reference, success: false, message: 'missing_shipping_route_quote', tookMs: Date.now() - started });
+      return res.status(200).json({ ok: false, error: 'shipping_quote_missing', message: 'This order has no verified shipping route. It has been held for manual review.' });
+    }
+    const quoteSnap = await db().collection('shippingQuotes').doc(String(quoteId)).get();
+    const quote = quoteSnap.exists ? quoteSnap.data() : null;
+    if (!quote || quote.status !== 'reserved' || quote.usedBy !== reference || quote.logisticName !== routeName
+      || String(quote.productId) !== String(order.productId) || String(quote.variantId || '') !== String(order.variantId || '')) {
+      await orderRef.set({ status: 'shipping_quote_issue', shippingQuoteIssue: 'quote_route_mismatch', requiresManualReview: true }, { merge: true });
+      await writeSyncLog({ event: 'order.create', objectId: reference, success: false, message: 'shipping_quote_route_mismatch', tookMs: Date.now() - started });
+      return res.status(200).json({ ok: false, error: 'shipping_quote_mismatch', message: 'The selected shipping route could not be verified. This order has been held for manual review.' });
+    }
+
     const qty = Math.max(1, parseInt(order.quantity, 10) || 1);
 
     // ---- Live stock check right before creating the order (README §37 —
@@ -156,3 +175,6 @@ module.exports = async (req, res) => {
     return res.status(200).json({ ok: false, error: 'server_error', message: 'Unexpected error creating the supplier order.' });
   }
 };
+
+// Export the pure payload builder for focused unit tests; the default export remains the HTTP handler.
+module.exports.buildCjOrderPayload = buildCjOrderPayload;
