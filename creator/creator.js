@@ -127,8 +127,27 @@ function resetCreatorForm(appData){
     documents: [],
     errors: [],
     saving: false,
+    prefilled: !!shopper,
   };
 }
+// The shopper's saved profile (date of birth etc.) arrives from Firestore a
+// moment AFTER sign-in. If the creator form was built before it landed, fill
+// the still-empty fields now — straight into the inputs on screen, never
+// overwriting anything the applicant already typed, and without re-rendering.
+window.__creatorPrefillFromShopper = function(){
+  const f = creatorForm, s = window.__fbShopper;
+  if(!f || !f.prefilled || !s) return;
+  const fill = (id, key, val)=>{
+    if(!val) return;
+    const el = document.getElementById(id);
+    if(el && !el.value) el.value = val;
+    if(!f.privateFields[key]) f.privateFields[key] = val;
+  };
+  fill('cf_legalName', 'legalName', s.name);
+  fill('cf_contactName', 'contactName', s.name);
+  fill('cf_email', 'email', s.email);
+  fill('cf_dob', 'dob', s.dob);
+};
 
 function screenCreator(){
   const shopper = window.__fbShopper;
@@ -847,7 +866,13 @@ function screenCreatorStatus(title, body, emoji, allowReapply){
 
 function screenCreatorForm(serverData){
   const f = creatorForm;
+  // Background refreshes (sign-in sync, exchange rates...) rebuild the whole
+  // screen from state. If the form is already on screen, keep whatever has
+  // been typed so far instead of wiping it back to the last saved values.
   const isBusiness = f.creatorType === 'business';
+  // (Only when the form on screen is the same kind — Personal vs Business —
+  // as the one being drawn; switching kinds starts fresh on purpose.)
+  if(document.getElementById('cf_displayName') && !f.saving && isBusiness === !!document.getElementById('cf_legalBusinessName')){ try{ readCreatorFormFromDom(); }catch(e){} }
   const changeNotice = serverData && serverData.status === 'CHANGES_REQUESTED'
     ? `<div class="card" style="padding:14px;margin-bottom:16px;border:1px solid var(--warn,#d4af37);"><strong>Changes requested:</strong> ${escapeHtml(serverData.changeRequestReason||'See below.')}</div>`
     : '';

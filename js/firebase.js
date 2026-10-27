@@ -619,6 +619,9 @@ onAuthStateChanged(fbAuth, user => {
           window.__fbShopper.state = profile.state||'';
           window.__fbShopper.howHeard = profile.howHeard||'';
           window.__fbShopper.profileSetupDone = !!profile.profileSetupDone;
+          // Late-arriving profile data (date of birth etc.) can fill the
+          // Become a Creator form if it was opened before this landed.
+          try{ window.__creatorPrefillFromShopper && window.__creatorPrefillFromShopper(); }catch(e){}
           // BUGFIX (uploaded profile picture "disappearing" after signing
           // out and back in): a manual (email/password) account's photo is
           // only ever saved to the Firestore profile doc (photoURL, set at
