@@ -750,6 +750,10 @@ async function saveProduct(id){
   const variantPrices=variantData.variants.map(variant=>variant.price).filter(value=>typeof value==='number'&&Number.isFinite(value));
   if(variantPrices.length)price=Math.min(...variantPrices);
   const productType=$('#f_productType')?.value||'DIGITAL';
+  const categoryId=$('#f_category')?.value||'';
+  const courseDetailsRelevant=isCourseCategory(categoryId) && productType!=='PHYSICAL' && productType!=='SERVICE';
+  const formatRelevant=isDigitalDetailsCategory(categoryId) && productType!=='PHYSICAL' && productType!=='SERVICE';
+  const hardwareRelevant=isHardwareCategory(categoryId);
   const publishing=$('#f_status')?.value==='published';
   if(publishing&&productType==='PHYSICAL'){
     const badVariant=variantData.variants.find(variant=>typeof variant.price!=='number'||variant.price<=0);
@@ -757,22 +761,25 @@ async function saveProduct(id){
     if(!variantData.variants.length&&(!Number.isFinite(price)||price<=0)){toast('Set a positive selling price before publishing a physical product.','error');return;}
   }
   const specs = {};
-  const fmt = $('#f_format')?.value.trim(); if(fmt) specs['Format'] = fmt;
-  const lvl = $('#f_level')?.value.trim(); if(lvl) specs['Level'] = lvl;
-  const cond = $('#f_condition')?.value.trim(); if(cond) specs['Condition'] = cond;
-  const warr = $('#f_warranty')?.value.trim(); if(warr) specs['Warranty'] = warr;
+  const fmt = $('#f_format')?.value.trim(); if(formatRelevant && fmt) specs['Format'] = fmt;
+  const lvl = $('#f_level')?.value.trim(); if(courseDetailsRelevant && lvl) specs['Level'] = lvl;
+  const cond = $('#f_condition')?.value.trim(); if(productType==='PHYSICAL' && cond) specs['Condition'] = cond;
+  const warr = $('#f_warranty')?.value.trim(); if(productType==='PHYSICAL' && hardwareRelevant && warr) specs['Warranty'] = warr;
   $all('#specRows [data-spec-row]').forEach(row=>{
     const k = row.querySelector('.spec-key')?.value.trim();
     const v = row.querySelector('.spec-val')?.value.trim();
-    if(k && v) specs[k] = v;
+    const key=String(k||'').trim().toLowerCase();
+    const builtInIrrelevant=(key==='level'&&!courseDetailsRelevant)||(key==='format'&&!formatRelevant)||(key==='condition'&&productType!=='PHYSICAL')||(key==='warranty'&&!(productType==='PHYSICAL'&&hardwareRelevant));
+    if(k && v && !builtInIrrelevant) specs[k] = v;
   });
   const data = {
-    name, category:$('#f_category').value, price,
+    name, category:categoryId, price,
     salePrice: variantData.variants.length ? null : ((nairaSale && nairaSale>0) ? nairaSale / ngnRate : null),
     options: variantData.options,
     variants: variantData.variants,
     pricingReviewRequired: publishing ? false : !!(id&&findProduct(id)?.pricingReviewRequired),
     itemCode:$('#f_itemCode').value, seller:$('#f_seller').value,
+    shareId: (id && findProduct(id)?.shareId) || (/^p\d{1,4}$/.test(String(id||'')) ? String(id) : nextProductShareId(id)),
     image: coverImage,
     gallery: gallery.length?gallery:[{url:coverImage,type:'image'}], affiliateLink:$('#f_link').value || '#',
     fileUrl: $('#f_fileUrl')?.value.trim() || '',
@@ -786,17 +793,17 @@ async function saveProduct(id){
     seoTitle: $('#f_seoTitle')?.value.trim() || '',
     metaDescription: $('#f_metaDescription')?.value.trim() || '',
     searchKeywords: ($('#f_searchKeywords')?.value || '').split(',').map(v=>v.trim()).filter(Boolean),
-    audienceFor: $('#f_audienceFor')?.value.trim() || '',
-    audienceNotFor: $('#f_audienceNotFor')?.value.trim() || '',
-    learningOutcomes: $('#f_learningOutcomes')?.value.trim() || '',
-    courseContents: $('#f_courseContents')?.value.trim() || '',
-    deliveryFormat: $('#f_deliveryFormat')?.value.trim() || '',
-    durationNote: $('#f_durationNote')?.value.trim() || '',
-    requirements: $('#f_requirements')?.value.trim() || '',
-    tools: $('#f_tools')?.value.trim() || '',
-    certificateDetails: $('#f_certificateDetails')?.value.trim() || '',
-    assignmentsDetails: $('#f_assignmentsDetails')?.value.trim() || '',
-    capstoneDetails: $('#f_capstoneDetails')?.value.trim() || '',
+    audienceFor: courseDetailsRelevant ? ($('#f_audienceFor')?.value.trim() || '') : '',
+    audienceNotFor: courseDetailsRelevant ? ($('#f_audienceNotFor')?.value.trim() || '') : '',
+    learningOutcomes: courseDetailsRelevant ? ($('#f_learningOutcomes')?.value.trim() || '') : '',
+    courseContents: courseDetailsRelevant ? ($('#f_courseContents')?.value.trim() || '') : '',
+    deliveryFormat: courseDetailsRelevant ? ($('#f_deliveryFormat')?.value.trim() || '') : '',
+    durationNote: courseDetailsRelevant ? ($('#f_durationNote')?.value.trim() || '') : '',
+    requirements: courseDetailsRelevant ? ($('#f_requirements')?.value.trim() || '') : '',
+    tools: courseDetailsRelevant ? ($('#f_tools')?.value.trim() || '') : '',
+    certificateDetails: courseDetailsRelevant ? ($('#f_certificateDetails')?.value.trim() || '') : '',
+    assignmentsDetails: courseDetailsRelevant ? ($('#f_assignmentsDetails')?.value.trim() || '') : '',
+    capstoneDetails: courseDetailsRelevant ? ($('#f_capstoneDetails')?.value.trim() || '') : '',
     accessDelivery: $('#f_accessDelivery')?.value.trim() || '',
     supportWording: $('#f_supportWording')?.value.trim() || '',
     refundPolicy: $('#f_refundPolicy')?.value.trim() || '',
@@ -808,7 +815,7 @@ async function saveProduct(id){
     }).filter(f=>f.q&&f.a),
     specs, rating:(id&&findProduct(id)?.rating)||4.5,
     reviewCount:(id&&findProduct(id)?.reviewCount)||0, featured:(id&&findProduct(id)?.featured)||false, trending:(id&&findProduct(id)?.trending)||false,
-    productType: $('#f_productType')?.value || 'DIGITAL',
+    productType,
     affiliateEnabled: $('#f_affiliateEnabled')?.checked || false,
     affiliateCommissionPct: $('#f_affiliateCommissionPct')?.value !== '' ? Number($('#f_affiliateCommissionPct').value) : null,
   };
