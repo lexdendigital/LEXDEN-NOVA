@@ -5,8 +5,8 @@ const {
 
 module.exports = async (req, res) => {
   const id = String(req.query.id || '');
-  const destUrl = id ? `${SITE_URL}#product/${encodeURIComponent(id)}` : SITE_URL;
-  const canonicalUrl = `https://${req.headers.host}/product/${encodeURIComponent(id)}`;
+  let destinationProductId = id;
+  let canonicalProductId = id;
 
   let title = APP_NAME;
   let description = FALLBACK_DESCRIPTION;
@@ -18,12 +18,15 @@ module.exports = async (req, res) => {
     const catalog = await getCatalogDoc('products');
     catalogRead = !!(catalog && Array.isArray(catalog.list));
     const list = catalog && Array.isArray(catalog.list) ? catalog.list : [];
-    const product = list.find(p => p && String(p.id) === id);
+    const product = list.find(p => p && String(p.id) === id) || list.find(p => p && String(p.shareId || '') === id);
     if (product) {
       found = true;
+      destinationProductId = String(product.id);
+      canonicalProductId = String(product.shareId || product.id);
       title = product.seoTitle || product.name || title;
       description = firstParagraph(product.metaDescription || product.shortDescription || product.description, 200) || description;
-      if (product.image) image = ogImage(product.image);
+      const mainImage = product.image || (Array.isArray(product.gallery) && (product.gallery.find(item => item && item.type !== 'video' && item.url) || {}).url) || (Array.isArray(product.images) ? product.images[0] : '');
+      if (mainImage) image = ogImage(mainImage);
     } else {
       // Not a catalog product: it may be a creator listing (public, sanitised data only).
       try {
@@ -44,6 +47,9 @@ module.exports = async (req, res) => {
       } catch (e) { catalogRead = false; /* keep the default preview; never call it missing on an error */ }
     }
   }
+
+  const destUrl = id ? `${SITE_URL}#product/${encodeURIComponent(destinationProductId)}` : SITE_URL;
+  const canonicalUrl = `https://${req.headers.host}/product/${encodeURIComponent(canonicalProductId)}`;
 
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.setHeader('Cache-Control', 'public, max-age=60, s-maxage=300, stale-while-revalidate=600');
