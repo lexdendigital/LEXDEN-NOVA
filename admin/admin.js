@@ -296,8 +296,8 @@ function openProductForm(id){
     <h3>${p?'Edit':'Add'} Product</h3>
     <div class="form-grid">
       <div class="form-field"><label>Name</label><input id="f_name" value="${p?escapeHtml(p.name):''}"></div>
-      <div class="form-field"><label>Category</label>${customSelect('f_category', p&&p.category||(cats[0]&&cats[0].id), cats.map(c=>({value:c.id,label:c.name})), '', ()=>toggleHardwareFields())}</div>
-      <div class="form-field"><label>Regular price (₦ Naira — leave blank or 0 for Free)</label><input id="f_price" type="number" step="1" oninput="updateDiscountPreview()" value="${p?Math.round(p.price*(DB.content.exchangeRates.NGN||1550)):''}"></div>
+      <div class="form-field"><label>Category</label>${customSelect('f_category', p ? (p.category||'') : (cats[0]&&cats[0].id), [{value:'',label:'Unassigned / not provided'}, ...cats.map(c=>({value:c.id,label:c.name}))], '', ()=>toggleHardwareFields())}</div>
+      <div class="form-field"><label>Regular price (₦ Naira — leave blank or 0 for Free)</label><input id="f_price" type="number" step="1" oninput="updateDiscountPreview()" value="${p&&p.price!=null?Math.round(p.price*(DB.content.exchangeRates.NGN||1550)):''}"></div>
       <div class="form-field"><label>Sale price (optional, ₦ Naira)</label><input id="f_salePrice" type="number" step="1" oninput="updateDiscountPreview()" value="${p&&p.salePrice?Math.round(p.salePrice*(DB.content.exchangeRates.NGN||1550)):''}"></div>
       <div class="form-field"><label>Discount</label><input id="f_discountPreview" disabled value="${p?discountPercent(p)+'%':'0%'}" style="opacity:.7;"></div>
       <div class="form-field"><label>Item code</label><input id="f_itemCode" value="${p?p.itemCode:'LX-'+Math.random().toString(36).slice(2,7).toUpperCase()}"></div>
@@ -369,7 +369,8 @@ function openProductForm(id){
         </div>
         <div class="form-field">
           <label>Stock status (shown honestly to shoppers — do not mark "In stock" unless it really is)</label>
-          ${customSelect('f_stockStatus', (p&&p.physical&&p.physical.stockStatus)||'in_stock', [
+          ${customSelect('f_stockStatus', p&&p.physical ? (p.physical.stockStatus||'') : 'in_stock', [
+            {value:'',label:'Unknown / not checked'},
             {value:'in_stock',label:'In stock'},
             {value:'low_stock',label:'Low stock'},
             {value:'out_of_stock',label:'Out of stock'},
@@ -377,7 +378,7 @@ function openProductForm(id){
           ], '')}
         </div>
         <div class="form-field"><label>Delivery estimate</label><input id="f_deliveryEstimate" placeholder="e.g. 3–7 business days" value="${escapeHtml((p&&p.physical&&p.physical.deliveryEstimate)||'')}"></div>
-        <div class="form-field"><label>Shipping countries (comma separated)</label><input id="f_shippingCountries" placeholder="e.g. Nigeria, Ghana" value="${escapeHtml((p&&p.physical&&(p.physical.shippingCountries||[]).join(', '))||'Nigeria')}"></div>
+        <div class="form-field"><label>Shipping countries (comma separated)</label><input id="f_shippingCountries" placeholder="e.g. Nigeria, Ghana" value="${escapeHtml(p ? ((p.physical&&p.physical.shippingCountries)||[]).join(', ') : 'Nigeria')}"></div>
         <div class="form-field"><label>Weight</label><input id="f_weight" placeholder="e.g. 1.2kg" value="${escapeHtml((p&&p.physical&&p.physical.weight)||'')}"></div>
         <div class="form-field"><label>Dimensions</label><input id="f_dimensions" placeholder="e.g. 30 x 20 x 4 cm" value="${escapeHtml((p&&p.physical&&p.physical.dimensions)||'')}"></div>
         <div class="form-field"><label>Return policy</label><input id="f_returnPolicy" placeholder="e.g. 7-day return if unopened" value="${escapeHtml((p&&p.physical&&p.physical.returnPolicy)||'')}"></div>
@@ -735,17 +736,21 @@ function updateDiscountPreview(){
 // filled in in on failure so retrying is one tap, not a re-type.
 async function saveProduct(id){
   const name = $('#f_name').value.trim();
-  const nairaPrice = parseFloat($('#f_price').value);
+  const rawNairaPrice = ($('#f_price')?.value || '').trim();
+  const nairaPrice = rawNairaPrice==='' ? null : Number(rawNairaPrice);
+  const existingProduct = id ? findProduct(id) : null;
+  const cjImportedExisting = !!(existingProduct && existingProduct.physical && existingProduct.physical.cj && existingProduct.physical.cj.productId);
   const list = DB.legacyProducts;
   const mediaUrls = Array.from({length:8}).map((_,i)=>$('#f_media'+i)?.value.trim()).filter(Boolean);
   const gallery = mediaUrls.map(url=>({url, type:guessMediaType(url)}));
   const coverImage = (gallery[0] && gallery[0].type==='image') ? gallery[0].url
-    : (gallery.find(g=>g.type==='image')||{}).url || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=600&q=80';
+    : (gallery.find(g=>g.type==='image')||{}).url || '';
   // Admin enters prices in Naira; we store the neutral USD base internally
   // (same base every other currency's rate is defined against) using the
   // current NGN rate, so a blank/zero price correctly means "Free".
   const ngnRate = (DB.content.exchangeRates && DB.content.exchangeRates.NGN) || 1550;
-  let price = (!nairaPrice || nairaPrice<=0) ? 0 : nairaPrice / ngnRate;
+  let price = rawNairaPrice==='' && cjImportedExisting ? null
+    : (!Number.isFinite(nairaPrice) || nairaPrice<=0) ? 0 : nairaPrice / ngnRate;
   const nairaSale = parseFloat($('#f_salePrice').value);
   if(!name){ toast('Product name is required','error'); return; }
   let variantData;
@@ -784,7 +789,8 @@ async function saveProduct(id){
     itemCode:$('#f_itemCode').value, seller:$('#f_seller').value,
     shareId: (id && findProduct(id)?.shareId) || (/^p\d{1,4}$/.test(String(id||'')) ? String(id) : nextProductShareId(id)),
     image: coverImage,
-    gallery: gallery.length?gallery:[{url:coverImage,type:'image'}], affiliateLink:$('#f_link').value || '#',
+    gallery: gallery.length ? gallery : (coverImage ? [{url:coverImage,type:'image'}] : []),
+    affiliateLink:$('#f_link').value || '',
     fileUrl: $('#f_fileUrl')?.value.trim() || '',
     deliveryLink: $('#f_deliveryLink')?.value.trim() || '',
     externalPaymentLink: $('#f_externalPaymentLink')?.value.trim() || '',
@@ -816,8 +822,10 @@ async function saveProduct(id){
       const split=line.indexOf('||');
       return split<0?{q:line,a:''}:{q:line.slice(0,split).trim(),a:line.slice(split+2).trim()};
     }).filter(f=>f.q&&f.a),
-    specs, rating:(id&&findProduct(id)?.rating)||4.5,
-    reviewCount:(id&&findProduct(id)?.reviewCount)||0, featured:(id&&findProduct(id)?.featured)||false, trending:(id&&findProduct(id)?.trending)||false,
+    specs,
+    rating: existingProduct?.rating ?? (cjImportedExisting ? null : 4.5),
+    reviewCount: existingProduct?.reviewCount ?? (cjImportedExisting ? null : 0),
+    featured: (id&&findProduct(id)?.featured)||false, trending: (id&&findProduct(id)?.trending)||false,
     productType,
     affiliateEnabled: $('#f_affiliateEnabled')?.checked || false,
     affiliateCommissionPct: $('#f_affiliateCommissionPct')?.value !== '' ? Number($('#f_affiliateCommissionPct').value) : null,
@@ -829,9 +837,9 @@ async function saveProduct(id){
   if(data.productType === 'PHYSICAL'){
     data.physical = {
       stockMode: $('#f_stockMode')?.value || 'SUPPLIER_STOCK',
-      stockStatus: $('#f_stockStatus')?.value || 'in_stock',
+      stockStatus: $('#f_stockStatus')?.value || (existingProduct?.physical?.stockStatus || ''),
       deliveryEstimate: $('#f_deliveryEstimate')?.value.trim() || '',
-      shippingCountries: ($('#f_shippingCountries')?.value || 'Nigeria').split(',').map(s=>s.trim()).filter(Boolean),
+      shippingCountries: ($('#f_shippingCountries')?.value || '').split(',').map(s=>s.trim()).filter(Boolean),
       weight: $('#f_weight')?.value.trim() || '',
       dimensions: $('#f_dimensions')?.value.trim() || '',
       returnPolicy: $('#f_returnPolicy')?.value.trim() || '',
@@ -840,6 +848,7 @@ async function saveProduct(id){
       // exposed" rule in that doc's Multiple Supplier Architecture section
       // — screenProductDetail() never reads product.physical.supplierCost
       // or .supplierCurrency; only the admin dashboard does.
+      supplier: existingProduct?.physical?.supplier || '',
       supplierId: $('#f_supplierId')?.value || '',
       supplierSku: $('#f_supplierSku')?.value.trim() || '',
       supplierCost: $('#f_supplierCost')?.value ? Number($('#f_supplierCost').value) : null,
@@ -847,13 +856,14 @@ async function saveProduct(id){
       // Preserve any routing already set via the Supplier Routing tab —
       // this form has no routing fields of its own, so without this an
       // ordinary product edit would silently wipe previously saved routing.
-      routing: (id && findProduct(id)?.physical?.routing) || null,
+      routing: existingProduct?.physical?.routing ?? null,
       // CJ Dropshipping mapping (README §15/§32) — read from the
       // collapsible block above. lastSyncedAt is preserved from whatever
       // it already was; it's only ever set by the cjRefresh*() actions
       // below, never by a manual form save, so editing other fields here
       // never falsely implies a sync just happened.
       cj: {
+        ...(existingProduct?.physical?.cj || {}),
         productId: $('#f_cjProductId')?.value.trim() || '',
         variantId: $('#f_cjVariantId')?.value.trim() || '',
         sku: $('#f_cjSku')?.value.trim() || '',
