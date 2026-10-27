@@ -290,7 +290,7 @@ function openProductForm(id){
   const specs = (p && p.specs) || {};
   window.__adminExistingVariants = p && Array.isArray(p.variants) ? JSON.parse(JSON.stringify(p.variants)) : [];
   window.__adminExistingOptions = p && Array.isArray(p.options) ? JSON.parse(JSON.stringify(p.options)) : [];
-  const isHardware = isHardwareCategory(p ? p.category : cats[0]?.id);
+  const isPhysicalCategorySelected = isPhysicalCategory(p ? p.category : cats[0]?.id);
   wrap.innerHTML = `
   <div class="card" style="padding:18px;margin-bottom:20px;">
     <h3>${p?'Edit':'Add'} Product</h3>
@@ -303,7 +303,7 @@ function openProductForm(id){
       <div class="form-field"><label>Item code</label><input id="f_itemCode" value="${p?p.itemCode:'LX-'+Math.random().toString(36).slice(2,7).toUpperCase()}"></div>
       <div class="form-field">
         <label>Product type</label>
-        ${customSelect('f_productType', p&&p.productType || (isHardware?'PHYSICAL':'DIGITAL'), [
+        ${customSelect('f_productType', p&&p.productType || (isPhysicalCategorySelected?'PHYSICAL':'DIGITAL'), [
           {value:'DIGITAL',label:'Digital (instant download)'},
           {value:'PHYSICAL',label:'Physical (shipped item)'},
           {value:'SERVICE',label:'Service'},
@@ -335,7 +335,7 @@ function openProductForm(id){
     <div class="form-grid">
       <div class="form-field" id="f_formatWrap"><label>Format</label><input id="f_format" placeholder="e.g. Video course (6h), PDF, Physical item" value="${escapeHtml(specs['Format']||'')}"></div>
       <div class="form-field" id="f_levelWrap"><label>Level</label><input id="f_level" placeholder="e.g. Beginner, Intermediate (courses only)" value="${escapeHtml(specs['Level']||'')}"></div>
-      <div class="form-field" id="f_conditionWrap" style="display:${isHardware?'block':'none'};">
+      <div class="form-field" id="f_conditionWrap" style="display:${isPhysicalCategorySelected?'block':'none'};">
         <label>Condition</label>
         ${customSelect('f_condition', specs['Condition']||'', [
           {value:'',label:'—'},
@@ -345,7 +345,7 @@ function openProductForm(id){
           {value:'Refurbished',label:'Refurbished'}
         ], '—')}
       </div>
-      <div class="form-field" id="f_warrantyWrap" style="display:${isHardware?'block':'none'};">
+      <div class="form-field" id="f_warrantyWrap" style="display:${isPhysicalCategorySelected?'block':'none'};">
         <label>Warranty</label><input id="f_warranty" placeholder="e.g. 6 months, No warranty" value="${escapeHtml(specs['Warranty']||'')}">
       </div>
     </div>
@@ -356,7 +356,7 @@ function openProductForm(id){
          extends the existing digital-first data model rather than
          replacing it, per "adapt to the existing NOVA architecture rather
          than blindly replacing existing structures." -->
-    <div id="physicalFieldsWrap" style="display:${(p&&p.productType==='PHYSICAL')||(!p&&isHardware)?'block':'none'};">
+    <div id="physicalFieldsWrap" style="display:${(p&&p.productType==='PHYSICAL')||(!p&&isPhysicalCategorySelected)?'block':'none'};">
       <div class="divider"></div>
       <h4 style="font-size:13px;margin-bottom:8px;">Physical product details</h4>
       <div class="form-grid">
@@ -688,6 +688,10 @@ function isHardwareCategory(categoryId){
   const c=productCategoryRecord(categoryId);
   return HARDWARE_CATEGORY_IDS.includes(String(c.id||categoryId||'')) || /\b(gadget|gadgets|electronics?|hardware|computers?|phones?|mobile|accessories)\b/i.test(String(c.id||'')+' '+String(c.name||''));
 }
+function isPhysicalCategory(categoryId){
+  const c=productCategoryRecord(categoryId);
+  return isHardwareCategory(categoryId) || /\\b(fashion|clothing|apparel|bags?|shoes?|footwear|wearables?)\\b/i.test(String(c.id||'')+' '+String(c.name||''));
+}
 function isDigitalDetailsCategory(categoryId){
   const c=productCategoryRecord(categoryId);
   return isCourseCategory(categoryId) || /\b(template|templates|software|bundles?|ebooks?|digital|resources?|tools?|apps?)\b/i.test(String(c.id||'')+' '+String(c.name||''));
@@ -702,7 +706,7 @@ function updateProductFieldVisibility(){
   setDisplay('#f_formatWrap',showFormat);
   setDisplay('#f_levelWrap',isCourse);
   setDisplay('#f_conditionWrap',isPhysical);
-  setDisplay('#f_warrantyWrap',isPhysical && isHardwareCategory(categoryId));
+  setDisplay('#f_warrantyWrap',isPhysical);
   setDisplay('#courseFieldsWrap',isCourse,'grid');
   setDisplay('#physicalFieldsWrap',isPhysical);
 }
@@ -753,7 +757,6 @@ async function saveProduct(id){
   const categoryId=$('#f_category')?.value||'';
   const courseDetailsRelevant=isCourseCategory(categoryId) && productType!=='PHYSICAL' && productType!=='SERVICE';
   const formatRelevant=isDigitalDetailsCategory(categoryId) && productType!=='PHYSICAL' && productType!=='SERVICE';
-  const hardwareRelevant=isHardwareCategory(categoryId);
   const publishing=$('#f_status')?.value==='published';
   if(publishing&&productType==='PHYSICAL'){
     const badVariant=variantData.variants.find(variant=>typeof variant.price!=='number'||variant.price<=0);
@@ -764,12 +767,12 @@ async function saveProduct(id){
   const fmt = $('#f_format')?.value.trim(); if(formatRelevant && fmt) specs['Format'] = fmt;
   const lvl = $('#f_level')?.value.trim(); if(courseDetailsRelevant && lvl) specs['Level'] = lvl;
   const cond = $('#f_condition')?.value.trim(); if(productType==='PHYSICAL' && cond) specs['Condition'] = cond;
-  const warr = $('#f_warranty')?.value.trim(); if(productType==='PHYSICAL' && hardwareRelevant && warr) specs['Warranty'] = warr;
+  const warr = $('#f_warranty')?.value.trim(); if(productType==='PHYSICAL' && warr) specs['Warranty'] = warr;
   $all('#specRows [data-spec-row]').forEach(row=>{
     const k = row.querySelector('.spec-key')?.value.trim();
     const v = row.querySelector('.spec-val')?.value.trim();
     const key=String(k||'').trim().toLowerCase();
-    const builtInIrrelevant=(key==='level'&&!courseDetailsRelevant)||(key==='format'&&!formatRelevant)||(key==='condition'&&productType!=='PHYSICAL')||(key==='warranty'&&!(productType==='PHYSICAL'&&hardwareRelevant));
+    const builtInIrrelevant=(key==='level'&&!courseDetailsRelevant)||(key==='format'&&!formatRelevant)||(key==='condition'&&productType!=='PHYSICAL')||(key==='warranty'&&productType!=='PHYSICAL');
     if(k && v && !builtInIrrelevant) specs[k] = v;
   });
   const data = {
