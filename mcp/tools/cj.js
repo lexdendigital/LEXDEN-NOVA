@@ -226,9 +226,9 @@ function register(server) {
           variantId: firstVariant.vid || '',
           sku: firstVariant.sku || source.sku || '',
           syncEnabled: true,
-          lastSyncedAt: stockLookupOk ? importedAt : null,
+          lastSyncedAt: stockStatusFrom(stockMap, variantIds.length, stockLookupOk) ? importedAt : null,
           lastImportedAt: importedAt,
-          stockCheckError: stockLookupOk ? '' : ((stockResult.body && stockResult.body.error) || 'Stock could not be verified.'),
+          stockCheckError: stockStatusFrom(stockMap, variantIds.length, stockLookupOk) ? '' : ((stockResult.body && stockResult.body.error) || 'No usable stock state was returned.'),
           videoIds: Array.isArray(source.videoIds) ? source.videoIds : [],
           sourceData: source.sourceData || source,
           variants: variants.map(v => ({
