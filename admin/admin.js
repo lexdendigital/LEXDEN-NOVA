@@ -2099,7 +2099,7 @@ async function importCjProduct(pid){
   const cats = DB.categories.filter(c=>c.id!=='all');
   const supplierCategoryName=String(product.categoryName||'').trim().toLowerCase();
   const matchedCategory=cats.find(c=>String(c.id||'').trim().toLowerCase()===supplierCategoryName || String(c.name||'').trim().toLowerCase()===supplierCategoryName);
-  const physicalFallback=cats.find(c=>/\\b(gadget|electronics?|hardware)\\b/i.test(String(c.id||'')+' '+String(c.name||'')));
+  const physicalFallback=cats.find(c=>/\b(gadget|electronics?|hardware)\b/i.test(String(c.id||'')+' '+String(c.name||'')));
   const chosenCategory=matchedCategory||physicalFallback;
   const data = {
     id: 'p'+Date.now(),
