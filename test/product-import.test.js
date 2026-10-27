@@ -1,7 +1,9 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { uniqueUrls, buildProductSpecs, stockStatusFrom } = require('../mcp/lib/productImport');
+const {
+  uniqueUrls, buildProductSpecs, stockStatusFrom, deriveSuggestedPricing,
+} = require('../mcp/lib/productImport');
 
 test('keeps unique usable supplier image URLs and drops unsafe or blank values', () => {
   assert.deepEqual(uniqueUrls([
@@ -21,8 +23,32 @@ test('preserves supplier technical and customs fields as admin product specs', (
   });
 });
 
-test('does not mark supplier stock as available without a successful stock lookup', () => {
-  assert.equal(stockStatusFrom({ v1: { inStock: true } }, 1, false), 'out_of_stock');
+test('does not guess stock state when CJ stock lookup fails or returns no usable state', () => {
+  assert.equal(stockStatusFrom({ v1: { inStock: true } }, 1, false), '');
+  assert.equal(stockStatusFrom({}, 1, true), '');
+  assert.equal(stockStatusFrom({ v1: { total: 0 } }, 1, true), '');
   assert.equal(stockStatusFrom({ v1: { inStock: true } }, 1, true), 'in_stock');
   assert.equal(stockStatusFrom({ v1: { inStock: false } }, 1, true), 'out_of_stock');
+});
+
+test('uses CJ suggested price as regular and applies a 40% sale discount', () => {
+  assert.deepEqual(deriveSuggestedPricing(85, [{ suggestedSellPrice: 90 }]), {
+    price: 85, salePrice: 51, discount: 40,
+  });
+});
+
+test('uses the lowest known variant suggested price when product-level suggestion is missing', () => {
+  assert.deepEqual(deriveSuggestedPricing(null, [
+    { suggestedSellPrice: 40 }, { suggestedSellPrice: 35 }, { suggestedSellPrice: null },
+  ]), {
+    price: 35, salePrice: 21, discount: 40,
+  });
+});
+
+test('leaves storefront pricing blank when CJ supplies no suggested price', () => {
+  assert.deepEqual(deriveSuggestedPricing(null, [
+    { sellPrice: 10 }, { suggestedSellPrice: null },
+  ]), {
+    price: null, salePrice: null, discount: null,
+  });
 });
