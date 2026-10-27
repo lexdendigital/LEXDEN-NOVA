@@ -540,6 +540,14 @@ function screenProductDetail(id){
   if(selectedVariant&&selectedVariant.image&&!media.some(item=>item.url===selectedVariant.image))media.unshift({url:selectedVariant.image,type:'image',alt:variantLabel(p,selectedVariant)});
   const main = media[0] || {url:p.image, type:'image'};
   const descLong = (p.description||'').length > 220;
+  const detailSpecs = Object.entries(p.specs||{}).filter(([key])=>{
+    const normalizedKey=String(key||'').trim().toLowerCase();
+    if(p.productType==='PHYSICAL' && ['format','level'].includes(normalizedKey)) return false;
+    if(normalizedKey==='level' && !isCourseProduct(p)) return false;
+    if(normalizedKey==='format' && p.productType==='SERVICE') return false;
+    if(['condition','warranty'].includes(normalizedKey) && p.productType!=='PHYSICAL') return false;
+    return true;
+  });
   return `
   <div class="screen" style="position:relative;">
     <div class="flex" style="justify-content:space-between;align-items:center;margin-bottom:10px;">
@@ -587,7 +595,7 @@ function screenProductDetail(id){
 
     <div class="detail-block">
       <h3>Details</h3>
-      ${Object.entries(p.specs||{}).map(([k,v])=>`<div class="spec-row"><span>${escapeHtml(k)}</span><span>${escapeHtml(v)}</span></div>`).join('')}
+      ${detailSpecs.map(([k,v])=>`<div class="spec-row"><span>${escapeHtml(k)}</span><span>${escapeHtml(v)}</span></div>`).join('')}
       <div class="spec-row"><span>Item code</span><span class="mono">${p.itemCode} <button class="btn-sm btn-ghost" style="padding:2px 6px;" onclick="copyCode('${p.itemCode}')">copy</button></span></div>
       ${p.productType==='PHYSICAL' && p.physical ? `
         ${p.physical.weight?`<div class="spec-row"><span>Weight</span><span>${escapeHtml(p.physical.weight)}</span></div>`:''}
@@ -855,7 +863,7 @@ function boldForShare(text){ return `*${String(text||'').replace(/\*/g,'')}*`; }
 function shareProduct(id){
   const p = findProduct(id);
   if(!p) return;
-  const url = NOVA_LINKS_BASE + '/product/' + id;
+  const url = publicProductUrl(p);
   const message = `${boldForShare(p.name)} on ${DB.content.appName||'our store'} — ${priceLabel(p)}\n\nLearn more: ${url}`;
   // Local + shared aggregate counter — feeds trendingScore() below, same
   // pattern as views/wishlists/clicks. Counted on tap (consistent with how
