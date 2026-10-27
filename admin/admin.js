@@ -276,7 +276,7 @@ function openProductForm(id){
   const specs = (p && p.specs) || {};
   window.__adminExistingVariants = p && Array.isArray(p.variants) ? JSON.parse(JSON.stringify(p.variants)) : [];
   window.__adminExistingOptions = p && Array.isArray(p.options) ? JSON.parse(JSON.stringify(p.options)) : [];
-  const isHardware = HARDWARE_CATEGORY_IDS.includes(p ? p.category : cats[0]?.id);
+  const isHardware = isHardwareCategory(p ? p.category : cats[0]?.id);
   wrap.innerHTML = `
   <div class="card" style="padding:18px;margin-bottom:20px;">
     <h3>${p?'Edit':'Add'} Product</h3>
@@ -319,8 +319,8 @@ function openProductForm(id){
     <div class="divider"></div>
     <h4 style="font-size:13px;margin-bottom:8px;">Details</h4>
     <div class="form-grid">
-      <div class="form-field"><label>Format</label><input id="f_format" placeholder="e.g. Video course (6h), PDF, Physical item" value="${escapeHtml(specs['Format']||'')}"></div>
-      <div class="form-field"><label>Level</label><input id="f_level" placeholder="e.g. Beginner, Intermediate (courses only)" value="${escapeHtml(specs['Level']||'')}"></div>
+      <div class="form-field" id="f_formatWrap"><label>Format</label><input id="f_format" placeholder="e.g. Video course (6h), PDF, Physical item" value="${escapeHtml(specs['Format']||'')}"></div>
+      <div class="form-field" id="f_levelWrap"><label>Level</label><input id="f_level" placeholder="e.g. Beginner, Intermediate (courses only)" value="${escapeHtml(specs['Level']||'')}"></div>
       <div class="form-field" id="f_conditionWrap" style="display:${isHardware?'block':'none'};">
         <label>Condition</label>
         ${customSelect('f_condition', specs['Condition']||'', [
@@ -405,7 +405,7 @@ function openProductForm(id){
       <h4 style="font-size:13px;">Additional specs (shown as a list on the product page — e.g. Brand, RAM, Storage, Access, Certificate)</h4>
     </div>
     <div id="specRows">
-      ${Object.entries(specs).filter(([k])=>!['Format','Level','Condition','Warranty'].includes(k)).map(([k,v],i)=>specRowHtml(i,k,v)).join('')}
+      ${Object.entries(specs).filter(([k])=>!['format','level','condition','warranty'].includes(String(k).trim().toLowerCase())).map(([k,v],i)=>specRowHtml(i,k,v)).join('')}
     </div>
     <button type="button" class="btn btn-outline btn-sm" style="margin:8px 0 4px;" onclick="addSpecRow()">+ Add spec row</button>
     <div class="divider"></div>
@@ -485,6 +485,7 @@ function openProductForm(id){
     </div>
   </div>`;
   renderVariantMatrix(window.__adminExistingVariants);
+  updateProductFieldVisibility();
   wrap.scrollIntoView({behavior:'smooth'});
 }
 function variantSlug(value){return String(value||'').trim().toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,48)||'value';}
