@@ -74,15 +74,15 @@ function register(server) {
   });
 
   server.registerTool('nova_cj_import_product', {
-    title: 'Import CJ product as an admin draft',
-    description: 'Fetches full CJ product details and variants, then creates an unpublished PHYSICAL product draft in Lexden Nova catalog/products. Includes every source field available to the integration: name, description, supplier price/currency, category/source details, variant identifiers and options, stock snapshot, image gallery and CJ sync metadata. Requires categoryId from nova_list_categories when available. Never publishes automatically; review NGN selling price, shipping, media rights and every admin field before publishing. Duplicate CJ product IDs are rejected. If no usable image is returned, search the web for the exact product/model and only attach a verified match with nova_update_product; never invent an image URL. If no exact match is available, report that instead of using a lookalike.',
+    title: 'Import CJ product as a complete admin draft',
+    description: 'Fetches the full CJ product detail and all returned variants, preserving the original CJ payload and mapping every known CJ field into NOVA fields/specs. Fields absent from CJ remain blank. Uses the CJ suggested price as regular price and a 40% discount when a suggested price exists; if CJ provides no suggested price, prices stay blank. Never publishes automatically. Duplicate CJ product IDs are rejected.',
     inputSchema: {
       pid: z.string().min(1),
       categoryId: z.string().optional(),
       categoryName: z.string().optional(),
-      seller: z.string().default('Lexden Digital'),
+      seller: z.string().optional(),
     },
-  }, async ({ pid, categoryId, categoryName, seller }) => {
+  }, async ({ pid }) => {
     const result = await callHandler(cjProductHandler, { method: 'GET', query: { pid } });
     const response = result.body;
     if (!response || !response.ok || !response.product) {
@@ -99,33 +99,75 @@ function register(server) {
     if (duplicate) throw Object.assign(new Error(`CJ product already imported as ${duplicate.id}.`), { status: 409 });
 
     const localCategories = await listCatalogDoc(db, 'categories');
-    const requestedCategoryName = String(categoryName || source.categoryName || '').trim().toLowerCase();
-    // categoryId belongs to CJ's supplier taxonomy, not NOVA's local catalog.
-    // Resolve the human-readable category name against NOVA's own categories;
-    // if it has no exact match, keep physical imports out of Courses.
-    const matchedLocalCategory = localCategories.find(c => String(c.id || '').trim().toLowerCase() === requestedCategoryName || String(c.name || '').trim().toLowerCase() === requestedCategoryName);
-    const supplierLooksFashion = /\b(fashion|bags?|clothing|apparel|shoes?|footwear|wearables?)\b/i.test(requestedCategoryName);
-    const fashionCategory = localCategories.find(c => /\b(fashion|apparel|clothing)\b/i.test(String(c.id || '') + ' ' + String(c.name || '')));
-    const supplierLooksHardware = /\b(gadget|electronics?|hardware|computers?|phones?|mobile|charger|power bank|earbuds|headphones?|smartwatch|tablet|laptop|USB)\b/i.test(requestedCategoryName + ' ' + name);
-    const physicalCategory = supplierLooksHardware ? localCategories.find(c => /\b(gadget|electronics?|hardware)\b/i.test(String(c.id || '') + ' ' + String(c.name || ''))) : null;
-    const localCategory = matchedLocalCategory || (supplierLooksFashion ? fashionCategory : null) || physicalCategory || null;
+    // Only map the supplier category when CJ's category label exactly matches
+    // a NOVA category. Never infer a category from the product name.
+    const sourceCategoryName = String(source.categoryName || '').trim();
+    const normalizedCategoryName = sourceCategoryName.toLowerCase();
+    const localCategory = normalizedCategoryName
+      ? localCategories.find(c =>
+          String(c.id || '').trim().toLowerCase() === normalizedCategoryName ||
+          String(c.name || '').trim().toLowerCase() === normalizedCategoryName)
+      : null;
+
     const variants = Array.isArray(response.variants) ? response.variants.filter(Boolean) : [];
     const variantIds = variants.map(v => v.vid).filter(Boolean).slice(0, 20);
     let stockResult = { body: { ok: false, error: 'No variant identifiers were returned.' } };
     if (variantIds.length) {
-      try { stockResult = await callHandler(cjStockHandler, { method: 'GET', query: { vid: variantIds.join(',') } }); }
-      catch (error) { stockResult = { body: { ok: false, error: error.message || 'Stock lookup failed.' } }; }
+      try {
+        stockResult = await callHandler(cjStockHandler, { method: 'GET', query: { vid: variantIds.join(',') } });
+      } catch (error) {
+        stockResult = { body: { ok: false, error: error.message || 'Stock lookup failed.' } };
+      }
     }
     const stockMap = stockResult.body && stockResult.body.stock || {};
+    const stockLookupOk = !!(stockResult.body && stockResult.body.ok);
     const firstVariant = variants[0] || {};
-    const supplierImages = uniqueUrls([...(Array.isArray(source.images) ? source.images : []), ...variants.map(v => v.image)]);
-    // Re-host on Cloudinary so the gallery survives the supplier later
-    // deleting/moving the original (see mediaRehost.js). Never-images-at-all
-    // still falls through to mediaReviewRequired below, same as before —
-    // this only makes real supplier images durable, it never invents one.
-    const images = supplierImages.length ? await rehostAll(supplierImages) : supplierImages;
+    const supplierImages = uniqueUrls([
+      ...(Array.isArray(source.images) ? source.images : []),
+      ...variants.map(v => v.image),
+    ]);
+    const images = supplierImages.length ? await rehostAll(supplierImages) : [];
     const id = `cj-${productId.replace(/[^a-z0-9_-]/gi, '').slice(-48)}`;
     const specs = buildProductSpecs(source);
+    const pricing = deriveSuggestedPricing(source.suggestedSellPrice, variants);
+    const optionId = 'cj-variant';
+    const optionName = Array.isArray(source.productOptions)
+      ? source.productOptions.filter(Boolean).join(', ')
+      : (source.productOptions == null ? '' : String(source.productOptions));
+    const rootVariants = variants.map((variant, index) => {
+      const variantPrice = deriveSuggestedPricing(variant.suggestedSellPrice, []);
+      const variantId = String(variant.vid || index);
+      const title = String(variant.name || variant.variantKey || variant.sku || '');
+      return {
+        id: `cj-${variantId}`,
+        title,
+        optionValues: { [optionId]: `cj-${variantId}` },
+        price: variantPrice.price,
+        salePrice: variantPrice.salePrice,
+        stock: stockMap[variant.vid] && stockMap[variant.vid].total != null ? stockMap[variant.vid].total : null,
+        sku: variant.sku || '',
+        image: variant.image || '',
+        cjVariantId: variant.vid || '',
+        active: true,
+        sourceData: variant.sourceData || variant,
+      };
+    });
+    const dimensionsSource = [firstVariant.length, firstVariant.width, firstVariant.height].some(v => v != null && v !== '')
+      ? firstVariant
+      : (source.dimensions || {});
+    const dimensionParts = [
+      ['L', dimensionsSource.length],
+      ['W', dimensionsSource.width],
+      ['H', dimensionsSource.height],
+    ].filter(([, value]) => value != null && value !== '')
+      .map(([label, value]) => `${label} ${(Number(value) / 10).toString()} cm`);
+    const dimensions = dimensionParts.join(' × ');
+    const sourceWeight = firstVariant.weight != null ? firstVariant.weight : source.weight;
+    const weight = sourceWeight != null && sourceWeight !== ''
+      ? `${(Number(sourceWeight) / 1000).toFixed(3)} kg`
+      : '';
+
+    const importedAt = new Date().toISOString();
     const draft = {
       id,
       shareId: nextProductShareId(current),
@@ -133,52 +175,106 @@ function register(server) {
       description: String(source.description || ''),
       categoryId: localCategory ? localCategory.id : '',
       category: localCategory ? localCategory.id : '',
-      categoryName: categoryName || source.categoryName || (localCategory && localCategory.name) || '',
-      itemCode: `CJ-${productId.slice(-8).toUpperCase()}`,
+      categoryName: sourceCategoryName,
+      itemCode: '',
       productType: 'PHYSICAL',
-      format: 'Physical item',
+      format: '',
       level: '',
-      price: null,
-      salePrice: null,
-      discount: 0,
-      seller: seller || 'Lexden Digital',
+      price: pricing.price,
+      salePrice: pricing.salePrice,
+      discount: pricing.discount,
+      seller: '',
       affiliateLink: '',
       affiliateEnabled: false,
       affiliateCommissionPct: null,
-      tags: ['cj-import', 'physical'],
+      tags: [],
       status: 'draft',
-      gallery: images.map((url, index) => ({ url, type: 'image', alt: `${name} product image ${index + 1}` })),
+      image: images[0] || '',
+      gallery: images.map(url => ({ url, type: 'image', alt: '' })),
       images,
       specs,
+      options: variants.length ? [{
+        id: optionId,
+        name: optionName,
+        values: variants.map((variant, index) => ({
+          id: `cj-${String(variant.vid || index)}`,
+          label: String(variant.name || variant.variantKey || variant.sku || ''),
+        })),
+      }] : [],
+      variants: rootVariants,
+      rating: null,
+      reviewCount: null,
+      featured: false,
+      trending: false,
+      pricingReviewRequired: true,
       physical: {
-        stockMode: 'supplier',
-        stockStatus: stockStatusFrom(stockMap, variantIds.length, !!(stockResult.body && stockResult.body.ok)),
-        deliveryEstimate: source.deliveryCycle ? `${source.deliveryCycle} days (supplier estimate; confirm destination)` : '',
+        stockMode: 'SUPPLIER_STOCK',
+        stockStatus: stockStatusFrom(stockMap, variantIds.length, stockLookupOk),
+        deliveryEstimate: source.deliveryCycle == null ? '' : String(source.deliveryCycle),
         shippingCountries: [],
-        weight: firstVariant.weight != null ? `${(Number(firstVariant.weight) / 1000).toFixed(3)} kg` : (source.weight == null ? '' : `${(Number(source.weight) / 1000).toFixed(3)} kg`),
-        dimensions: firstVariant.length || firstVariant.width || firstVariant.height
-          ? `${[firstVariant.length, firstVariant.width, firstVariant.height].map(value => value == null ? '?' : (Number(value) / 10)).join(' × ')} cm`
-          : '',
+        weight,
+        dimensions,
         returnPolicy: '',
-        supplier: 'CJ Dropshipping',
+        supplier: source.supplierName || 'CJ Dropshipping',
+        supplierId: source.supplierId || '',
         supplierSku: firstVariant.sku || source.sku || '',
         supplierCost: firstVariant.sellPrice ?? source.sellPrice ?? null,
-        supplierCurrency: 'USD',
+        supplierCurrency: firstVariant.sellPriceCurrency || source.supplierCurrency || '',
+        routing: null,
         cj: {
           productId,
           variantId: firstVariant.vid || '',
           sku: firstVariant.sku || source.sku || '',
           syncEnabled: true,
-          variants: variants.map(v => ({ id: v.vid || '', sku: v.sku || '', name: v.name || '', optionKey: v.variantKey || '', barcode: v.barcode || '', standard: v.standard || '', unit: v.unit || '', image: v.image || '', sellPrice: v.sellPrice ?? null, suggestedSellPrice: v.suggestedSellPrice ?? null, weight: v.weight ?? null, length: v.length ?? null, width: v.width ?? null, height: v.height ?? null, stock: stockMap[v.vid] || null, supplierInventories: v.inventories || [] })),
-          stockCheckError: stockResult.body && stockResult.body.ok ? null : (stockResult.body && stockResult.body.error) || 'Stock could not be verified; refresh inventory before publishing.',
+          lastSyncedAt: stockLookupOk ? importedAt : null,
+          lastImportedAt: importedAt,
+          stockCheckError: stockLookupOk ? '' : ((stockResult.body && stockResult.body.error) || 'Stock could not be verified.'),
           videoIds: Array.isArray(source.videoIds) ? source.videoIds : [],
-          lastImportedAt: new Date().toISOString(),
+          sourceData: source.sourceData || source,
+          variants: variants.map(v => ({
+            id: v.vid || '',
+            sku: v.sku || '',
+            name: v.name || '',
+            optionKey: v.variantKey || '',
+            barcode: v.barcode || '',
+            standard: v.standard || '',
+            unit: v.unit || '',
+            image: v.image || '',
+            sellPrice: v.sellPrice ?? null,
+            sellPriceCurrency: v.sellPriceCurrency || source.supplierCurrency || '',
+            suggestedSellPrice: v.suggestedSellPrice ?? null,
+            weight: v.weight ?? null,
+            length: v.length ?? null,
+            width: v.width ?? null,
+            height: v.height ?? null,
+            stock: stockMap[v.vid] || null,
+            supplierInventories: v.inventories || [],
+            sourceData: v.sourceData || v,
+          })),
         },
       },
-      importSource: { supplier: 'CJ Dropshipping', productId, importedAt: new Date().toISOString(), sourceCategoryId: source.categoryId || '' },
+      importSource: {
+        supplier: 'CJ Dropshipping',
+        productId,
+        importedAt,
+        sourceCategoryId: source.categoryId || '',
+        sourceData: source.sourceData || source,
+      },
     };
     const saved = await upsertCatalogItem(db, 'products', draft, { isNew: true });
-    return { content: [{ type: 'text', text: JSON.stringify({ product: saved, imageCount: images.length, mediaReviewRequired: images.length === 0, publishStatus: 'draft' }, null, 2) }] };
+    return {
+      content: [{
+        type: 'text',
+        text: JSON.stringify({
+          product: saved,
+          imageCount: images.length,
+          mediaReviewRequired: images.length === 0,
+          publishStatus: 'draft',
+          fieldsLeftBlankWhenAbsent: true,
+          pricing: { regular: pricing.price, sale: pricing.salePrice, discountPercent: pricing.discount },
+        }, null, 2),
+      }],
+    };
   });
 
   server.registerTool('nova_cj_check_stock', {
