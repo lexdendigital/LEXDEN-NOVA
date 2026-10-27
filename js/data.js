@@ -21,7 +21,7 @@ const DEFAULT_CATEGORIES = [
 // Categories whose products are physical hardware rather than digital
 // downloads. Used to show hardware-relevant fields (condition, warranty,
 // brand/model) on the admin product form instead of digital-only fields.
-const HARDWARE_CATEGORY_IDS = ['computers','phones','accessories'];
+const HARDWARE_CATEGORY_IDS = ['computers','phones','accessories','gadgets'];
 
 // NOTE: the rating/reviewCount values below are historical placeholders
 // only — DB.products' getter (see STATE/STORAGE section) always overwrites
