@@ -152,6 +152,7 @@ function renderProductPreview(product, routeId) {
     '  <meta name="description" content="' + escapedDescription + '">',
     '  <link rel="canonical" href="' + escapedCanonicalUrl + '">',
     '  <meta property="og:type" content="product">',
+    '  <meta property="og:locale" content="en_NG">',
     '  <meta property="og:site_name" content="' + APP_NAME + '">',
     '  <meta property="og:title" content="' + escapedTitle + '">',
     '  <meta property="og:description" content="' + escapedDescription + '">',
