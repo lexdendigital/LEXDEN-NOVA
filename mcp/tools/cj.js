@@ -149,7 +149,6 @@ function register(server) {
         image: variant.image || '',
         cjVariantId: variant.vid || '',
         active: true,
-        sourceData: variant.sourceData || variant,
       };
     });
     const dimensionsSource = [firstVariant.length, firstVariant.width, firstVariant.height].some(v => v != null && v !== '')
@@ -258,7 +257,6 @@ function register(server) {
         productId,
         importedAt,
         sourceCategoryId: source.categoryId || '',
-        sourceData: source.sourceData || source,
       },
     };
     const saved = await upsertCatalogItem(db, 'products', draft, { isNew: true });
