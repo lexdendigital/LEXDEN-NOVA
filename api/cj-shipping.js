@@ -7,7 +7,7 @@ const crypto = require('node:crypto');
 const { setCors, cjFetch, writeSyncLog } = require('./cj-shared');
 const { getDb } = require('./affiliate/shared');
 const { resolveProductSelection } = require('./product-variants');
-const { getCommercePricingPolicy, calculateShippingCharge, sortShippingOptions } = require('./commerce-pricing');
+const { getCommercePricingPolicy, calculateShippingCharge, sortShippingOptions, shippingRatio } = require('./commerce-pricing');
 
 function countryToIso2(value) {
   const text = String(value || '').trim();
@@ -130,9 +130,14 @@ module.exports = async (req, res) => {
         const quoteId = crypto.randomUUID();
         const productAmountMajor = Number(selection.price);
         const totalAmountMajor = roundTotal(productAmountMajor + shippingAmountMajor, currency);
+        const ratio = shippingRatio(shippingAmountMajor, productAmountMajor);
+        const blockedByPricingPolicy = policy.shipping.enforceShippingRatioBlock === true
+          && ratio !== null && ratio >= policy.shipping.highShippingItemPriceRatioBlock;
         const quoteData = {
           quoteId,
           status: 'open',
+          blockedByPricingPolicy,
+          shippingRatio: ratio,
           productId: String(product.id),
           variantId: selection.variantId || null,
           cjVariantId: productVariantId,
@@ -157,7 +162,8 @@ module.exports = async (req, res) => {
           productAmountMajor,
           shippingAmountMajor,
           totalAmountMajor,
-          shippingRatio: productAmountMajor > 0 ? shippingAmountMajor / productAmountMajor : null,
+          shippingRatio: ratio,
+          blockedByPricingPolicy,
           quoteExpiresAt: expiresAt.toISOString(),
         });
       }
