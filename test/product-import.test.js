@@ -2,7 +2,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
-  uniqueUrls, buildProductSpecs, stockStatusFrom, deriveSuggestedPricing,
+  uniqueUrls, buildProductSpecs, stockStatusFrom, deriveSuggestedPricing, deriveCostBasedPricing,
 } = require('../mcp/lib/productImport');
 
 test('keeps unique usable supplier image URLs and drops unsafe or blank values', () => {
@@ -51,4 +51,33 @@ test('leaves storefront pricing blank when CJ supplies no suggested price', () =
   ]), {
     price: null, salePrice: null, discount: null,
   });
+});
+
+test('new CJ import pricing uses supplier cost and does not invent a sale discount', () => {
+  const settings = {
+    exchangeRates: { USD: 1, NGN: 1343.09 },
+    commercePricingPolicy: {
+      targetNetMarginPct: 25,
+      websiteMaintenanceReservePct: 8,
+      paystackPercentFeePct: 1.5,
+      paystackFixedFeeNGN: 100,
+      fxSafetyBufferPct: 3,
+    },
+  };
+  const result = deriveCostBasedPricing(3.34, [
+    { sellPrice: 3.34, sellPriceCurrency: 'USD', suggestedSellPrice: 21.41 },
+    { sellPrice: 4.10, sellPriceCurrency: 'USD', suggestedSellPrice: 25.00 },
+  ], settings, 'USD');
+  assert.equal(result.price, Math.min(...result.variantPrices));
+  assert.equal(result.salePrice, null);
+  assert.equal(result.discount, 0);
+  assert.ok(result.price < 10);
+});
+
+test('new CJ import leaves pricing blank if supplier cost currency is not known', () => {
+  const result = deriveCostBasedPricing(3.34, [
+    { sellPrice: 3.34, sellPriceCurrency: '', suggestedSellPrice: 21.41 },
+  ], { exchangeRates: { NGN: 1343.09 } }, '');
+  assert.equal(result.price, null);
+  assert.equal(result.salePrice, null);
 });
