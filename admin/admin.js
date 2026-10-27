@@ -2102,7 +2102,8 @@ async function importCjProduct(pid){
   const supplierLooksFashion=/\b(fashion|bags?|clothing|apparel|shoes?|footwear|wearables?)\b/i.test(supplierCategoryName);
   const fashionFallback=cats.find(c=>/\b(fashion|apparel|clothing)\b/i.test(String(c.id||'')+' '+String(c.name||'')));
   const matchedCategory=exactCategory||(supplierLooksFashion?fashionFallback:null);
-  const physicalFallback=cats.find(c=>/\b(gadget|electronics?|hardware)\b/i.test(String(c.id||'')+' '+String(c.name||'')));
+  const supplierLooksHardware=/\b(gadget|electronics?|hardware|computers?|phones?|mobile|charger|power bank|earbuds|headphones?|smartwatch|tablet|laptop|USB)\b/i.test(supplierCategoryName+' '+String(product.name||''));
+  const physicalFallback=supplierLooksHardware?cats.find(c=>/\b(gadget|electronics?|hardware)\b/i.test(String(c.id||'')+' '+String(c.name||''))):null;
   const chosenCategory=matchedCategory||physicalFallback;
   const data = {
     id: 'p'+Date.now(),
