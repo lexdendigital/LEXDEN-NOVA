@@ -39,6 +39,7 @@ test('product preview includes correct metadata, image and app destination', () 
   }, 'p2');
 
   assert.match(html, /og:type" content="product"/);
+  assert.match(html, /og:locale" content="en_NG"/);
   assert.match(html, /og:title" content="Power Bank &quot;Ultra&quot;"/);
   assert.match(html, /og:description" content="Slim &amp; useful power bank\."/);
   assert.match(html, /og:image" content="https:\/\/cf\.cjdropshipping\.com\/power-bank\.jpg"/);
