@@ -267,6 +267,20 @@ function adminProducts(){
     </table>
     </div>`;
 }
+function nextProductShareId(excludeId){
+  const products=DB.legacyProducts||DB.products||[];
+  const used=new Set();
+  products.forEach(p=>{
+    if(!p || String(p.id||'')===String(excludeId||'')) return;
+    const id=String(p.id||'');
+    const alias=String(p.shareId||'');
+    if(/^p\d{1,4}$/.test(id)) used.add(id);
+    if(/^p\d{1,4}$/.test(alias)) used.add(alias);
+  });
+  let n=1;
+  while(used.has('p'+n)) n++;
+  return 'p'+n;
+}
 function openProductForm(id){
   const p = id ? findProduct(id) : null;
   const cats = DB.categories.filter(c=>c.id!=='all');
@@ -456,7 +470,7 @@ function openProductForm(id){
       <div class="form-field"><label>Meta description</label><textarea id="f_metaDescription" maxlength="160" placeholder="Recommended: up to 160 characters">${p?escapeHtml(p.metaDescription||''):''}</textarea></div>
       <div class="form-field"><label>Search keywords</label><input id="f_searchKeywords" placeholder="Comma separated" value="${p?escapeHtml((p.searchKeywords||[]).join(', ')):''}"></div>
     </div>
-    <div class="form-grid">
+    <div id="courseFieldsWrap" class="form-grid" style="display:none;">
       <div class="form-field"><label>Who it is for</label><textarea id="f_audienceFor">${p?escapeHtml(p.audienceFor||''):''}</textarea></div>
       <div class="form-field"><label>Who it is NOT for</label><textarea id="f_audienceNotFor">${p?escapeHtml(p.audienceNotFor||''):''}</textarea></div>
       <div class="form-field"><label>Learning outcomes</label><textarea id="f_learningOutcomes" placeholder="One outcome per line">${p?escapeHtml(p.learningOutcomes||''):''}</textarea></div>
@@ -468,6 +482,8 @@ function openProductForm(id){
       <div class="form-field"><label>Certificate / completion</label><textarea id="f_certificateDetails">${p?escapeHtml(p.certificateDetails||''):''}</textarea></div>
       <div class="form-field"><label>Assignments / assessment</label><textarea id="f_assignmentsDetails">${p?escapeHtml(p.assignmentsDetails||''):''}</textarea></div>
       <div class="form-field"><label>Capstone / final project</label><textarea id="f_capstoneDetails">${p?escapeHtml(p.capstoneDetails||''):''}</textarea></div>
+    </div>
+    <div class="form-grid">
       <div class="form-field"><label>Access and delivery wording</label><textarea id="f_accessDelivery">${p?escapeHtml(p.accessDelivery||''):''}</textarea></div>
       <div class="form-field"><label>Support wording</label><textarea id="f_supportWording">${p?escapeHtml(p.supportWording||''):''}</textarea></div>
       <div class="form-field"><label>Refund policy</label><textarea id="f_refundPolicy" placeholder="Product-specific refund/return policy">${p?escapeHtml(p.refundPolicy||''):''}</textarea></div>
@@ -660,15 +676,38 @@ function clearProductFile(){
   if(statusEl) statusEl.textContent = '';
   toast('File removed — click Save to apply.');
 }
-function toggleHardwareFields(){
-  const isHw = HARDWARE_CATEGORY_IDS.includes($('#f_category').value);
-  $('#f_conditionWrap').style.display = isHw ? 'block' : 'none';
-  $('#f_warrantyWrap').style.display = isHw ? 'block' : 'none';
+function productCategoryRecord(categoryId){
+  const id=String(categoryId||'').trim().toLowerCase();
+  return (DB.categories||[]).find(c=>String(c.id||'').trim().toLowerCase()===id || String(c.name||'').trim().toLowerCase()===id) || {id:categoryId||'',name:categoryId||''};
 }
-function togglePhysicalFields(){
-  const wrap = $('#physicalFieldsWrap');
-  if(wrap) wrap.style.display = ($('#f_productType')?.value === 'PHYSICAL') ? 'block' : 'none';
+function isCourseCategory(categoryId){
+  const c=productCategoryRecord(categoryId);
+  return /\b(course|courses|training|learning|education|academy|masterclass|programme|program)\b/i.test(String(c.id||'')+' '+String(c.name||''));
 }
+function isHardwareCategory(categoryId){
+  const c=productCategoryRecord(categoryId);
+  return HARDWARE_CATEGORY_IDS.includes(String(c.id||categoryId||'')) || /\b(gadget|gadgets|electronics?|hardware|computers?|phones?|mobile|accessories)\b/i.test(String(c.id||'')+' '+String(c.name||''));
+}
+function isDigitalDetailsCategory(categoryId){
+  const c=productCategoryRecord(categoryId);
+  return isCourseCategory(categoryId) || /\b(template|templates|software|bundles?|ebooks?|digital|resources?|tools?|apps?)\b/i.test(String(c.id||'')+' '+String(c.name||''));
+}
+function updateProductFieldVisibility(){
+  const categoryId=$('#f_category')?.value||'';
+  const productType=$('#f_productType')?.value||'DIGITAL';
+  const isPhysical=productType==='PHYSICAL';
+  const isCourse=!isPhysical && productType!=='SERVICE' && isCourseCategory(categoryId);
+  const showFormat=!isPhysical && productType!=='SERVICE' && isDigitalDetailsCategory(categoryId);
+  const setDisplay=(selector,visible,displayValue='block')=>{const el=$(selector);if(el)el.style.display=visible?displayValue:'none';};
+  setDisplay('#f_formatWrap',showFormat);
+  setDisplay('#f_levelWrap',isCourse);
+  setDisplay('#f_conditionWrap',isPhysical);
+  setDisplay('#f_warrantyWrap',isPhysical && isHardwareCategory(categoryId));
+  setDisplay('#courseFieldsWrap',isCourse,'grid');
+  setDisplay('#physicalFieldsWrap',isPhysical);
+}
+function toggleHardwareFields(){ updateProductFieldVisibility(); }
+function togglePhysicalFields(){ updateProductFieldVisibility(); }
 function updateDiscountPreview(){
   const reg = parseFloat($('#f_price')?.value);
   const sale = parseFloat($('#f_salePrice')?.value);
