@@ -497,6 +497,8 @@ function formatStructuredProductText(text){
   }).join('');
 }
 function structuredProductSections(p){
+  const isCourseDetails=isCourseProduct(p) && p.productType!=='PHYSICAL' && p.productType!=='SERVICE';
+  const courseOnlyTitles=new Set(['Who this is for','Who this is not for','What you will learn','Course contents','Delivery format','Duration and pace','Requirements','Tools','Assignments and assessment','Capstone / final project','Certificate and completion']);
   const sections=[
     ['Who this is for',p.audienceFor],
     ['Who this is not for',p.audienceNotFor],
@@ -514,7 +516,7 @@ function structuredProductSections(p){
     ['Refund policy',p.refundPolicy],
     ['Compliance disclaimer',p.complianceDisclaimer],
     ['Earnings / results disclaimer',p.earningsDisclaimer],
-  ].filter(([,value])=>String(value||'').trim());
+  ].filter(([title,value])=>String(value||'').trim() && (isCourseDetails || !courseOnlyTitles.has(title)));
   const body=sections.map(([title,value])=>`<div class="detail-block"><h3>${escapeHtml(title)}</h3>${formatStructuredProductText(value)}</div>`).join('');
   const faqs=Array.isArray(p.productFaqs)?p.productFaqs.filter(f=>f&&f.q&&f.a):[];
   const faqHtml=faqs.length?`<div class="detail-block"><h3>Frequently asked questions</h3>${faqs.map((f,i)=>`<details style="border-top:1px solid var(--border);padding:10px 0;" ${i===0?'open':''}><summary style="cursor:pointer;font-weight:650;font-size:13.5px;">${escapeHtml(f.q)}</summary><div style="margin-top:7px;">${formatStructuredProductText(f.a)}</div></details>`).join('')}</div>`:'';
