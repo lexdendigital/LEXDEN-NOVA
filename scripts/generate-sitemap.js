@@ -59,7 +59,7 @@ async function main() {
     { loc: SITE_URL, freq: 'daily', pri: '1.0' },
     { loc: SITE_URL + '#products', freq: 'daily', pri: '0.9' },
     ...products.filter(p => p && p.status !== 'draft').map(p => ({
-      loc: `${NOVA_LINKS_BASE}/product/${p.id}`, freq: 'weekly', pri: '0.9',
+      loc: `${NOVA_LINKS_BASE}/product/${p.shareId || p.id}`, freq: 'weekly', pri: '0.9',
     })),
     { loc: SITE_URL + '#service', freq: 'weekly', pri: '0.6' },
     ...feed.map(f => ({ loc: `${NOVA_LINKS_BASE}/feed/${f.id}`, freq: 'monthly', pri: '0.5' })),
