@@ -307,7 +307,7 @@ function syncWishIcons(){
     btn.innerHTML = icon(wished?'heartFill':'heart');
   });
 }
-function findProduct(id){ return DB.products.find(p=>p.id===id); }
+function findProduct(id){ return DB.products.find(p=>String(p.id)===String(id)) || DB.products.find(p=>String(p.shareId||'')===String(id)); }
 
 /* ---------------- AI/SEO STRUCTURED DATA ----------------
    Keeps <title>, meta description/OG/Twitter tags, canonical URL, and
