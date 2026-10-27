@@ -60,14 +60,16 @@ module.exports = async (req, res) => {
       categoryId: d.categoryId || null,
       categoryName: d.categoryName || null,
       weight: d.productWeight != null ? Number(d.productWeight) : null,
-      supplierName: d.supplierName || 'CJ Dropshipping',
+      supplierName: d.supplierName || '',
+      supplierCurrency: String(d.productCurrency || d.currencyCode || d.priceCurrency || d.currency || ''),
+      sourceData: d,
       supplierId: d.supplierId || null,
       sku: d.productSku || d.sku || d.spu || null,
       sellPrice: numberOrNull(d.sellPrice ?? d.productSellPrice ?? d.price),
-      suggestedSellPrice: d.suggestSellPrice || d.suggestedSellPrice || null,
+      suggestedSellPrice: numberOrNull(d.suggestSellPrice ?? d.suggestedSellPrice ?? d.suggestPrice),
       productType: d.productType || null,
       unit: d.productUnit || d.unit || null,
-      sourceCountry: d.sourceCountry || 'CN',
+      sourceCountry: d.sourceCountry || '',
       deliveryCycle: d.deliveryCycle || null,
       materials: d.materialNameEnSet || d.materialNameEn || d.materialName || [],
       packageWeight: d.packingWeight != null ? Number(d.packingWeight) : null,
@@ -78,8 +80,8 @@ module.exports = async (req, res) => {
       customsName: d.entryNameEn || null,
       videoIds: Array.isArray(d.productVideo) ? d.productVideo : (d.productVideo ? [d.productVideo] : []),
       specifications: d.productPropertyList || d.specifications || {},
-      dimensions: d.productLength || d.productWidth || d.productHeight
-        ? { length: d.productLength || null, width: d.productWidth || null, height: d.productHeight || null }
+      dimensions: [d.productLength, d.productWidth, d.productHeight].some(value => value != null && value !== '')
+        ? { length: d.productLength ?? null, width: d.productWidth ?? null, height: d.productHeight ?? null }
         : null,
       listedNum: d.listedNum || null,
     };
@@ -119,6 +121,8 @@ function normalizeVariant(v) {
     unit: v.variantUnit || null,
     standard: v.variantStandard || null,
     suggestedSellPrice: v.variantSugSellPrice != null ? numberOrNull(v.variantSugSellPrice) : null,
+    sellPriceCurrency: String(v.variantCurrency || v.currencyCode || v.priceCurrency || v.currency || ''),
+    sourceData: v,
     inventories: Array.isArray(v.inventories) ? v.inventories : [],
     // e.g. "Black-128GB" — the human-readable option combination
     variantKey: v.variantKey || v.variantNameEn || null,
