@@ -2094,11 +2094,16 @@ async function importCjProduct(pid){
   const w = firstVariant.weight!=null ? firstVariant.weight : product.weight;
   const dim = (firstVariant.length||firstVariant.width||firstVariant.height) ? [firstVariant.length,firstVariant.width,firstVariant.height].map(v=>v==null?'?':(Number(v)/10)).join(' × ')+' cm' : '';
   const cats = DB.categories.filter(c=>c.id!=='all');
+  const supplierCategoryName=String(product.categoryName||'').trim().toLowerCase();
+  const matchedCategory=cats.find(c=>String(c.id||'').trim().toLowerCase()===supplierCategoryName || String(c.name||'').trim().toLowerCase()===supplierCategoryName);
+  const physicalFallback=cats.find(c=>/\\b(gadget|electronics?|hardware)\\b/i.test(String(c.id||'')+' '+String(c.name||'')));
+  const chosenCategory=matchedCategory||physicalFallback;
   const data = {
     id: 'p'+Date.now(),
+    shareId: nextProductShareId(),
     name: (product.name||'Imported CJ product').slice(0,200),
-    category: cats[0]?.id || 'general',
-    categoryName: product.categoryName || '',
+    category: chosenCategory?.id || '',
+    categoryName: product.categoryName || chosenCategory?.name || '',
     price: 0, // supplier cost is not a shopper price; leave selling price for admin review
     salePrice: null,
     itemCode: 'CJ-'+String(pid).slice(-8).toUpperCase(),
