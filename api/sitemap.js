@@ -21,7 +21,7 @@ const realId = (x) => x && x.id != null && String(x.id) && !DEMO_IDS.has(String(
 function buildSitemapXml({ products = [], feed = [], now = new Date() }) {
   const day = now.toISOString().slice(0, 10);
   const urls = [{ loc: STORE, freq: 'daily', pri: '1.0' }];
-  for (const p of products) if (realId(p) && p.status !== 'draft') urls.push({ loc: `${BASE}/product/${encodeURIComponent(p.id)}`, freq: 'weekly', pri: '0.9' });
+  for (const p of products) if (realId(p) && p.status !== 'draft') urls.push({ loc: `${BASE}/product/${encodeURIComponent(p.shareId || p.id)}`, freq: 'weekly', pri: '0.9' });
   for (const f of feed) if (realId(f)) urls.push({ loc: `${BASE}/feed/${encodeURIComponent(f.id)}`, freq: 'monthly', pri: '0.5' });
   return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n`
     + urls.map((u) => `  <url><loc>${xml(u.loc)}</loc><lastmod>${day}</lastmod><changefreq>${u.freq}</changefreq><priority>${u.pri}</priority></url>`).join('\n')
