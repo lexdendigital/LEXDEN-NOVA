@@ -110,7 +110,7 @@ function sortShippingOptions(options, settings = {}) {
   const fallbacks = (policy.fallbackMethods || []).map(v => String(v).toLowerCase());
   const express = (policy.expressMethods || []).map(v => String(v).toLowerCase());
   const isExpressMethod = name => express.some(v => name === v || name.includes(v))
-    || /(^|\\s)(dhl|fedex|ups|express|priority)(\\s|$)/i.test(name);
+    || ['dhl', 'fedex', 'ups', 'express', 'priority'].some(token => name.includes(token));
   const rank = (option) => {
     const name = String(option.logisticName || '').toLowerCase();
     if (preferred && name === preferred) return 0;
