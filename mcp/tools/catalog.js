@@ -13,7 +13,9 @@ const productShape = z.object({
   salePrice: z.number().nullable().optional(),
   discount: z.number().optional(),
   categoryId: z.string().optional(),
+  category: z.string().optional(),
   categoryName: z.string().optional(),
+  shareId: z.string().regex(/^p\d{1,4}$/).optional(),
   description: z.string().optional(),
   // Structured listing fields (admin "Advanced product listing"): optional, shown on the product page only when filled.
   shortDescription: z.string().max(240).optional(), heroCopy: z.string().max(220).optional(), slug: z.string().max(120).optional(),
@@ -73,6 +75,25 @@ const productShape = z.object({
 
 const categoryShape = z.object({ id: z.string() }).catchall(z.any());
 
+function nextProductShareId(products){
+  const used=new Set();
+  for(const p of products||[]){
+    if(!p) continue;
+    const primary=String(p.id||'');
+    const alias=String(p.shareId||'');
+    if(/^p\d{1,4}$/.test(primary)) used.add(primary);
+    if(/^p\d{1,4}$/.test(alias)) used.add(alias);
+  }
+  let n=1; while(used.has('p'+n)) n++;
+  return 'p'+n;
+}
+
+function assertUniqueShareId(products, product){
+  if(!product.shareId) return;
+  const collision=(products||[]).find(p=>p.id!==product.id && (String(p.id||'')===product.shareId || String(p.shareId||'')===product.shareId));
+  if(collision) throw Object.assign(new Error(`Public product ID "${product.shareId}" is already used by "${collision.id}".`), {status:409});
+}
+
 function register(server) {
   server.registerTool('nova_list_products', {
     title: 'List products',
@@ -111,7 +132,10 @@ function register(server) {
     inputSchema: { product: productShape },
   }, async ({ product }) => {
     const db = getDb();
-    const saved = await upsertCatalogItem(db, 'products', product, { isNew: true });
+    const existing = await listCatalogDoc(db, 'products');
+    const toSave = { ...product, shareId: product.shareId || nextProductShareId(existing) };
+    assertUniqueShareId(existing, toSave);
+    const saved = await upsertCatalogItem(db, 'products', toSave, { isNew: true });
     return { content: [{ type: 'text', text: JSON.stringify(saved, null, 2) }] };
   });
 
@@ -121,6 +145,10 @@ function register(server) {
     inputSchema: { product: productShape },
   }, async ({ product }) => {
     const db = getDb();
+    if(product.shareId){
+      const existing = await listCatalogDoc(db, 'products');
+      assertUniqueShareId(existing, product);
+    }
     const saved = await upsertCatalogItem(db, 'products', product, { isNew: false });
     return { content: [{ type: 'text', text: JSON.stringify(saved, null, 2) }] };
   });
