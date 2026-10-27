@@ -30,6 +30,10 @@ const settings = {
 
 test('cost-plus retail pricing includes reserve, gateway fee, FX cushion and a target margin', () => {
   const price = calculateRetailPriceUSD(3.34, settings);
+  const expectedWorstCase = Math.ceil(
+    ((3.34 * 1.03 + 100 / 1343.09) / (1 - 0.25 - 0.08 - 0.039)) * 100
+  ) / 100;
+  assert.equal(price, expectedWorstCase);
   assert.ok(price > 3.34);
   assert.equal(price, Math.ceil(price * 100) / 100);
   assert.equal(calculateRetailPriceUSD(null, settings), null);
