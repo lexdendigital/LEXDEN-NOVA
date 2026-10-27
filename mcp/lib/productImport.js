@@ -66,8 +66,7 @@ function deriveSuggestedPricing(productSuggestedPrice, variants = []) {
 }
 
 function deriveCostBasedPricing(productCost, variants = [], settings = {}, productCurrency = 'USD') {
-  const currencyIsUsd = value => ['USD', 'US
-, 'US DOLLAR', 'US DOLLARS'].includes(String(value || '').trim().toUpperCase());
+  const currencyIsUsd = value => ['USD', 'US DOLLAR', 'US DOLLARS'].includes(String(value || '').trim().toUpperCase());
   const numericCost = value => {
     if (value == null || value === '') return null;
     const number = Number(value);
