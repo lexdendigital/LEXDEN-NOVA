@@ -32,3 +32,15 @@ test('missing feed post is 404, present is 200', async () => {
   assert.equal((await run('../api/feed', req('fp1'), s)).code, 404);
   assert.equal((await run('../api/feed', req('n1'), s)).code, 200);
 });
+test('short public alias resolves product-specific OG metadata and short hash destination', async () => {
+  const product = { id: 'cj-long-internal-id', shareId: 'p2', name: 'Power Bank', description: 'A rechargeable power bank.', image: 'https://cdn.example.com/power-bank.jpg' };
+  const r = await run('../api/product', req('p2'), { list: [product] });
+  assert.equal(r.code, 200);
+  assert.ok(r.body.includes('og:title'));
+  assert.ok(r.body.includes('Power Bank'));
+  assert.ok(r.body.includes('og:image'));
+  assert.ok(r.body.includes('https://cdn.example.com/power-bank.jpg'));
+  assert.ok(r.body.includes('og:url'));
+  assert.ok(r.body.includes('https://x.test/product/p2'));
+  assert.ok(r.body.includes('#product/p2'));
+});
