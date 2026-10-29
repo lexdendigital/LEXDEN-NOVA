@@ -53,12 +53,10 @@ test('insufficient CJ balance does not attempt payment and inspects Paystack ava
     status: 200,
     json: async () => ({ status: true, data: [{ currency: 'NGN', balance: 250000 }] }),
   });
-  process.env.PAYSTACK_SECRET_KEY = 'sk_test_example';
-  const out = await fundCjOrder({ cjFetch, cjOrderId: 'CJ-2', requiredUSD: 10, fetchImpl });
+  const out = await fundCjOrder({ cjFetch, cjOrderId: 'CJ-2', requiredUSD: 10, paystackSecretKey: 'sk_test_example', fetchImpl });
   assert.equal(out.ok, false);
   assert.equal(out.state, 'cj_balance_insufficient');
   assert.equal(out.shortfallUSD, 6);
   assert.equal(calls.length, 1);
   assert.deepEqual(out.paystack.balances[0], { currency: 'NGN', balanceMinor: 250000, balanceMajor: 2500 });
-  delete process.env.PAYSTACK_SECRET_KEY;
 });
