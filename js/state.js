@@ -927,11 +927,11 @@ async function cjRefreshShippingEstimate(product,selectedVariant){
       }else{
         const placeholder=document.createElement('option');
         placeholder.value='';
-        placeholder.textContent='No Smart route meets the 45-day target. Select a slower service to continue.';
+        placeholder.textContent='No Smart route meets the 45-day target. Select an alternative service to continue.';
         placeholder.selected=true;
         routeSelect.insertBefore(placeholder,routeSelect.firstChild);
         routeSelect.value='';
-        if(el)el.textContent='No route meets NOVA Smart Delivery’s 45-day target. A slower service may be available, but you must select it deliberately and review its estimate.';
+        if(el)el.textContent='No route meets NOVA Smart Delivery’s 45-day target. An alternative service may be available; review its estimate and full cost, then select it deliberately.';
         btn.disabled=true;
         return;
       }
@@ -961,11 +961,11 @@ function updateCjShippingChoice(product,selectedVariant){
   else if(quote.logisticAging)message+=' Supplier transit estimate: '+quote.logisticAging+'; processing may add time.';
   if(quote.requiresExplicitChoice===true)message+=' This is a slower alternative, not NOVA Smart Delivery. Continue only if you accept the longer estimate.';
   const policy=(DB.content&&DB.content.commercePricingPolicy&&DB.content.commercePricingPolicy.shipping)||{};
-  const warningRatio=Number(policy.highShippingItemPriceRatioWarning)||0.6;
-  const blockRatio=Number(policy.highShippingItemPriceRatioBlock)||1.5;
+  const warningRatio=Number(policy.highShippingItemPriceRatioWarning)||0.25;
+  const blockRatio=Number(policy.highShippingItemPriceRatioBlock)||0.35;
   if(ratio!==null&&ratio>=blockRatio){
     message+=' This route exceeds the shipping-to-item affordability limit.';
-    if(policy.enforceShippingRatioBlock===true){
+    if(policy.enforceShippingRatioBlock!==false){
       el.textContent=message+' Select another route or a locally stocked/bundled alternative.';
       btn.disabled=true;
       return;
