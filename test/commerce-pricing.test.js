@@ -104,23 +104,21 @@ test('offers Economy only for a material saving and requires an explicit choice'
 
   const economy = services.find(service => service.serviceLevel === 'economy');
   assert.ok(economy);
-  assert.equal(economy.logisticName, 'CJPacket Postal');
+  assert.equal(economy.logisticName, 'CJPacket Liquid Line');
   assert.equal(economy.serviceLabel, 'NOVA Economy');
   assert.equal(economy.requiresExplicitChoice, true);
-  assert.equal(economy.estimatedOrderToDoorMaxDays, 55);
+  assert.equal(economy.estimatedOrderToDoorMaxDays, 35);
+  assert.ok(economy.estimatedOrderToDoorMaxDays <= 45);
 });
 
-test('never pretends a slow-only route meets Smart; Economy requires explicit acceptance', () => {
+test('rejects every route whose maximum transit plus processing exceeds 45 days', () => {
   const services = selectShippingServices([
     { logisticName: 'CJPacket Liquid Line', logisticPrice: 5.00, logisticAging: '20-60' },
     { logisticName: 'PostNL', logisticPrice: 8.00, logisticAging: '15-45' },
+    { logisticName: 'CJPacket Postal', logisticPrice: 8.99, logisticAging: '12-40' },
   ], settings, { productAmountUSD: 40 });
 
-  assert.equal(services.some(service => service.serviceLevel === 'smart'), false);
-  assert.equal(services.length, 1);
-  assert.equal(services[0].serviceLevel, 'economy');
-  assert.equal(services[0].requiresExplicitChoice, true);
-  assert.equal(services[0].estimatedOrderToDoorMaxDays, 65);
+  assert.deepEqual(services, []);
 });
 
 test('suppresses a financially absurd express route but permits an affordable fast option', () => {
@@ -192,4 +190,16 @@ test('legacy admin values cannot weaken NOVA delivery and affordability guardrai
   assert.equal(policy.smartMaxShippingPremiumPct, 0.4);
   assert.equal(policy.economyMinSavingUSD, 2.5);
   assert.equal(policy.economyMinSavingPct, 0.2);
+});
+
+
+test('never returns an Economy service whose order-to-door estimate exceeds the 45-day limit', () => {
+  const services = selectShippingServices([
+    { logisticName: 'PostNL', logisticPrice: 9.80, logisticAging: '5-20' },
+    { logisticName: 'CJPacket Postal', logisticPrice: 6.00, logisticAging: '12-50' },
+    { logisticName: 'CJPacket Liquid Line', logisticPrice: 7.00, logisticAging: '15-30' },
+  ], settings, { productAmountUSD: 40, processingDays: 5 });
+
+  assert.ok(services.every(service => service.estimatedOrderToDoorMaxDays <= 45));
+  assert.ok(services.some(service => service.serviceLevel === 'economy'));
 });
