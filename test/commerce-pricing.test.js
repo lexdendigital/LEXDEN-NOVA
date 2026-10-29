@@ -4,6 +4,8 @@ const assert = require('node:assert/strict');
 const {
   calculateRetailPriceUSD,
   calculateShippingCharge,
+  parseShippingAging,
+  selectShippingServices,
   sortShippingOptions,
   shippingRatio,
 } = require('../api/commerce-pricing');
@@ -63,7 +65,87 @@ test('shipping methods prioritize the configured route and keep express options 
   assert.equal(result[3].isExpress, true);
 });
 
-test('shipping ratio marks freight-heavy items without forcing a policy block', () => {
+test('shipping ratio helper supports affordability policy checks', () => {
   assert.equal(shippingRatio(8, 10), 0.8);
   assert.equal(shippingRatio(8, 0), null);
+});
+
+
+test('parses CJ shipping aging ranges without inventing an estimate', () => {
+  assert.deepEqual(parseShippingAging('12-50'), { minDays: 12, maxDays: 50 });
+  assert.deepEqual(parseShippingAging('15–45'), { minDays: 15, maxDays: 45 });
+  assert.deepEqual(parseShippingAging('7 days'), { minDays: 7, maxDays: 7 });
+  assert.equal(parseShippingAging('unknown'), null);
+  assert.equal(parseShippingAging(null), null);
+});
+
+test('selects the fastest eligible Smart route within the configured price premium', () => {
+  const services = selectShippingServices([
+    { logisticName: 'CJPacket Liquid Line', logisticPrice: 7.00, logisticAging: '15-30' },
+    { logisticName: 'PostNL', logisticPrice: 9.80, logisticAging: '5-20' },
+    { logisticName: 'CJPacket Postal', logisticPrice: 6.00, logisticAging: '12-50' },
+  ], settings, { productAmountUSD: 40 });
+
+  assert.equal(services[0].serviceLevel, 'smart');
+  assert.equal(services[0].serviceLabel, 'NOVA Smart Delivery');
+  assert.equal(services[0].logisticName, 'PostNL');
+  assert.equal(services[0].estimatedOrderToDoorMaxDays, 25);
+  assert.equal(services[0].deliveryEstimate, '10-25 days');
+});
+
+test('offers Economy only for a material saving and requires an explicit choice', () => {
+  const services = selectShippingServices([
+    { logisticName: 'CJPacket Liquid Line', logisticPrice: 7.00, logisticAging: '15-30' },
+    { logisticName: 'PostNL', logisticPrice: 9.80, logisticAging: '5-20' },
+    { logisticName: 'CJPacket Postal', logisticPrice: 6.00, logisticAging: '12-50' },
+  ], settings, { productAmountUSD: 40 });
+
+  const economy = services.find(service => service.serviceLevel === 'economy');
+  assert.ok(economy);
+  assert.equal(economy.logisticName, 'CJPacket Postal');
+  assert.equal(economy.serviceLabel, 'NOVA Economy');
+  assert.equal(economy.requiresExplicitChoice, true);
+  assert.equal(economy.estimatedOrderToDoorMaxDays, 55);
+});
+
+test('never pretends a slow-only route meets Smart; Economy requires explicit acceptance', () => {
+  const services = selectShippingServices([
+    { logisticName: 'CJPacket Liquid Line', logisticPrice: 5.00, logisticAging: '20-60' },
+    { logisticName: 'PostNL', logisticPrice: 8.00, logisticAging: '15-45' },
+  ], settings, { productAmountUSD: 40 });
+
+  assert.equal(services.some(service => service.serviceLevel === 'smart'), false);
+  assert.equal(services.length, 1);
+  assert.equal(services[0].serviceLevel, 'economy');
+  assert.equal(services[0].requiresExplicitChoice, true);
+  assert.equal(services[0].estimatedOrderToDoorMaxDays, 65);
+});
+
+test('suppresses a financially absurd express route but permits an affordable fast option', () => {
+  const services = selectShippingServices([
+    { logisticName: 'PostNL', logisticPrice: 6.00, logisticAging: '10-30' },
+    { logisticName: 'DHL Official', logisticPrice: 85.41, logisticAging: '3-7' },
+  ], settings, { productAmountUSD: 30 });
+
+  assert.equal(services.some(service => service.logisticName === 'DHL Official'), false);
+
+  const affordable = selectShippingServices([
+    { logisticName: 'PostNL', logisticPrice: 6.00, logisticAging: '10-30' },
+    { logisticName: 'DHL Official', logisticPrice: 4.00, logisticAging: '3-7' },
+  ], settings, { productAmountUSD: 30 });
+
+  const express = affordable.find(service => service.serviceLevel === 'express');
+  assert.ok(express);
+  assert.equal(express.serviceLabel, 'NOVA Express');
+  assert.equal(express.requiresExplicitChoice, true);
+  assert.equal(express.estimatedOrderToDoorMaxDays, 12);
+});
+
+test('rejects unknown delivery estimates and routes whose freight ratio breaks affordability rules', () => {
+  const services = selectShippingServices([
+    { logisticName: 'Unknown Carrier', logisticPrice: 2.00, logisticAging: 'unknown' },
+    { logisticName: 'CJPacket Liquid Line', logisticPrice: 6.00, logisticAging: '20-60' },
+  ], settings, { productAmountUSD: 10 });
+
+  assert.deepEqual(services, []);
 });
