@@ -961,11 +961,11 @@ function updateCjShippingChoice(product,selectedVariant){
   else if(quote.logisticAging)message+=' Supplier transit estimate: '+quote.logisticAging+'; processing may add time.';
   if(quote.requiresExplicitChoice===true)message+=' This is a slower alternative, not NOVA Smart Delivery. Continue only if you accept the longer estimate.';
   const policy=(DB.content&&DB.content.commercePricingPolicy&&DB.content.commercePricingPolicy.shipping)||{};
-  const warningRatio=Number(policy.highShippingItemPriceRatioWarning)||0.25;
-  const blockRatio=Number(policy.highShippingItemPriceRatioBlock)||0.35;
+  const warningRatio=Math.min(Number(policy.highShippingItemPriceRatioWarning)||0.25,0.25);
+  const blockRatio=Math.min(Number(policy.highShippingItemPriceRatioBlock)||0.35,0.35);
   if(ratio!==null&&ratio>=blockRatio){
     message+=' This route exceeds the shipping-to-item affordability limit.';
-    if(policy.enforceShippingRatioBlock!==false){
+    {
       el.textContent=message+' Select another route or a locally stocked/bundled alternative.';
       btn.disabled=true;
       return;
