@@ -631,6 +631,7 @@ module.exports = async function handler(req, res) {
     shippingQuoteValidated = true;
     deliveryDetails.shippingQuoteId = quoteId;
     deliveryDetails.shippingMethod = String(shippingQuote.logisticName);
+    deliveryDetails.shippingOriginCountry = countryCodeForShipping(shippingQuote.startCountryCode) || 'CN';
     deliveryDetails.shippingAmountMajor = quoteShipping;
     deliveryDetails.shippingCurrency = String(shippingQuote.currency);
     deliveryDetails.shippingAmountUSD = Number(shippingQuote.shippingAmountUSD);
