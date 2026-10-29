@@ -921,7 +921,10 @@ async function saveProduct(id){
       },
     };
   }
-  const hasCjPhysicalMapping = data.productType==='PHYSICAL' && !!String(data.physical&&data.physical.cj&&data.physical.cj.productId||'').trim();
+  const hasCjPhysicalMapping = data.productType==='PHYSICAL' && (
+    !!String(data.physical&&data.physical.cj&&data.physical.cj.productId||'').trim()
+    || !!(existingProduct&&existingProduct.pricingReviewRequired===true)
+  );
   if(hasCjPhysicalMapping){
     const reviewNotes=String($('#f_pricingReviewNotes')?.value||'').trim();
     const reviewChecked=$('#f_pricingReviewComplete')?.checked===true;
