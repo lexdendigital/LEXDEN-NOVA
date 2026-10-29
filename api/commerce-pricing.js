@@ -173,9 +173,8 @@ function isExpressShippingMethod(name, settings = {}) {
  * - Smart: a non-express route whose maximum quoted transit + processing allowance
  *   meets the configured order-to-door target. From those routes, pick the fastest
  *   route within a bounded premium over the cheapest eligible route.
- * - Economy: a slower, cheaper route only when savings are material. It can exceed
- *   the Smart target, so the customer must explicitly choose it and sees the honest
- *   expanded estimate. If there is no Smart route, Economy is never preselected.
+ * - Economy: a slower, cheaper route only when savings are material. It must still
+ *   meet the hard maximum order-to-door delivery limit. If no route qualifies, fail closed.
  * - Express: a verified fast route is surfaced only when its shipping-to-item
  *   cost ratio remains below the hard affordability cap.
  *
@@ -213,7 +212,10 @@ function selectShippingServices(options, settings = {}, context = {}) {
       __maxDoorDays: aging ? aging.maxDays + processingDays : null,
     };
   }).filter(option => option.__aging && option.__cost != null && option.__cost >= 0
-    && option.__ratio != null && option.__ratio <= maxRatio);
+    && option.__ratio != null && option.__ratio <= maxRatio
+    // Forty-five days is a hard eligibility limit for every service level,
+    // not only the default Smart option. Processing time is included.
+    && option.__maxDoorDays <= policy.maxDeliveryDays);
 
   const standard = normalized.filter(option => !option.__express);
   const smartEligible = standard.filter(option => option.__maxDoorDays <= policy.maxDeliveryDays);
@@ -257,10 +259,6 @@ function selectShippingServices(options, settings = {}, context = {}) {
       selected.push(toPublicService(economyCandidates[0], 'economy', 'NOVA Economy', true,
         'Slower route offered only because its saving is material; the longer estimate is shown before payment.'));
     }
-  } else if (policy.allowEconomyOverMaxDays && standard.length) {
-    standard.sort((a, b) => a.__cost - b.__cost || a.__maxDoorDays - b.__maxDoorDays);
-    selected.push(toPublicService(standard[0], 'economy', 'NOVA Economy', true,
-      'No route met the Smart delivery target; this slower option requires explicit customer acceptance.'));
   }
 
   const expressCandidates = normalized.filter(option => option.__express
