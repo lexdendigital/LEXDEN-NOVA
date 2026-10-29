@@ -222,6 +222,8 @@ module.exports = async (req, res) => {
         : (displayRate ? Number(selection.price) / displayRate : null);
       options = selectShippingServices(options, settingsDoc, {
         productAmountUSD,
+        productAmountMajor: Number(selection.price),
+        currency,
         processingDays: policy.shipping.processingDays,
       });
       if (!options.length) {
@@ -241,12 +243,15 @@ module.exports = async (req, res) => {
       for (const option of options) {
         const shippingAmountMajor = calculateShippingCharge(option.logisticPrice, currency, settingsDoc);
         if (shippingAmountMajor == null) continue;
-        const quoteId = crypto.randomUUID();
         const productAmountMajor = Number(selection.price);
-        const totalAmountMajor = roundTotal(productAmountMajor + shippingAmountMajor, currency);
         const ratio = shippingRatio(shippingAmountMajor, productAmountMajor);
-        const blockedByPricingPolicy = policy.shipping.enforceShippingRatioBlock === true
-          && ratio !== null && ratio >= policy.shipping.highShippingItemPriceRatioBlock;
+        // Recheck after FX and payment-fee buffers. Do not send checkout options
+        // that already violate the shopper-facing affordability cap.
+        if (policy.shipping.enforceShippingRatioBlock && ratio !== null
+          && ratio >= policy.shipping.highShippingItemPriceRatioBlock) continue;
+        const quoteId = crypto.randomUUID();
+        const totalAmountMajor = roundTotal(productAmountMajor + shippingAmountMajor, currency);
+        const blockedByPricingPolicy = false;
         const quoteData = {
           quoteId,
           status: 'open',
@@ -290,7 +295,10 @@ module.exports = async (req, res) => {
         });
       }
       if (!quoteOptions.length) {
-        return res.status(200).json({ ok: false, error: 'The shipping quote could not be converted into a checkout total. Please try again.' });
+        return res.status(200).json({
+          ok: false,
+          error: 'No route meets NOVA’s delivery and affordability rules after fees and currency conversion. Choose a locally stocked alternative or another product.',
+        });
       }
       await writeSyncLog({
         event: 'shipping.calc',
