@@ -71,14 +71,129 @@ service cloud.firestore {
     }
 
     // ---- users/{uid} ----
-    // A shopper's own profile (name/gender/dob/country/state/occupation/
-    // howHeard from the sign-up wizard). A shopper can read/write only
-    // their own document. Admin dashboard's Users tab reads every
-    // profile (getDocs(collection(fbDb,"users"))), so admin gets
-    // collection-wide read too.
+    // Shopper-owned profile fields are explicitly allow-listed. Unknown
+    // fields fail closed so a future server-authoritative field cannot
+    // accidentally become browser-writable just because it lives here.
+    //
+    // generalAffiliateConsumed is intentionally NOT in either allow-list:
+    // verify-paystack.js owns that commission-consumption marker through
+    // the Firebase Admin SDK, and Admin SDK writes bypass client Rules.
+    //
+    // affiliateAttributions remains client-writable for compatibility with
+    // affiliate/index.html's existing localStorage -> profile merge. No
+    // server payout/commission reader of that field exists in this version.
+    //
+    // Existing profile code uses set(..., {merge:true}) and re-submits some
+    // unchanged identity/metadata fields. diff().affectedKeys() evaluates
+    // the resulting document, so unchanged fields do not count as edits.
     match /users/{uid} {
+      function userCreateFieldsAllowed() {
+        return request.resource.data.keys().hasOnly([
+          'uid',
+          'name',
+          'email',
+          'photoURL',
+          'address',
+          'occupation',
+          'gender',
+          'dob',
+          'country',
+          'state',
+          'howHeard',
+          'legalAccepted',
+          'legalAcceptedAt',
+          'termsVersion',
+          'privacyVersion',
+          'marketingConsent',
+          'marketingConsentAt',
+          'marketingConsentSource',
+          'profileSetupDone',
+          'provider',
+          'updatedAt',
+          'createdAt',
+          'affiliateAttributions'
+        ]);
+      }
+
+      function userUpdateFieldsAllowed() {
+        return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'uid',
+          'name',
+          'email',
+          'photoURL',
+          'address',
+          'occupation',
+          'gender',
+          'dob',
+          'country',
+          'state',
+          'howHeard',
+          'legalAccepted',
+          'legalAcceptedAt',
+          'termsVersion',
+          'privacyVersion',
+          'marketingConsent',
+          'marketingConsentAt',
+          'marketingConsentSource',
+          'profileSetupDone',
+          'provider',
+          'updatedAt',
+          'createdAt',
+          'affiliateAttributions'
+        ]);
+      }
+
+      function userCreateIdentityValid(uid) {
+        return (!('uid' in request.resource.data) || request.resource.data.uid == uid)
+          && (!('email' in request.resource.data)
+            || (('email' in request.auth.token)
+              && request.resource.data.email == request.auth.token.email))
+          && (!('provider' in request.resource.data)
+            || request.resource.data.provider in ['google', 'password'])
+          && (!('affiliateAttributions' in request.resource.data)
+            || request.resource.data.affiliateAttributions is map);
+      }
+
+      function userUpdateIdentityValid(uid) {
+        let affected = request.resource.data.diff(resource.data).affectedKeys();
+        return (!affected.hasAny(['uid'])
+            || (('uid' in request.resource.data) && request.resource.data.uid == uid))
+          && (!affected.hasAny(['email'])
+            || (('email' in request.resource.data)
+              && ('email' in request.auth.token)
+              && request.resource.data.email == request.auth.token.email))
+          && (!affected.hasAny(['createdAt'])
+            || (!('createdAt' in resource.data)
+              && ('createdAt' in request.resource.data)
+              && request.resource.data.createdAt is string))
+          && (!affected.hasAny(['provider'])
+            || (!('provider' in resource.data)
+              && ('provider' in request.resource.data)
+              && request.resource.data.provider in ['google', 'password']))
+          && (!affected.hasAny(['affiliateAttributions'])
+            || (('affiliateAttributions' in request.resource.data)
+              && request.resource.data.affiliateAttributions is map));
+      }
+
       allow read: if isOwner(uid) || isAdmin();
-      allow write: if isOwner(uid);
+
+      // Creation may be either the normal full profile upsert or the
+      // affiliate page's narrow merge if it wins an initial-write race.
+      // Identity fields are optional, but when present they must agree
+      // with Firebase Authentication.
+      allow create: if isOwner(uid)
+        && userCreateFieldsAllowed()
+        && userCreateIdentityValid(uid);
+
+      // No broad "write": update is limited to known client fields and
+      // protected identity invariants. Server-owned/unknown fields cannot
+      // be added, changed, reset, or removed by a browser.
+      allow update: if isOwner(uid)
+        && userUpdateFieldsAllowed()
+        && userUpdateIdentityValid(uid);
+
+      // No shopper-side users/{uid} delete flow exists. Omission is
+      // deliberate; Admin SDK server operations continue to bypass Rules.
     }
 
     // ---- wishlists/{uid} & likedPosts/{uid} ----
