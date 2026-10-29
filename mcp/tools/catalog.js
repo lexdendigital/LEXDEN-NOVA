@@ -48,8 +48,8 @@ const productShape = z.object({
   status: z.string().optional(),
   pricingReviewRequired: z.boolean().optional(),
   pricingReviewNotes: z.string().max(3000).optional(),
-  pricingReviewCompletedAt: z.string().optional(),
-  pricingReviewCompletedBy: z.string().optional(),
+  pricingReviewCompletedAt: z.string().nullable().optional(),
+  pricingReviewCompletedBy: z.string().nullable().optional(),
   tags: z.array(z.string()).optional(),
   images: z.array(z.string()).optional(),
   options: z.array(z.object({
@@ -180,10 +180,12 @@ function register(server) {
       product = {
         ...product,
         pricingReviewRequired: true,
+        pricingReviewNotes: typeof product.pricingReviewNotes === 'string' ? product.pricingReviewNotes : '',
         pricingReviewCompletedAt: null,
         pricingReviewCompletedBy: null,
       };
       merged.pricingReviewRequired = true;
+      merged.pricingReviewNotes = product.pricingReviewNotes;
       merged.pricingReviewCompletedAt = null;
       merged.pricingReviewCompletedBy = null;
     }
