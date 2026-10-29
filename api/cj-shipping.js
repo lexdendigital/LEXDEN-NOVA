@@ -27,10 +27,20 @@ function roundTotal(value, currency) {
 
 function stockRowsFromResponse(data) {
   if (Array.isArray(data)) return data;
-  if (data && Array.isArray(data.list)) return data.list;
-  if (data && Array.isArray(data.rows)) return data.rows;
-  if (data && Array.isArray(data.data)) return data.data;
-  return data && typeof data === 'object' ? [data] : [];
+  if (!data || typeof data !== 'object') return [];
+  // CJ integrations may return raw rows or wrap warehouse rows under data/list.
+  // Prefer warehouse-specific arrays so quantities are never treated as a total
+  // for every warehouse.
+  for (const key of ['list', 'rows', 'byWarehouse', 'warehouseList', 'inventories', 'warehouses', 'data']) {
+    if (Array.isArray(data[key])) return data[key];
+  }
+  for (const key of ['data', 'stock', 'result']) {
+    if (data[key] && typeof data[key] === 'object') {
+      const nested = stockRowsFromResponse(data[key]);
+      if (nested.length) return nested;
+    }
+  }
+  return [data];
 }
 
 function stockQuantity(row) {
