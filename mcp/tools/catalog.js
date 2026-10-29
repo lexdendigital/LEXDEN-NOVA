@@ -5,6 +5,12 @@ const fileStorage = require('../../api/file-storage');
 const { listCatalogDoc, upsertCatalogItem, appendCatalogProductMedia, deleteCatalogItem } = require('../lib/settings');
 const { decodeProductImage, buildImagePath, appendProductImage } = require('../lib/productImage');
 const { randomUUID } = require('node:crypto');
+const {
+  isCjPhysicalProduct,
+  hasCjPricingInputsChanged,
+  assertCjPhysicalPublicationAllowed,
+  assertCjPhysicalProductCreatedAsDraft,
+} = require('../../api/cj-product-review');
 
 const productShape = z.object({
   id: z.string(),
@@ -40,6 +46,10 @@ const productShape = z.object({
   fileUrl: z.string().optional(),
   externalPaymentLink: z.string().optional(),
   status: z.string().optional(),
+  pricingReviewRequired: z.boolean().optional(),
+  pricingReviewNotes: z.string().max(3000).optional(),
+  pricingReviewCompletedAt: z.string().nullable().optional(),
+  pricingReviewCompletedBy: z.string().nullable().optional(),
   tags: z.array(z.string()).optional(),
   images: z.array(z.string()).optional(),
   options: z.array(z.object({
@@ -135,6 +145,10 @@ function register(server) {
     const existing = await listCatalogDoc(db, 'products');
     const toSave = { ...product, shareId: product.shareId || nextProductShareId(existing) };
     assertUniqueShareId(existing, toSave);
+    // CJ-linked physical items always start as Draft; their first quote, market-price
+    // check and fulfilment funding review must happen against the saved product.
+    assertCjPhysicalProductCreatedAsDraft(toSave);
+    assertCjPhysicalPublicationAllowed(toSave);
     const saved = await upsertCatalogItem(db, 'products', toSave, { isNew: true });
     return { content: [{ type: 'text', text: JSON.stringify(saved, null, 2) }] };
   });
@@ -145,10 +159,38 @@ function register(server) {
     inputSchema: { product: productShape },
   }, async ({ product }) => {
     const db = getDb();
-    if(product.shareId){
-      const existing = await listCatalogDoc(db, 'products');
-      assertUniqueShareId(existing, product);
+    const existing = await listCatalogDoc(db, 'products');
+    const current = existing.find(item => item.id === product.id);
+    if (!current) throw Object.assign(new Error(`No product with id "${product.id}".`), { status: 404 });
+    if(product.shareId) assertUniqueShareId(existing, product);
+
+    const merged = { ...current, ...product };
+    const cjReviewLinked = isCjPhysicalProduct(current) || isCjPhysicalProduct(merged);
+    const economicsChanged = cjReviewLinked && (
+      current.productType !== merged.productType || hasCjPricingInputsChanged(current, merged)
+    );
+    if (economicsChanged) {
+      // A pricing/mapping change must not go live in the same write. Save as Draft,
+      // re-fetch current stock/shipping and refresh the market-price evidence first.
+      if (merged.status === 'published') {
+        throw Object.assign(new Error(
+          'Publishing blocked: a CJ product price, supplier, variant, destination or delivery input changed. Save it as Draft, refresh live stock/shipping, update the market comparison, then complete a fresh pricing review before republishing.'
+        ), { status: 400, code: 'CJ_PRICING_REVIEW_REQUIRED' });
+      }
+      product = {
+        ...product,
+        pricingReviewRequired: true,
+        pricingReviewNotes: typeof product.pricingReviewNotes === 'string' ? product.pricingReviewNotes : '',
+        pricingReviewCompletedAt: null,
+        pricingReviewCompletedBy: null,
+      };
+      merged.pricingReviewRequired = true;
+      merged.pricingReviewNotes = product.pricingReviewNotes;
+      merged.pricingReviewCompletedAt = null;
+      merged.pricingReviewCompletedBy = null;
     }
+    assertCjPhysicalPublicationAllowed(merged);
+
     const saved = await upsertCatalogItem(db, 'products', product, { isNew: false });
     return { content: [{ type: 'text', text: JSON.stringify(saved, null, 2) }] };
   });
