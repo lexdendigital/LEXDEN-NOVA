@@ -965,11 +965,9 @@ function updateCjShippingChoice(product,selectedVariant){
   const blockRatio=Math.min(Number(policy.highShippingItemPriceRatioBlock)||0.35,0.35);
   if(ratio!==null&&ratio>=blockRatio){
     message+=' This route exceeds the shipping-to-item affordability limit.';
-    {
-      el.textContent=message+' Select another route or a locally stocked/bundled alternative.';
-      btn.disabled=true;
-      return;
-    }
+    el.textContent=message+' Select another route or a locally stocked/bundled alternative.';
+    btn.disabled=true;
+    return;
   } else if(ratio!==null&&ratio>=warningRatio)message+=' Shipping is high relative to this item price, so compare routes before paying.';
   el.textContent=message;
   btn.disabled=false;
