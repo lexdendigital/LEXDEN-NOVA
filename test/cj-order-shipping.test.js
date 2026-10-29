@@ -24,3 +24,10 @@ test('CJ order payload receives the exact route chosen at checkout', () => {
   assert.equal(payload.payType, 3);
   assert.equal(payload.products[0].vid, 'cj-variant-1');
 });
+
+
+test('funding holds remain resumable without recreating the CJ order', () => {
+  assert.equal(cjOrderHandler.canResumeSupplierOrderStatus('funding_required'), true);
+  assert.equal(cjOrderHandler.canResumeSupplierOrderStatus('supplier_created'), true);
+  assert.equal(cjOrderHandler.canResumeSupplierOrderStatus('stock_issue'), false);
+});
