@@ -78,7 +78,7 @@ function getCommercePricingPolicy(settings = {}) {
         boundedPct(Number(rawShipping.highShippingItemPriceRatioBlock) * 100, defaults.shipping.highShippingItemPriceRatioBlock * 100, 500) / 100,
         defaults.shipping.highShippingItemPriceRatioBlock
       ),
-      enforceShippingRatioBlock: rawShipping.enforceShippingRatioBlock !== false,
+      enforceShippingRatioBlock: true,
     },
   };
 }
