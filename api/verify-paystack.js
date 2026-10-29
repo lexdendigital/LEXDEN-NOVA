@@ -631,10 +631,18 @@ module.exports = async function handler(req, res) {
     shippingQuoteValidated = true;
     deliveryDetails.shippingQuoteId = quoteId;
     deliveryDetails.shippingMethod = String(shippingQuote.logisticName);
+    deliveryDetails.shippingOriginCountry = countryCodeForShipping(shippingQuote.startCountryCode) || 'CN';
     deliveryDetails.shippingAmountMajor = quoteShipping;
     deliveryDetails.shippingCurrency = String(shippingQuote.currency);
     deliveryDetails.shippingAmountUSD = Number(shippingQuote.shippingAmountUSD);
     deliveryDetails.shippingETA = shippingQuote.logisticAging || null;
+    deliveryDetails.shippingServiceLevel = shippingQuote.serviceLevel || null;
+    deliveryDetails.shippingServiceLabel = shippingQuote.serviceLabel || 'NOVA Delivery';
+    deliveryDetails.shippingDeliveryEstimate = shippingQuote.deliveryEstimate || null;
+    deliveryDetails.shippingEstimatedMaxDays = Number.isFinite(Number(shippingQuote.estimatedOrderToDoorMaxDays))
+      ? Number(shippingQuote.estimatedOrderToDoorMaxDays) : null;
+    deliveryDetails.shippingProcessingAllowanceDays = Number.isFinite(Number(shippingQuote.processingAllowanceDays))
+      ? Number(shippingQuote.processingAllowanceDays) : null;
     deliveryDetails.shippingQuoteExpiresAt = new Date(quoteExpiresAt).toISOString();
   }
   const expectedAmount = shippingQuoteValidated ? Number(shippingQuote.totalAmountMajor) : selection && selection.price;

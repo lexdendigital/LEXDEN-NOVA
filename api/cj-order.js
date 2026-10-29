@@ -43,7 +43,7 @@ function buildCjOrderPayload(orderRef, order, product, cjMapping, qty) {
     logisticName: d.shippingMethod || '',
     payType: 3,
     remark: `LEXDEN NOVA order ${orderRef}`,
-    fromCountryCode: 'CN',
+    fromCountryCode: countryToIso2(d.shippingOriginCountry) || 'CN',
     products: [
       { vid: cjMapping.variantId, quantity: qty, shopProductId: product.id },
     ],
@@ -52,10 +52,12 @@ function buildCjOrderPayload(orderRef, order, product, cjMapping, qty) {
 
 // Minimal, extend as needed — CJ expects ISO-2 country codes and the
 // existing delivery modal collects a free-text country in some builds.
-const COUNTRY_ISO2 = { nigeria: 'NG', 'united states': 'US', 'united kingdom': 'GB', ghana: 'GH', kenya: 'KE', 'south africa': 'ZA' };
+const COUNTRY_ISO2 = { nigeria: 'NG', china: 'CN', 'united states': 'US', 'united kingdom': 'GB', ghana: 'GH', kenya: 'KE', 'south africa': 'ZA', poland: 'PL', germany: 'DE', france: 'FR', netherlands: 'NL', italy: 'IT', spain: 'ES' };
 function countryToIso2(country) {
   if (!country) return null;
   const s = String(country).trim();
+  if (s.toUpperCase() === 'UK') return 'GB';
+  if (s.toUpperCase() === 'EU') return null; // warehouse regions must resolve to a country
   if (/^[A-Z]{2}$/.test(s)) return s;
   return COUNTRY_ISO2[s.toLowerCase()] || null;
 }
@@ -245,7 +247,8 @@ module.exports = async (req, res) => {
     const quoteSnap = await db().collection('shippingQuotes').doc(String(quoteId)).get();
     const quote = quoteSnap.exists ? quoteSnap.data() : null;
     if (!quote || quote.status !== 'reserved' || quote.usedBy !== reference || quote.logisticName !== routeName
-      || String(quote.productId) !== String(order.productId) || String(quote.variantId || '') !== String(order.variantId || '')) {
+      || String(quote.productId) !== String(order.productId) || String(quote.variantId || '') !== String(order.variantId || '')
+      || String(quote.startCountryCode || 'CN') !== String(countryToIso2(order.delivery.shippingOriginCountry) || 'CN')) {
       await orderRef.set({ status: 'shipping_quote_issue', shippingQuoteIssue: 'quote_route_mismatch', requiresManualReview: true }, { merge: true });
       await writeSyncLog({ event: 'order.create', objectId: reference, success: false, message: 'shipping_quote_route_mismatch', tookMs: Date.now() - started });
       return res.status(200).json({ ok: false, error: 'shipping_quote_mismatch', message: 'The selected shipping route could not be verified. This order has been held for manual review.' });
@@ -256,12 +259,40 @@ module.exports = async (req, res) => {
     // ---- Live stock check right before creating the order (README §37 —
     // "do not rely on stale inventory for final order approval"). ----
     const stockR = await cjFetch('/product/stock/queryByVid', { query: { vid: cjMapping.variantId } });
-    const rows = stockR.ok ? (Array.isArray(stockR.data) ? stockR.data : [stockR.data]) : [];
-    const totalQty = rows.reduce((sum, row) => sum + (Number(row && (row.storageNum ?? row.stockNum ?? row.num)) || 0), 0);
-    if (stockR.ok && totalQty < qty) {
-      await orderRef.set({ status: 'stock_issue' }, { merge: true });
-      await writeSyncLog({ event: 'order.create', objectId: reference, success: false, message: `Out of stock: need ${qty}, have ${totalQty}`, tookMs: Date.now() - started });
-      return res.status(200).json({ ok: false, error: 'out_of_stock', message: 'This item just went out of stock at the supplier — order held for manual review.' });
+    const data = stockR && stockR.data;
+    const rows = Array.isArray(data) ? data
+      : data && Array.isArray(data.list) ? data.list
+      : data && Array.isArray(data.rows) ? data.rows
+      : data && Array.isArray(data.byWarehouse) ? data.byWarehouse
+      : data && Array.isArray(data.warehouseList) ? data.warehouseList
+      : data && Array.isArray(data.inventories) ? data.inventories
+      : data && Array.isArray(data.warehouses) ? data.warehouses
+      : data && Array.isArray(data.data) ? data.data
+      : data && typeof data === 'object' ? [data] : [];
+    const stockOrigin = countryToIso2(order.delivery.shippingOriginCountry || quote.startCountryCode) || 'CN';
+    const originRows = rows.filter(row => {
+      const rawOrigin = row && (row.area ?? row.areaCode ?? row.countryCode ?? row.country ?? row.storageCountryCode ?? row.warehouseCountryCode);
+      return countryToIso2(rawOrigin) === stockOrigin;
+    });
+    const originQty = originRows.reduce((sum, row) => {
+      const rawQty = row && (row.storageNum ?? row.stockNum ?? row.num ?? row.quantity ?? row.qty ?? row.availableStock ?? row.inventoryNum ?? row.total ?? row.stock);
+      const amount = Number(rawQty);
+      return sum + (Number.isFinite(amount) && amount > 0 ? amount : 0);
+    }, 0);
+    if (!stockR || !stockR.ok || !originRows.length || originQty < qty) {
+      const issue = !stockR || !stockR.ok ? 'stock_unverified' : 'out_of_stock_at_selected_origin';
+      await orderRef.set({ status: 'stock_issue', requiresManualReview: true, stockIssue: issue }, { merge: true });
+      await writeSyncLog({
+        event: 'order.create', objectId: reference, success: false,
+        message: `Stock not verified at selected origin ${stockOrigin}: need ${qty}, have ${originQty}`,
+        tookMs: Date.now() - started,
+        detail: { issue, origin: stockOrigin },
+      });
+      return res.status(200).json({
+        ok: false,
+        error: issue,
+        message: 'The selected warehouse can no longer fulfil this item. The order has been held for review; the route will not be silently changed.',
+      });
     }
 
     // ---- Create the CJ order. ----

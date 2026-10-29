@@ -739,15 +739,15 @@ function openCheckoutReviewModal(product,variant,delivery,onContinue,external=fa
   if(external) deliveryCopy='You will continue to the seller’s payment page to complete this order.';
   else if(product.productType==='PHYSICAL'){
     deliveryCopy='Ships to '+escapeHtml(delivery&&delivery.country||'your delivery address');
-    if(hasShippingQuote && delivery.shippingMethod) deliveryCopy+=' · '+escapeHtml(delivery.shippingMethod);
-    if(hasShippingQuote && delivery.shippingETA) deliveryCopy+=' · estimated '+escapeHtml(delivery.shippingETA);
+    if(hasShippingQuote && (delivery.shippingServiceLabel||delivery.shippingServiceLevel)) deliveryCopy+=' · '+escapeHtml(delivery.shippingServiceLabel||'NOVA Delivery');
+    if(hasShippingQuote && (delivery.shippingDeliveryEstimate||delivery.shippingETA)) deliveryCopy+=' · estimated '+escapeHtml(delivery.shippingDeliveryEstimate||delivery.shippingETA);
     if(!hasShippingQuote && isCjPhysicalProduct(product)) deliveryCopy+=' · a valid shipping quote is required before payment';
     if(!hasShippingQuote && !isCjPhysicalProduct(product) && product.physical && product.physical.deliveryEstimate) deliveryCopy+=' · '+escapeHtml(product.physical.deliveryEstimate);
   } else deliveryCopy='Digital access or download after payment verification';
   let priceRows;
   if(hasShippingQuote){
     priceRows='<div class="checkout-review-price"><span>Product price</span><strong>'+formatChargeMajor(itemMajor,chargeCurrency)+'</strong></div>'
-      +'<div class="checkout-review-price"><span>Shipping ('+escapeHtml(delivery.shippingMethod||'selected route')+')</span><strong>'+formatChargeMajor(shippingMajor,chargeCurrency)+'</strong></div>'
+      +'<div class="checkout-review-price"><span>Shipping ('+escapeHtml(delivery.shippingServiceLabel||'Delivery')+')</span><strong>'+formatChargeMajor(shippingMajor,chargeCurrency)+'</strong></div>'
       +'<div class="checkout-review-price" style="border-top:1px solid var(--border);padding-top:10px;margin-top:4px;"><span>Total due now</span><strong>'+formatChargeMajor(totalMajor,chargeCurrency)+'</strong></div>';
   } else {
     priceRows='<div class="checkout-review-price"><span>Price</span><strong>'+(amount===0?'Free':fmtPrice(amount))+'</strong></div>';
@@ -822,7 +822,7 @@ function openDeliveryDetailsModal(product, selectedVariant, onSubmit){
   overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:900;display:flex;align-items:center;justify-content:center;padding:20px;overflow-y:auto;';
   const countries=(product.physical&&product.physical.shippingCountries&&product.physical.shippingCountries.length)?product.physical.shippingCountries:['Nigeria'];
   const requiresCjQuote=isCjPhysicalProduct(product);
-  const routeField=requiresCjQuote ? '<div class="form-field"><label for="dd_shippingMethod">Shipping method</label><select id="dd_shippingMethod" style="width:100%;"><option value="">Checking available routes…</option></select></div>' : '';
+  const routeField=requiresCjQuote ? '<div class="form-field"><label for="dd_shippingMethod">Delivery service</label><select id="dd_shippingMethod" style="width:100%;"><option value="">Checking delivery services…</option></select></div>' : '';
   overlay.innerHTML='<div class="card" style="max-width:420px;width:100%;padding:20px;max-height:90vh;overflow-y:auto;">'
     +'<h2 class="font-display" style="margin-bottom:4px;">Where should we ship this?</h2>'
     +'<p class="text-2 small" style="margin-bottom:14px;">'+escapeHtml(product.name)+' is a physical item. We will show the shipping fee before you pay.</p>'
@@ -863,7 +863,7 @@ function openDeliveryDetailsModal(product, selectedVariant, onSubmit){
       }
       const currency=checkoutChargeCurrency();
       if(quote.currency!==currency){if(errEl)errEl.textContent='Currency changed. Refresh the shipping options before continuing.';cjRefreshShippingEstimate(product,selectedVariant);return;}
-      quoteDetails={shippingQuoteId:quote.quoteId,shippingMethod:quote.logisticName,shippingAmountMajor:Number(quote.shippingAmountMajor),shippingCurrency:quote.currency,shippingAmountUSD:Number(quote.logisticPrice),shippingETA:quote.logisticAging||null,shippingQuoteExpiresAt:quote.quoteExpiresAt};
+      quoteDetails={shippingQuoteId:quote.quoteId,shippingMethod:quote.logisticName,shippingServiceLevel:quote.serviceLevel||null,shippingServiceLabel:quote.serviceLabel||'NOVA Delivery',shippingDeliveryEstimate:quote.deliveryEstimate||null,shippingEstimatedMaxDays:Number.isFinite(Number(quote.estimatedOrderToDoorMaxDays))?Number(quote.estimatedOrderToDoorMaxDays):null,shippingAmountMajor:Number(quote.shippingAmountMajor),shippingCurrency:quote.currency,shippingAmountUSD:Number(quote.logisticPrice),shippingETA:quote.logisticAging||null,shippingQuoteExpiresAt:quote.quoteExpiresAt};
     }
     closeDeliveryDetailsModal();
     onSubmit(Object.assign({name,phone,address,city,state,country},quoteDetails));
@@ -907,19 +907,34 @@ async function cjRefreshShippingEstimate(product,selectedVariant){
       if(!routeSelect)return;
       const elOption=document.createElement('option');
       elOption.value=option.quoteId;
-      const eta=option.logisticAging?(' · estimated '+option.logisticAging):'';
-      const badge=option.isPreferred?' (preferred)':(option.isExpress?' (express)':'');
+      elOption.dataset.serviceLevel=String(option.serviceLevel||'');
+      const serviceLabel=option.serviceLabel||'NOVA Delivery';
+      const eta=option.deliveryEstimate?(' · estimated '+option.deliveryEstimate):'';
       const blocked=option.blockedByPricingPolicy===true;
       elOption.disabled=blocked;
-      elOption.textContent=option.logisticName+badge+' · '+formatChargeMajor(option.shippingAmountMajor,currency)+eta+(blocked?' · unavailable at this delivery cost':'');
+      elOption.textContent=serviceLabel+' · '+formatChargeMajor(option.shippingAmountMajor,currency)+eta+(blocked?' · unavailable at this delivery cost':'');
       routeSelect.appendChild(elOption);
     });
     if(routeSelect){
       routeSelect.disabled=false;
-      if(!routeSelect.options.length){routeSelect.disabled=true;if(el)el.textContent='CJ returned no usable route prices. No payment has been taken.';if(btn)btn.disabled=true;return;}
-      const firstEligible=Array.from(routeSelect.options).find(option=>!option.disabled);
-      if(!firstEligible){routeSelect.value='';if(el)el.textContent='None of the available routes meets LEXDEN NOVA’s affordability limit for this item. Please choose a locally stocked alternative or try a bundle.';if(btn)btn.disabled=true;return;}
-      routeSelect.value=firstEligible.value;
+      const serviceOptions=Array.from(routeSelect.options);
+      if(!serviceOptions.length){routeSelect.disabled=true;if(el)el.textContent='CJ returned no usable delivery service prices. No payment has been taken.';if(btn)btn.disabled=true;return;}
+      const firstEligible=serviceOptions.find(option=>!option.disabled);
+      if(!firstEligible){routeSelect.value='';if(el)el.textContent='No delivery service meets NOVA’s affordability limit for this item. Choose a better-priced or locally stocked alternative.';if(btn)btn.disabled=true;return;}
+      const smartOption=serviceOptions.find(option=>!option.disabled&&option.dataset.serviceLevel==='smart');
+      if(smartOption){
+        routeSelect.value=smartOption.value;
+      }else{
+        const placeholder=document.createElement('option');
+        placeholder.value='';
+        placeholder.textContent='No Smart route meets the 45-day target. Select an alternative service to continue.';
+        placeholder.selected=true;
+        routeSelect.insertBefore(placeholder,routeSelect.firstChild);
+        routeSelect.value='';
+        if(el)el.textContent='No route meets NOVA Smart Delivery’s 45-day target. An alternative service may be available; review its estimate and full cost, then select it deliberately.';
+        btn.disabled=true;
+        return;
+      }
     }
     updateCjShippingChoice(product,selectedVariant);
   }catch(error){
@@ -941,18 +956,18 @@ function updateCjShippingChoice(product,selectedVariant){
   const currency=checkoutChargeCurrency();
   const itemAmount=checkoutItemAmountMajor(product,selectedVariant,currency);
   const ratio=itemAmount>0?Number(quote.shippingAmountMajor)/itemAmount:null;
-  let message='Shipping: '+formatChargeMajor(quote.shippingAmountMajor,currency)+'. Total before payment: '+formatChargeMajor(Number(quote.productAmountMajor)+Number(quote.shippingAmountMajor),currency)+'.';
-  if(quote.logisticAging)message+=' Estimated transit: '+quote.logisticAging+'. This is an estimate, not a guarantee.';
+  let message=(quote.serviceLabel||'NOVA Delivery')+': '+formatChargeMajor(quote.shippingAmountMajor,currency)+'. Total before payment: '+formatChargeMajor(Number(quote.productAmountMajor)+Number(quote.shippingAmountMajor),currency)+'.';
+  if(quote.deliveryEstimate)message+=' Estimated order-to-door time: '+quote.deliveryEstimate+'. This is an estimate, not a guarantee.';
+  else if(quote.logisticAging)message+=' Supplier transit estimate: '+quote.logisticAging+'; processing may add time.';
+  if(quote.requiresExplicitChoice===true)message+=' This is a slower alternative, not NOVA Smart Delivery. Continue only if you accept the longer estimate.';
   const policy=(DB.content&&DB.content.commercePricingPolicy&&DB.content.commercePricingPolicy.shipping)||{};
-  const warningRatio=Number(policy.highShippingItemPriceRatioWarning)||0.6;
-  const blockRatio=Number(policy.highShippingItemPriceRatioBlock)||1.5;
+  const warningRatio=Math.min(Number(policy.highShippingItemPriceRatioWarning)||0.25,0.25);
+  const blockRatio=Math.min(Number(policy.highShippingItemPriceRatioBlock)||0.35,0.35);
   if(ratio!==null&&ratio>=blockRatio){
     message+=' This route exceeds the shipping-to-item affordability limit.';
-    if(policy.enforceShippingRatioBlock===true){
-      el.textContent=message+' Select another route or a locally stocked/bundled alternative.';
-      btn.disabled=true;
-      return;
-    }
+    el.textContent=message+' Select another route or a locally stocked/bundled alternative.';
+    btn.disabled=true;
+    return;
   } else if(ratio!==null&&ratio>=warningRatio)message+=' Shipping is high relative to this item price, so compare routes before paying.';
   el.textContent=message;
   btn.disabled=false;

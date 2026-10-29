@@ -7,16 +7,59 @@ const crypto = require('node:crypto');
 const { setCors, cjFetch, writeSyncLog } = require('./cj-shared');
 const { getDb } = require('./affiliate/shared');
 const { resolveProductSelection } = require('./product-variants');
-const { getCommercePricingPolicy, calculateShippingCharge, sortShippingOptions, shippingRatio } = require('./commerce-pricing');
+const { getCommercePricingPolicy, calculateShippingCharge, rateForCurrency, selectShippingServices, sortShippingOptions, shippingRatio } = require('./commerce-pricing');
 
 function countryToIso2(value) {
   const text = String(value || '').trim();
+  if (text.toUpperCase() === 'UK') return 'GB';
+  if (text.toUpperCase() === 'EU') return null; // a region is not a country-of-origin code
   if (/^[A-Z]{2}$/.test(text)) return text;
-  return ({ nigeria: 'NG', 'united states': 'US', 'united kingdom': 'GB', ghana: 'GH', kenya: 'KE', 'south africa': 'ZA' })[text.toLowerCase()] || null;
+  return ({
+    nigeria: 'NG', china: 'CN', 'united states': 'US', 'united states of america': 'US',
+    'united kingdom': 'GB', uk: 'GB', ghana: 'GH', kenya: 'KE', 'south africa': 'ZA',
+    poland: 'PL', germany: 'DE', france: 'FR', netherlands: 'NL', italy: 'IT', spain: 'ES',
+  })[text.toLowerCase()] || null;
 }
 
 function roundTotal(value, currency) {
   return currency === 'NGN' ? Math.ceil(value) : Math.round(value * 100) / 100;
+}
+
+function stockRowsFromResponse(data) {
+  if (Array.isArray(data)) return data;
+  if (!data || typeof data !== 'object') return [];
+  // CJ integrations may return raw rows or wrap warehouse rows under data/list.
+  // Prefer warehouse-specific arrays so quantities are never treated as a total
+  // for every warehouse.
+  for (const key of ['list', 'rows', 'byWarehouse', 'warehouseList', 'inventories', 'warehouses', 'data']) {
+    if (Array.isArray(data[key])) return data[key];
+  }
+  for (const key of ['data', 'stock', 'result']) {
+    if (data[key] && typeof data[key] === 'object') {
+      const nested = stockRowsFromResponse(data[key]);
+      if (nested.length) return nested;
+    }
+  }
+  return [data];
+}
+
+function stockQuantity(row) {
+  for (const key of ['storageNum', 'stockNum', 'num', 'quantity', 'qty', 'availableStock', 'inventoryNum', 'total', 'stock']) {
+    if (row && row[key] != null && row[key] !== '') {
+      const n = Number(row[key]);
+      if (Number.isFinite(n) && n >= 0) return n;
+    }
+  }
+  return null;
+}
+
+function stockOriginCountry(row) {
+  if (!row || typeof row !== 'object') return null;
+  for (const key of ['area', 'areaCode', 'countryCode', 'country', 'storageCountryCode', 'warehouseCountryCode']) {
+    const code = countryToIso2(row[key]);
+    if (code) return code;
+  }
+  return null;
 }
 
 module.exports = async (req, res) => {
@@ -33,7 +76,7 @@ module.exports = async (req, res) => {
   const checkoutQuote = typeof body.productId === 'string' && body.productId.length > 0;
   const currency = String(body.currency || 'NGN').toUpperCase();
 
-  if (!endCountryCode || !startCountryCode) {
+  if (!endCountryCode || (!checkoutQuote && !startCountryCode)) {
     return res.status(200).json({ ok: false, error: 'Choose a supported delivery country before checking shipping.' });
   }
   if (!products.length || products.some(p => !p || !p.vid)) {
@@ -82,35 +125,86 @@ module.exports = async (req, res) => {
       policy = getCommercePricingPolicy(settingsDoc);
     }
 
-    const r = await cjFetch('/logistic/freightCalculate', {
-      method: 'POST',
-      body: {
-        startCountryCode,
-        endCountryCode,
-        products: products.map(p => ({
-          vid: String(p.vid),
-          quantity: Math.max(1, parseInt(p.quantity, 10) || 1),
-        })),
-      },
-    });
-    const tookMs = Date.now() - started;
+    // For storefront checkout, derive origin countries from the LIVE warehouse
+    // inventory for the exact selected variant. Never trust the browser's origin.
+    let sourceCountryCodes = [startCountryCode];
+    if (checkoutQuote) {
+      const stockR = await cjFetch('/product/stock/queryByVid', { query: { vid: productVariantId } });
+      if (!stockR.ok) {
+        await writeSyncLog({ event: 'shipping.calc', success: false, message: 'Could not verify live warehouse inventory before freight quote', tookMs: Date.now() - started, detail: { productId: product.id, variantId: productVariantId, code: stockR.code || null } });
+        return res.status(200).json({ ok: false, error: 'Live stock location could not be verified. No payment has been taken; please retry.' });
+      }
+      const stockRows = stockRowsFromResponse(stockR.data);
+      sourceCountryCodes = [...new Set(stockRows
+        .filter(row => {
+          const qty = stockQuantity(row);
+          return qty != null && qty > 0 && stockOriginCountry(row);
+        })
+        .map(stockOriginCountry))];
 
-    if (!r.ok) {
-      await writeSyncLog({ event: 'shipping.calc', success: false, message: r.message, tookMs, detail: { endCountryCode, products, checkoutQuote } });
+      // Fallback only to supplier-origin metadata, never to a client-supplied origin.
+      if (!sourceCountryCodes.length) {
+        const catalogOrigin = countryToIso2(product.physical.cj.sourceCountry || product.physical.sourceCountry);
+        if (catalogOrigin && stockRows.some(row => {
+          const qty = stockQuantity(row);
+          return qty != null && qty > 0;
+        })) sourceCountryCodes = [catalogOrigin];
+      }
+      if (!sourceCountryCodes.length) {
+        await writeSyncLog({ event: 'shipping.calc', success: false, message: 'No verifiable stocked warehouse origin for this CJ variant', tookMs: Date.now() - started, detail: { productId: product.id, variantId: productVariantId } });
+        return res.status(200).json({ ok: false, error: 'NOVA could not verify a stocked shipping origin for this variant. No payment has been taken.' });
+      }
+
+      // Query a bounded number of origins, preferring Nigeria if it really has stock.
+      sourceCountryCodes.sort((a, b) => (a === endCountryCode ? -1 : b === endCountryCode ? 1 : 0));
+      sourceCountryCodes = sourceCountryCodes.slice(0, 5);
+    }
+
+    const freightResults = await Promise.all(sourceCountryCodes.map(async origin => ({
+      origin,
+      result: await cjFetch('/logistic/freightCalculate', {
+        method: 'POST',
+        body: {
+          startCountryCode: origin,
+          endCountryCode,
+          products: products.map(p => ({
+            vid: String(p.vid),
+            quantity: Math.max(1, parseInt(p.quantity, 10) || 1),
+          })),
+        },
+      }),
+    })));
+    const tookMs = Date.now() - started;
+    const successfulResults = freightResults.filter(entry => entry.result && entry.result.ok);
+    if (!successfulResults.length) {
+      const firstFailure = freightResults.find(entry => entry.result && !entry.result.ok);
+      const errorCode = firstFailure && firstFailure.result.code;
+      await writeSyncLog({
+        event: 'shipping.calc',
+        success: false,
+        message: firstFailure && firstFailure.result.message || 'No freight calculation succeeded',
+        tookMs,
+        detail: { endCountryCode, products, checkoutQuote, sourceCountryCodes },
+      });
       return res.status(200).json({
         ok: false,
-        error: r.code === 'RATE_LIMITED'
+        error: errorCode === 'RATE_LIMITED'
           ? 'Shipping is busy right now. Please try again in a moment.'
-          : 'No valid shipping method was returned for this destination.',
+          : 'No valid shipping method was returned for this destination and stocked origin.',
       });
     }
 
-    const raw = Array.isArray(r.data) ? r.data : (r.data && r.data.list) || [];
+    const raw = successfulResults.flatMap(entry => {
+      const data = entry.result.data;
+      const rows = Array.isArray(data) ? data : (data && data.list) || [];
+      return rows.map(option => ({ ...option, startCountryCode: entry.origin }));
+    });
     let options = raw.map(o => ({
       logisticName: String(o.logisticName || o.logisticNameEn || ''),
       logisticPrice: o.logisticPrice != null ? Number(o.logisticPrice) : null,
       currency: 'USD',
       logisticAging: o.logisticAging || o.aging || null,
+      startCountryCode: countryToIso2(o.startCountryCode) || startCountryCode,
     })).filter(o => o.logisticName && o.logisticPrice != null && Number.isFinite(o.logisticPrice) && o.logisticPrice >= 0);
 
     if (!options.length) {
@@ -122,7 +216,27 @@ module.exports = async (req, res) => {
       const quoteTtlMs = policy.shipping.quoteTtlMinutes * 60 * 1000;
       const createdAt = new Date();
       const expiresAt = new Date(createdAt.getTime() + quoteTtlMs);
-      options = sortShippingOptions(options, settingsDoc);
+      const displayRate = rateForCurrency(settingsDoc, currency);
+      const productAmountUSD = currency === 'USD'
+        ? Number(selection.price)
+        : (displayRate ? Number(selection.price) / displayRate : null);
+      options = selectShippingServices(options, settingsDoc, {
+        productAmountUSD,
+        processingDays: policy.shipping.processingDays,
+      });
+      if (!options.length) {
+        await writeSyncLog({
+          event: 'shipping.calc',
+          success: true,
+          message: 'No route meets NOVA service-level, speed and affordability rules',
+          tookMs: Date.now() - started,
+          detail: { endCountryCode, productId: product.id, currency, rawRouteCount: raw.length },
+        });
+        return res.status(200).json({
+          ok: false,
+          error: 'No delivery option currently meets NOVA’s speed and affordability rules for this product. Choose another item or contact support.',
+        });
+      }
       const quoteOptions = [];
       for (const option of options) {
         const shippingAmountMajor = calculateShippingCharge(option.logisticPrice, currency, settingsDoc);
@@ -149,7 +263,15 @@ module.exports = async (req, res) => {
           shippingAmountUSD: option.logisticPrice,
           logisticName: option.logisticName,
           logisticAging: option.logisticAging,
-          startCountryCode,
+          serviceLevel: option.serviceLevel,
+          serviceLabel: option.serviceLabel,
+          deliveryEstimate: option.deliveryEstimate,
+          estimatedOrderToDoorMinDays: option.estimatedOrderToDoorMinDays,
+          estimatedOrderToDoorMaxDays: option.estimatedOrderToDoorMaxDays,
+          processingAllowanceDays: option.processingAllowanceDays,
+          requiresExplicitChoice: option.requiresExplicitChoice === true,
+          serviceRationale: option.serviceRationale || null,
+          startCountryCode: option.startCountryCode || startCountryCode,
           endCountryCode,
           createdAt,
           expiresAt,
@@ -191,3 +313,7 @@ module.exports = async (req, res) => {
     return res.status(200).json({ ok: false, error: 'Shipping calculation failed. No payment has been taken.' });
   }
 };
+
+module.exports.stockRowsFromResponse = stockRowsFromResponse;
+module.exports.stockQuantity = stockQuantity;
+module.exports.stockOriginCountry = stockOriginCountry;
