@@ -13,6 +13,7 @@ test('CJ order payload receives the exact route chosen at checkout', () => {
       name: 'Customer',
       phone: '08000000000',
       shippingMethod: 'CJPacket Postal',
+      shippingOriginCountry: 'NG',
       shippingQuoteId: '12345678-1234-1234-1234-123456789abc',
     },
     email: 'buyer@example.com',
@@ -20,6 +21,7 @@ test('CJ order payload receives the exact route chosen at checkout', () => {
   assert.equal(payload.logisticName, 'CJPacket Postal');
   assert.equal(payload.shippingCountryCode, 'NG');
   assert.equal(payload.shippingCountry, 'Nigeria');
+  assert.equal(payload.fromCountryCode, 'NG');
   assert.equal(payload.email, 'buyer@example.com');
   assert.equal(payload.payType, 3);
   assert.equal(payload.products[0].vid, 'cj-variant-1');
