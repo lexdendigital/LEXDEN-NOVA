@@ -2,8 +2,10 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
+  DEFAULT_POLICY,
   calculateRetailPriceUSD,
   calculateShippingCharge,
+  getCommercePricingPolicy,
   parseShippingAging,
   selectShippingServices,
   sortShippingOptions,
@@ -148,4 +150,46 @@ test('rejects unknown delivery estimates and routes whose freight ratio breaks a
   ], settings, { productAmountUSD: 10 });
 
   assert.deepEqual(services, []);
+});
+
+
+test('checks affordability after NGN conversion and checkout fee buffers, not raw freight alone', () => {
+  const services = selectShippingServices([
+    { logisticName: 'PostNL', logisticPrice: 2.55, logisticAging: '10-20' },
+  ], settings, {
+    productAmountUSD: 7.5,
+    productAmountMajor: 10073.18,
+    currency: 'NGN',
+    processingDays: 5,
+  });
+
+  // Raw freight is 34% of the USD item price, but the actual NGN amount
+  // charged after FX and payment-fee buffers exceeds the 35% hard cap.
+  assert.deepEqual(services, []);
+});
+
+test('legacy admin values cannot weaken NOVA delivery and affordability guardrails', () => {
+  const policy = getCommercePricingPolicy({
+    commercePricingPolicy: {
+      shipping: {
+        maxDeliveryDays: 90,
+        processingDays: 0,
+        highShippingItemPriceRatioWarning: 0.6,
+        highShippingItemPriceRatioBlock: 1.5,
+        enforceShippingRatioBlock: false,
+        smartMaxShippingPremiumPct: 1.5,
+        economyMinSavingUSD: 0,
+        economyMinSavingPct: 0,
+      },
+    },
+  }).shipping;
+
+  assert.equal(policy.maxDeliveryDays, 45);
+  assert.equal(policy.processingDays, DEFAULT_POLICY.shipping.processingDays);
+  assert.equal(policy.highShippingItemPriceRatioWarning, 0.25);
+  assert.equal(policy.highShippingItemPriceRatioBlock, 0.35);
+  assert.equal(policy.enforceShippingRatioBlock, true);
+  assert.equal(policy.smartMaxShippingPremiumPct, 0.4);
+  assert.equal(policy.economyMinSavingUSD, 2.5);
+  assert.equal(policy.economyMinSavingPct, 0.2);
 });
