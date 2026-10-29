@@ -311,7 +311,7 @@ function openProductForm(id){
       </div>
       <div class="form-field"><label>Seller</label><input id="f_seller" value="${p?escapeHtml(p.seller||''):'Lexden Digital'}"></div>
       <div class="form-field"><label>Affiliate / purchase link</label><input id="f_link" value="${p?p.affiliateLink:'#'}"></div>
-      <div class="form-field"><label>Status</label>${customSelect('f_status', p&&p.status||'published', [{value:'published',label:'Published'},{value:'draft',label:'Draft'}], '')}</div>
+      <div class="form-field"><label>Status</label>${customSelect('f_status', p ? (p.status||'draft') : (isPhysicalCategorySelected?'draft':'published'), [{value:'published',label:'Published'},{value:'draft',label:'Draft'}], '')}</div>
       <div class="form-field"><label>Tags (comma separated)</label><input id="f_tags" value="${p?(p.tags||[]).join(', '):''}"></div>
       <div class="form-field">
         <label><input type="checkbox" id="f_affiliateEnabled" ${p&&p.affiliateEnabled?'checked':''}> Allow Nova Affiliates to earn commission on this product</label>
@@ -389,6 +389,17 @@ function openProductForm(id){
         <div class="form-field"><label>Supplier SKU</label><input id="f_supplierSku" placeholder="Supplier's own product code" value="${escapeHtml((p&&p.physical&&p.physical.supplierSku)||'')}"></div>
         <div class="form-field"><label>Supplier cost <span class="text-2 small">(what you pay them — never shown to shoppers)</span></label><input id="f_supplierCost" type="number" min="0" step="0.01" value="${p&&p.physical&&p.physical.supplierCost!=null?p.physical.supplierCost:''}"></div>
         <div class="form-field"><label>Supplier currency</label><input id="f_supplierCurrency" placeholder="e.g. NGN, USD, CNY" value="${escapeHtml((p&&p.physical&&p.physical.supplierCurrency)||'')}"></div>
+      </div>
+      <div class="card" style="padding:12px;margin:12px 0;border:1px solid var(--border);">
+        <h4 style="font-size:13px;margin-bottom:6px;">CJ pricing and fulfilment review</h4>
+        <p class="text-2 small" style="margin-bottom:8px;">Required before publishing a CJ-linked physical product. Verify live stock at the selected origin, current supplier cost and currency, current shipping quote, processing plus delivery estimate, complete customer total, Nigerian competitor prices, contribution margin and supplier-wallet funding.</p>
+        <div class="form-field">
+          <label><input type="checkbox" id="f_pricingReviewComplete" ${p&&p.pricingReviewRequired===false&&String(p.pricingReviewNotes||'').trim().length>=40&&p.pricingReviewCompletedAt?'checked':''}> I completed the review and confirmed the product passes NOVA's pricing and delivery rules.</label>
+        </div>
+        <div class="form-field" style="margin-bottom:0;">
+          <label>Review evidence (at least 40 characters)</label>
+          <textarea id="f_pricingReviewNotes" rows="3" placeholder="Record supplier cost/stock, selected route and end-to-door estimate, full delivered price, local comparison source and price, margin and funding readiness.">${escapeHtml((p&&p.pricingReviewNotes)||'')}</textarea>
+        </div>
       </div>
       <!-- CJ Dropshipping mapping block (README §32) — collapsible, only
            meaningful once the product was Imported from CJ (see
@@ -734,6 +745,39 @@ function updateDiscountPreview(){
 // the cloud write, only claim success and close the form if it really
 // reached Firestore, and leave the form open with everything still
 // filled in in on failure so retrying is one tap, not a re-type.
+function cjPricingReviewSnapshot(product){
+  const p=product||{};
+  const physical=p.physical||{};
+  const cj=physical.cj||{};
+  const money=value=>{
+    if(value==null||value==='')return null;
+    const n=Number(value);
+    return Number.isFinite(n)?Number(n.toFixed(2)):String(value);
+  };
+  const variants=(Array.isArray(p.variants)?p.variants:[]).map(v=>({
+    id:String(v&&v.id||''),
+    price:money(v&&v.price),
+    salePrice:money(v&&v.salePrice),
+    cjVariantId:String(v&&v.cjVariantId||''),
+    sku:String(v&&v.sku||''),
+    active:!v||v.active!==false,
+    available:!v||v.available!==false,
+  })).sort((a,b)=>a.id.localeCompare(b.id));
+  return JSON.stringify({
+    price:money(p.price),salePrice:money(p.salePrice),
+    supplierId:String(physical.supplierId||''),supplierSku:String(physical.supplierSku||''),
+    supplierCost:money(physical.supplierCost),supplierCurrency:String(physical.supplierCurrency||'').trim().toUpperCase(),
+    shippingCountries:(Array.isArray(physical.shippingCountries)?physical.shippingCountries:[]).map(v=>String(v||'').trim()).filter(Boolean).sort(),
+    deliveryEstimate:String(physical.deliveryEstimate||''),
+    cjProductId:String(cj.productId||''),cjVariantId:String(cj.variantId||''),cjSku:String(cj.sku||''),
+    sourceCountry:String(cj.sourceCountry||physical.sourceCountry||'').trim().toUpperCase(),variants
+  });
+}
+function cjPricingInputsChanged(currentProduct,nextProduct){
+  if(!currentProduct)return true;
+  return cjPricingReviewSnapshot(currentProduct)!==cjPricingReviewSnapshot(nextProduct);
+}
+
 async function saveProduct(id){
   const name = $('#f_name').value.trim();
   const rawNairaPrice = ($('#f_price')?.value || '').trim();
@@ -788,6 +832,9 @@ async function saveProduct(id){
     options: variantData.options,
     variants: variantData.variants,
     pricingReviewRequired: publishing ? false : !!(id&&findProduct(id)?.pricingReviewRequired),
+    pricingReviewNotes: existingProduct?.pricingReviewNotes || '',
+    pricingReviewCompletedAt: existingProduct?.pricingReviewCompletedAt || null,
+    pricingReviewCompletedBy: existingProduct?.pricingReviewCompletedBy || null,
     itemCode:$('#f_itemCode').value, seller:$('#f_seller').value,
     shareId: (id && findProduct(id)?.shareId) || (/^p\d{1,4}$/.test(String(id||'')) ? String(id) : nextProductShareId(id)),
     image: coverImage,
@@ -873,6 +920,43 @@ async function saveProduct(id){
         lastSyncedAt: (id && findProduct(id)?.physical?.cj?.lastSyncedAt) || null,
       },
     };
+  }
+  const hasCjPhysicalMapping = data.productType==='PHYSICAL' && !!String(data.physical&&data.physical.cj&&data.physical.cj.productId||'').trim();
+  if(hasCjPhysicalMapping){
+    const reviewNotes=String($('#f_pricingReviewNotes')?.value||'').trim();
+    const reviewChecked=$('#f_pricingReviewComplete')?.checked===true;
+    if(!existingProduct){
+      if(data.status==='published'){
+        toast('New CJ physical products must be saved as Draft first. Verify live stock, shipping, market price and funding before reviewing and publishing.','error');
+        return;
+      }
+      data.pricingReviewRequired=true;
+      data.pricingReviewNotes=reviewNotes;
+      data.pricingReviewCompletedAt=null;
+      data.pricingReviewCompletedBy=null;
+    }else{
+      const economicsChanged=cjPricingInputsChanged(existingProduct,data);
+      if(economicsChanged){
+        if(data.status==='published'){
+          toast('Publishing blocked: price, supplier cost, variant mapping, destination or delivery inputs changed. Save as Draft first, refresh the live quote and market comparison, then complete a fresh review before publishing.','error');
+          return;
+        }
+        data.pricingReviewRequired=true;
+        data.pricingReviewNotes=reviewNotes;
+        data.pricingReviewCompletedAt=null;
+        data.pricingReviewCompletedBy=null;
+      }else{
+        const reviewPassed=reviewChecked&&reviewNotes.length>=40;
+        if(data.status==='published'&&!reviewPassed){
+          toast('Cannot publish this CJ product yet. Complete the pricing and fulfilment checklist and record at least 40 characters of review evidence.','error');
+          return;
+        }
+        data.pricingReviewRequired=!reviewPassed;
+        data.pricingReviewNotes=reviewNotes;
+        data.pricingReviewCompletedAt=reviewPassed?new Date().toISOString():null;
+        data.pricingReviewCompletedBy=reviewPassed?(window.__fbAdminEmail||'admin'):null;
+      }
+    }
   }
   if(id){
     const idx = list.findIndex(p=>p.id===id);
