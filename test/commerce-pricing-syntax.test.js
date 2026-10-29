@@ -8,6 +8,9 @@ const vm = require('node:vm');
 const root = path.resolve(__dirname, '..');
 const files = [
   'js/state.js',
+  'admin/admin.js',
+  'api/cj-product-review.js',
+  'mcp/tools/catalog.js',
   'api/commerce-pricing.js',
   'api/cj-shipping.js',
   'api/cj-order.js',
