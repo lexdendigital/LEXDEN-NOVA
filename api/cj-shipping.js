@@ -7,7 +7,7 @@ const crypto = require('node:crypto');
 const { setCors, cjFetch, writeSyncLog } = require('./cj-shared');
 const { getDb } = require('./affiliate/shared');
 const { resolveProductSelection } = require('./product-variants');
-const { getCommercePricingPolicy, calculateShippingCharge, sortShippingOptions, shippingRatio } = require('./commerce-pricing');
+const { getCommercePricingPolicy, calculateShippingCharge, rateForCurrency, selectShippingServices, sortShippingOptions, shippingRatio } = require('./commerce-pricing');
 
 function countryToIso2(value) {
   const text = String(value || '').trim();
@@ -122,7 +122,27 @@ module.exports = async (req, res) => {
       const quoteTtlMs = policy.shipping.quoteTtlMinutes * 60 * 1000;
       const createdAt = new Date();
       const expiresAt = new Date(createdAt.getTime() + quoteTtlMs);
-      options = sortShippingOptions(options, settingsDoc);
+      const displayRate = rateForCurrency(settingsDoc, currency);
+      const productAmountUSD = currency === 'USD'
+        ? Number(selection.price)
+        : (displayRate ? Number(selection.price) / displayRate : null);
+      options = selectShippingServices(options, settingsDoc, {
+        productAmountUSD,
+        processingDays: policy.shipping.processingDays,
+      });
+      if (!options.length) {
+        await writeSyncLog({
+          event: 'shipping.calc',
+          success: true,
+          message: 'No route meets NOVA service-level, speed and affordability rules',
+          tookMs: Date.now() - started,
+          detail: { endCountryCode, productId: product.id, currency, rawRouteCount: raw.length },
+        });
+        return res.status(200).json({
+          ok: false,
+          error: 'No delivery option currently meets NOVA’s speed and affordability rules for this product. Choose another item or contact support.',
+        });
+      }
       const quoteOptions = [];
       for (const option of options) {
         const shippingAmountMajor = calculateShippingCharge(option.logisticPrice, currency, settingsDoc);
@@ -149,6 +169,14 @@ module.exports = async (req, res) => {
           shippingAmountUSD: option.logisticPrice,
           logisticName: option.logisticName,
           logisticAging: option.logisticAging,
+          serviceLevel: option.serviceLevel,
+          serviceLabel: option.serviceLabel,
+          deliveryEstimate: option.deliveryEstimate,
+          estimatedOrderToDoorMinDays: option.estimatedOrderToDoorMinDays,
+          estimatedOrderToDoorMaxDays: option.estimatedOrderToDoorMaxDays,
+          processingAllowanceDays: option.processingAllowanceDays,
+          requiresExplicitChoice: option.requiresExplicitChoice === true,
+          serviceRationale: option.serviceRationale || null,
           startCountryCode,
           endCountryCode,
           createdAt,
