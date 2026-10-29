@@ -2,8 +2,10 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
+  DEFAULT_POLICY,
   calculateRetailPriceUSD,
   calculateShippingCharge,
+  getCommercePricingPolicy,
   parseShippingAging,
   selectShippingServices,
   sortShippingOptions,
