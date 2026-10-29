@@ -55,8 +55,8 @@ function normalizePaystackBalances(data) {
     .map((row) => ({ ...row, balanceMajor: row.balanceMinor / 100 }));
 }
 
-async function paystackBalanceSnapshot({ mode, fetchImpl = fetch, timeoutMs = 6000 } = {}) {
-  const key = mode === 'live' || mode === 'test' ? keyForMode(mode) : await resolvePaystackSecretKey();
+async function paystackBalanceSnapshot({ mode, secretKey, fetchImpl = fetch, timeoutMs = 6000 } = {}) {
+  const key = secretKey || (mode === 'live' || mode === 'test' ? keyForMode(mode) : await resolvePaystackSecretKey());
   if (!key) return { ok: false, error: 'paystack_key_unavailable', balances: [] };
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), timeoutMs);
@@ -78,7 +78,7 @@ async function paystackBalanceSnapshot({ mode, fetchImpl = fetch, timeoutMs = 60
   }
 }
 
-async function fundCjOrder({ cjFetch, cjOrderId, requiredUSD, paystackMode, fetchImpl } = {}) {
+async function fundCjOrder({ cjFetch, cjOrderId, requiredUSD, paystackMode, paystackSecretKey, fetchImpl } = {}) {
   if (typeof cjFetch !== 'function') throw new Error('cjFetch is required');
   if (!cjOrderId) return { ok: false, state: 'invalid_cj_order', message: 'CJ order id is missing.' };
 
@@ -89,7 +89,7 @@ async function fundCjOrder({ cjFetch, cjOrderId, requiredUSD, paystackMode, fetc
       state: 'cj_balance_unknown',
       message: balR.message || 'Could not read CJ wallet balance.',
       cjCode: balR.code || null,
-      paystack: await paystackBalanceSnapshot({ mode: paystackMode, fetchImpl }),
+      paystack: await paystackBalanceSnapshot({ mode: paystackMode, secretKey: paystackSecretKey, fetchImpl }),
     };
   }
 
@@ -102,7 +102,7 @@ async function fundCjOrder({ cjFetch, cjOrderId, requiredUSD, paystackMode, fetc
       message: 'CJ did not return a usable wallet balance or order amount.',
       cjBalanceUSD: balanceUSD,
       requiredUSD: needUSD,
-      paystack: await paystackBalanceSnapshot({ mode: paystackMode, fetchImpl }),
+      paystack: await paystackBalanceSnapshot({ mode: paystackMode, secretKey: paystackSecretKey, fetchImpl }),
     };
   }
 
@@ -115,7 +115,7 @@ async function fundCjOrder({ cjFetch, cjOrderId, requiredUSD, paystackMode, fetc
       cjBalanceUSD: balanceUSD,
       requiredUSD: needUSD,
       shortfallUSD,
-      paystack: await paystackBalanceSnapshot({ mode: paystackMode, fetchImpl }),
+      paystack: await paystackBalanceSnapshot({ mode: paystackMode, secretKey: paystackSecretKey, fetchImpl }),
     };
   }
 
@@ -131,7 +131,7 @@ async function fundCjOrder({ cjFetch, cjOrderId, requiredUSD, paystackMode, fetc
       cjCode: payR.code || null,
       cjBalanceUSD: balanceUSD,
       requiredUSD: needUSD,
-      paystack: await paystackBalanceSnapshot({ mode: paystackMode, fetchImpl }),
+      paystack: await paystackBalanceSnapshot({ mode: paystackMode, secretKey: paystackSecretKey, fetchImpl }),
     };
   }
 
