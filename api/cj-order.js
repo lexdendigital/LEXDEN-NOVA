@@ -60,6 +60,10 @@ function countryToIso2(country) {
   return COUNTRY_ISO2[s.toLowerCase()] || null;
 }
 
+function canResumeSupplierOrderStatus(status) {
+  return ['paid', 'processing', 'supplier_created', 'funding_required'].includes(status);
+}
+
 
 function paystackBalanceText(snapshot) {
   if (!snapshot || !snapshot.ok || !Array.isArray(snapshot.balances) || !snapshot.balances.length) {
@@ -100,8 +104,7 @@ module.exports = async (req, res) => {
     if (!snap.exists) return res.status(200).json({ ok: false, error: 'unknown_order' });
     const order = snap.data();
 
-    const supplierResumeStates = new Set(['paid', 'processing', 'supplier_created', 'funding_required']);
-    if (!supplierResumeStates.has(order.status)) {
+    if (!canResumeSupplierOrderStatus(order.status)) {
       return res.status(200).json({ ok: false, error: 'not_paid', message: 'This order has not been verified as paid.' });
     }
     if (!order.delivery) {
@@ -230,6 +233,7 @@ module.exports = async (req, res) => {
 
 // Export the pure payload builder for focused unit tests; the default export remains the HTTP handler.
 module.exports.buildCjOrderPayload = buildCjOrderPayload;
+module.exports.canResumeSupplierOrderStatus = canResumeSupplierOrderStatus;
  + Number(funding.requiredUSD).toFixed(2)}`,
         `CJ wallet balance: ${funding.cjBalanceUSD == null ? 'Unknown' : '
 module.exports = async (req, res) => {
