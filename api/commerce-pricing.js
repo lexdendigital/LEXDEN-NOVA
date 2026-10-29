@@ -68,8 +68,16 @@ function getCommercePricingPolicy(settings = {}) {
       economyMinSavingUSD: finiteNonNegative(rawShipping.economyMinSavingUSD) ?? defaults.shipping.economyMinSavingUSD,
       economyMinSavingPct: boundedPct(Number(rawShipping.economyMinSavingPct) * 100, defaults.shipping.economyMinSavingPct * 100, 100) / 100,
       allowEconomyOverMaxDays: rawShipping.allowEconomyOverMaxDays !== false,
-      highShippingItemPriceRatioWarning: boundedPct(Number(rawShipping.highShippingItemPriceRatioWarning) * 100, defaults.shipping.highShippingItemPriceRatioWarning * 100, 500) / 100,
-      highShippingItemPriceRatioBlock: boundedPct(Number(rawShipping.highShippingItemPriceRatioBlock) * 100, defaults.shipping.highShippingItemPriceRatioBlock * 100, 500) / 100,
+      // Legacy settings may contain permissive 60%/150% values. Keep the agreed
+      // affordability warning/block as hard ceilings while allowing stricter admin values.
+      highShippingItemPriceRatioWarning: Math.min(
+        boundedPct(Number(rawShipping.highShippingItemPriceRatioWarning) * 100, defaults.shipping.highShippingItemPriceRatioWarning * 100, 500) / 100,
+        defaults.shipping.highShippingItemPriceRatioWarning
+      ),
+      highShippingItemPriceRatioBlock: Math.min(
+        boundedPct(Number(rawShipping.highShippingItemPriceRatioBlock) * 100, defaults.shipping.highShippingItemPriceRatioBlock * 100, 500) / 100,
+        defaults.shipping.highShippingItemPriceRatioBlock
+      ),
       enforceShippingRatioBlock: rawShipping.enforceShippingRatioBlock !== false,
     },
   };
