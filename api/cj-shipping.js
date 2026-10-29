@@ -303,3 +303,7 @@ module.exports = async (req, res) => {
     return res.status(200).json({ ok: false, error: 'Shipping calculation failed. No payment has been taken.' });
   }
 };
+
+module.exports.stockRowsFromResponse = stockRowsFromResponse;
+module.exports.stockQuantity = stockQuantity;
+module.exports.stockOriginCountry = stockOriginCountry;
