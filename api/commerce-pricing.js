@@ -126,14 +126,14 @@ function calculateShippingCharge(logisticPriceUSD, currency, settings = {}) {
 function parseShippingAging(value) {
   if (value == null || value === '') return null;
   const text = String(value).trim();
-  const range = text.match(/(\\d+)\\s*(?:-|–|—|to)\\s*(\\d+)/i);
+  const range = text.match(/(\d+)\s*(?:-|–|—|to)\s*(\d+)/i);
   if (range) {
     const min = Number(range[1]);
     const max = Number(range[2]);
     if (Number.isFinite(min) && Number.isFinite(max) && min >= 0 && max >= min) return { minDays: min, maxDays: max };
     return null;
   }
-  const one = text.match(/^\\s*(\\d+)\\s*(?:days?|d)?\\s*$/i);
+  const one = text.match(/^\s*(\d+)\s*(?:days?|d)?\s*$/i);
   if (one) {
     const days = Number(one[1]);
     if (Number.isFinite(days) && days >= 0) return { minDays: days, maxDays: days };
@@ -185,7 +185,7 @@ function selectShippingServices(options, settings = {}, context = {}) {
       __maxDoorDays: aging ? aging.maxDays + processingDays : null,
     };
   }).filter(option => option.__aging && option.__cost != null && option.__cost >= 0
-    && (!option.__ratio || option.__ratio <= maxRatio));
+    && option.__ratio != null && option.__ratio <= maxRatio);
 
   const standard = normalized.filter(option => !option.__express);
   const smartEligible = standard.filter(option => option.__maxDoorDays <= policy.maxDeliveryDays);
