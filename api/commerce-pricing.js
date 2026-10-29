@@ -62,11 +62,21 @@ function getCommercePricingPolicy(settings = {}) {
       expressMethods: Array.isArray(rawShipping.expressMethods) ? rawShipping.expressMethods : (Array.isArray(root.cjExpressShippingMethods) ? root.cjExpressShippingMethods : defaults.shipping.expressMethods),
       quoteTtlMinutes: Math.min(120, Math.max(5, Number(rawShipping.quoteTtlMinutes) || defaults.shipping.quoteTtlMinutes)),
       chargeCustomerSeparately: rawShipping.chargeCustomerSeparately !== false,
-      maxDeliveryDays: Math.min(90, Math.max(7, Number(rawShipping.maxDeliveryDays) || defaults.shipping.maxDeliveryDays)),
-      processingDays: Math.min(15, Math.max(0, Number.isFinite(Number(rawShipping.processingDays)) ? Number(rawShipping.processingDays) : defaults.shipping.processingDays)),
-      smartMaxShippingPremiumPct: boundedPct(Number(rawShipping.smartMaxShippingPremiumPct) * 100, defaults.shipping.smartMaxShippingPremiumPct * 100, 200) / 100,
-      economyMinSavingUSD: finiteNonNegative(rawShipping.economyMinSavingUSD) ?? defaults.shipping.economyMinSavingUSD,
-      economyMinSavingPct: boundedPct(Number(rawShipping.economyMinSavingPct) * 100, defaults.shipping.economyMinSavingPct * 100, 100) / 100,
+      // The Smart target and processing allowance are guardrails, not loose UI preferences.
+      maxDeliveryDays: Math.min(45, Math.max(7, Number(rawShipping.maxDeliveryDays) || defaults.shipping.maxDeliveryDays)),
+      processingDays: Math.max(defaults.shipping.processingDays, Math.min(15, Math.max(0, Number.isFinite(Number(rawShipping.processingDays)) ? Number(rawShipping.processingDays) : defaults.shipping.processingDays))),
+      smartMaxShippingPremiumPct: Math.min(
+        boundedPct(Number(rawShipping.smartMaxShippingPremiumPct) * 100, defaults.shipping.smartMaxShippingPremiumPct * 100, 200) / 100,
+        defaults.shipping.smartMaxShippingPremiumPct
+      ),
+      economyMinSavingUSD: Math.max(
+        defaults.shipping.economyMinSavingUSD,
+        finiteNonNegative(rawShipping.economyMinSavingUSD) ?? defaults.shipping.economyMinSavingUSD
+      ),
+      economyMinSavingPct: Math.max(
+        defaults.shipping.economyMinSavingPct,
+        boundedPct(Number(rawShipping.economyMinSavingPct) * 100, defaults.shipping.economyMinSavingPct * 100, 100) / 100
+      ),
       allowEconomyOverMaxDays: rawShipping.allowEconomyOverMaxDays !== false,
       // Legacy settings may contain permissive 60%/150% values. Keep the agreed
       // affordability warning/block as hard ceilings while allowing stricter admin values.
