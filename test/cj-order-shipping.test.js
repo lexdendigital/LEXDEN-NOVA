@@ -2,6 +2,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const cjOrderHandler = require('../api/cj-order');
+const cjShippingHandler = require('../api/cj-shipping');
 
 test('CJ order payload receives the exact route chosen at checkout', () => {
   const payload = cjOrderHandler.buildCjOrderPayload('LN-123', {
@@ -32,4 +33,40 @@ test('funding holds remain resumable without recreating the CJ order', () => {
   assert.equal(cjOrderHandler.canResumeSupplierOrderStatus('funding_required'), true);
   assert.equal(cjOrderHandler.canResumeSupplierOrderStatus('supplier_created'), true);
   assert.equal(cjOrderHandler.canResumeSupplierOrderStatus('stock_issue'), false);
+});
+
+
+test('warehouse discovery preserves available Nigeria stock and ignores empty or region-only origins', () => {
+  const rows = cjShippingHandler.stockRowsFromResponse({
+    list: [
+      { area: 'NG', storageNum: 4 },
+      { area: 'CN', storageNum: 20 },
+      { area: 'US', storageNum: 0 },
+      { area: 'EU', storageNum: 9 },
+    ],
+  });
+  const availableOrigins = rows
+    .filter(row => {
+      const quantity = cjShippingHandler.stockQuantity(row);
+      return quantity != null && quantity > 0 && cjShippingHandler.stockOriginCountry(row);
+    })
+    .map(cjShippingHandler.stockOriginCountry);
+  assert.deepEqual(availableOrigins, ['NG', 'CN']);
+});
+
+test('CJ order payload uses the verified quote origin instead of assuming China', () => {
+  const payload = cjOrderHandler.buildCjOrderPayload('LN-456', {
+    delivery: {
+      country: 'Nigeria',
+      state: 'Lagos',
+      city: 'Lagos',
+      address: 'Local stock dispatch',
+      name: 'Customer',
+      phone: '08000000000',
+      shippingMethod: 'Local Carrier',
+      shippingOriginCountry: 'NG',
+    },
+  }, { id: 'nova-local' }, { variantId: 'cj-variant-local' }, 1);
+  assert.equal(payload.fromCountryCode, 'NG');
+  assert.equal(payload.logisticName, 'Local Carrier');
 });
