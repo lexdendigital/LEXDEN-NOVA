@@ -70,3 +70,10 @@ test('CJ order payload uses the verified quote origin instead of assuming China'
   assert.equal(payload.fromCountryCode, 'NG');
   assert.equal(payload.logisticName, 'Local Carrier');
 });
+
+test('warehouse parser unwraps nested CJ warehouse arrays', () => {
+  const rows = cjShippingHandler.stockRowsFromResponse({
+    data: { byWarehouse: [{ area: 'NG', qty: 3 }, { area: 'CN', qty: 20 }] },
+  });
+  assert.deepEqual(rows.map(row => row.area), ['NG', 'CN']);
+});
