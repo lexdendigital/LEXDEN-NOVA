@@ -263,6 +263,10 @@ module.exports = async (req, res) => {
     const rows = Array.isArray(data) ? data
       : data && Array.isArray(data.list) ? data.list
       : data && Array.isArray(data.rows) ? data.rows
+      : data && Array.isArray(data.byWarehouse) ? data.byWarehouse
+      : data && Array.isArray(data.warehouseList) ? data.warehouseList
+      : data && Array.isArray(data.inventories) ? data.inventories
+      : data && Array.isArray(data.warehouses) ? data.warehouses
       : data && Array.isArray(data.data) ? data.data
       : data && typeof data === 'object' ? [data] : [];
     const stockOrigin = countryToIso2(order.delivery.shippingOriginCountry || quote.startCountryCode) || 'CN';
