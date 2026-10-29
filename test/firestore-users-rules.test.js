@@ -3,23 +3,30 @@ const path = require('node:path');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const {
-  assertFails,
-  assertSucceeds,
-  initializeTestEnvironment,
-} = require('@firebase/rules-unit-testing');
+const RUN_FIRESTORE_RULE_TESTS = process.env.RUN_FIRESTORE_RULE_TESTS === '1';
 
-const {
-  doc,
-  getDoc,
-  setDoc,
-  updateDoc,
-} = require('firebase/firestore');
+if (!RUN_FIRESTORE_RULE_TESTS) {
+  test('Firestore users authority rules suite', {
+    skip: 'Run through the dedicated Firestore Emulator workflow.',
+  }, () => {});
+} else {
+  const {
+    assertFails,
+    assertSucceeds,
+    initializeTestEnvironment,
+  } = require('@firebase/rules-unit-testing');
 
-const PROJECT_ID = 'demo-lexden-nova-v301';
-const RULES_PATH = path.join(__dirname, '..', 'firestore.rules');
+  const {
+    doc,
+    getDoc,
+    setDoc,
+    updateDoc,
+  } = require('firebase/firestore');
 
-let testEnv;
+  const PROJECT_ID = 'demo-lexden-nova-v301';
+  const RULES_PATH = path.join(__dirname, '..', 'firestore.rules');
+
+  let testEnv;
 
 function normalProfile(uid = 'alice', email = 'alice@example.com') {
   return {
@@ -213,3 +220,5 @@ test('additional: create rejects UID or email that contradict Firebase Auth', as
   await assertFails(setDoc(doc(db, 'users', 'alice'), normalProfile('bob', 'alice@example.com')));
   await assertFails(setDoc(doc(db, 'users', 'alice'), normalProfile('alice', 'attacker@example.com')));
 });
+
+}
