@@ -20,6 +20,8 @@
 // this route as many times as you like for the same reference.
 
 const { setCors, cjFetch, writeSyncLog, getProductsDoc, db, FieldValue } = require('./cj-shared');
+const { fundCjOrder, cjOrderAmountUSD } = require('./cj-funding');
+const { queueEmailBackground } = require('./email-shared');
 
 // README §66/§67 — Nigeria-specific note: CJ's own destination-country
 // support/cost varies; NG is still passed through as-is to CJ rather than
@@ -30,12 +32,16 @@ function buildCjOrderPayload(orderRef, order, product, cjMapping, qty) {
   return {
     orderNumber: `NOVA-${orderRef}`,
     shippingCountryCode: countryToIso2(d.country) || 'NG',
+    shippingCountry: d.country || '',
     shippingProvince: d.state || '',
     shippingCity: d.city || '',
     shippingAddress: d.address || '',
     shippingCustomerName: d.name || '',
     shippingPhone: d.phone || '',
+    email: order.email || '',
+    shippingZip: d.postalCode || d.zip || '',
     logisticName: d.shippingMethod || '',
+    payType: 3,
     remark: `LEXDEN NOVA order ${orderRef}`,
     fromCountryCode: 'CN',
     products: [
@@ -52,6 +58,120 @@ function countryToIso2(country) {
   const s = String(country).trim();
   if (/^[A-Z]{2}$/.test(s)) return s;
   return COUNTRY_ISO2[s.toLowerCase()] || null;
+}
+
+
+function canResumeSupplierOrderStatus(status) {
+  return ['paid', 'processing', 'supplier_created', 'funding_required'].includes(status);
+}
+
+function paystackBalanceText(snapshot) {
+  if (!snapshot || !snapshot.ok || !Array.isArray(snapshot.balances) || !snapshot.balances.length) {
+    return snapshot && snapshot.error ? `Unavailable (${snapshot.error})` : 'Unavailable';
+  }
+  return snapshot.balances.map(b => `${b.currency} ${Number(b.balanceMajor).toLocaleString('en-NG')}`).join(', ');
+}
+
+function alertFundingProblem(reference, order, funding) {
+  queueEmailBackground({
+    templateKey: 'admin',
+    to: { email: process.env.ADMIN_NOTIFY_EMAIL || 'lexdendigital@gmail.com' },
+    params: {
+      event_type: 'CJ funding required',
+      reference_id: reference,
+      user_email: order.email || 'Unknown',
+      event_time: new Date().toLocaleString('en-GB', { timeZone: 'Africa/Lagos' }) + ' WAT',
+      priority: 'Urgent',
+      details: [
+        `Product: ${order.productName || order.productId || 'Unknown'}`,
+        `CJ funding state: ${funding.state}`,
+        `CJ order amount: ${funding.requiredUSD == null ? 'Unknown' : '$' + Number(funding.requiredUSD).toFixed(2)}`,
+        `CJ wallet balance: ${funding.cjBalanceUSD == null ? 'Unknown' : '$' + Number(funding.cjBalanceUSD).toFixed(2)}`,
+        `CJ shortfall: ${funding.shortfallUSD == null ? 'Unknown' : '$' + Number(funding.shortfallUSD).toFixed(2)}`,
+        `Paystack available balance: ${paystackBalanceText(funding.paystack)}`,
+        'Automatic Paystack-to-CJ wallet top-up is not attempted because CJ exposes no documented instant Paystack top-up API. The paid shopper order is preserved and held safely for funding.',
+      ].join(' | '),
+    },
+  });
+}
+
+async function finishCjFunding({ reference, orderRef, order, cj, started }) {
+  const funding = await fundCjOrder({
+    cjFetch,
+    cjOrderId: cj.shipmentOrderId || cj.orderId,
+    requiredUSD: cj.requiredUSD,
+    paystackMode: order.paystackDomain,
+  });
+
+  if (funding.ok) {
+    const paidCj = {
+      ...cj,
+      status: 'PAID',
+      fundingStatus: 'paid',
+      cjBalanceBeforeUSD: funding.cjBalanceUSD,
+      requiredUSD: funding.requiredUSD,
+      paidAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    await orderRef.set({
+      status: 'processing',
+      requiresManualReview: false,
+      fundingIssue: null,
+      cj: paidCj,
+    }, { merge: true });
+    await writeSyncLog({
+      event: 'order.pay',
+      objectId: reference,
+      success: true,
+      message: `CJ order paid from wallet: ${paidCj.orderId}`,
+      requestId: funding.paymentRequestId,
+      tookMs: Date.now() - started,
+    });
+    return { ok: true, alreadyCreated: true, cj: paidCj };
+  }
+
+  const shouldAlert = !cj.fundingAlertedAt || cj.fundingStatus !== funding.state;
+  const heldCj = {
+    ...cj,
+    status: 'AWAITING_FUNDING',
+    fundingStatus: funding.state,
+    cjBalanceBeforeUSD: funding.cjBalanceUSD == null ? null : funding.cjBalanceUSD,
+    requiredUSD: funding.requiredUSD == null ? (cj.requiredUSD || null) : funding.requiredUSD,
+    shortfallUSD: funding.shortfallUSD == null ? null : funding.shortfallUSD,
+    fundingAlertedAt: shouldAlert ? new Date().toISOString() : (cj.fundingAlertedAt || null),
+    updatedAt: new Date().toISOString(),
+  };
+  await orderRef.set({
+    status: 'funding_required',
+    requiresManualReview: true,
+    fundingIssue: {
+      state: funding.state,
+      message: funding.message || null,
+      cjBalanceUSD: funding.cjBalanceUSD == null ? null : funding.cjBalanceUSD,
+      requiredUSD: funding.requiredUSD == null ? null : funding.requiredUSD,
+      shortfallUSD: funding.shortfallUSD == null ? null : funding.shortfallUSD,
+      paystackBalances: funding.paystack && funding.paystack.ok ? funding.paystack.balances : [],
+      paystackBalanceError: funding.paystack && !funding.paystack.ok ? funding.paystack.error : null,
+      updatedAt: FieldValue.serverTimestamp(),
+    },
+    cj: heldCj,
+  }, { merge: true });
+  await writeSyncLog({
+    event: 'order.pay',
+    objectId: reference,
+    success: false,
+    message: funding.message || funding.state,
+    tookMs: Date.now() - started,
+    detail: { state: funding.state, requiredUSD: funding.requiredUSD, cjBalanceUSD: funding.cjBalanceUSD, shortfallUSD: funding.shortfallUSD },
+  });
+  if (shouldAlert) alertFundingProblem(reference, order, funding);
+  return {
+    ok: false,
+    error: 'funding_required',
+    fundingState: funding.state,
+    message: 'The supplier order was created, but CJ could not be paid automatically. The order is safely held and the admin has been alerted.',
+    cj: heldCj,
+  };
 }
 
 module.exports = async (req, res) => {
@@ -72,7 +192,7 @@ module.exports = async (req, res) => {
     if (!snap.exists) return res.status(200).json({ ok: false, error: 'unknown_order' });
     const order = snap.data();
 
-    if (order.status !== 'paid' && order.status !== 'processing') {
+    if (!canResumeSupplierOrderStatus(order.status)) {
       return res.status(200).json({ ok: false, error: 'not_paid', message: 'This order has not been verified as paid.' });
     }
     if (!order.delivery) {
@@ -80,10 +200,15 @@ module.exports = async (req, res) => {
       return res.status(200).json({ ok: false, error: 'not_physical', message: 'This order has no delivery details — nothing to fulfil via CJ.' });
     }
 
-    // ---- Idempotency: already created? Return the existing result. ----
+    // ---- Idempotency: if CJ already has this order, NEVER create it again.
+    // A previously-created but unpaid order resumes only its funding step. ----
     if (order.cj && order.cj.orderId) {
-      await writeSyncLog({ event: 'order.create', objectId: reference, success: true, message: 'Idempotent replay', tookMs: Date.now() - started });
-      return res.status(200).json({ ok: true, alreadyCreated: true, cj: order.cj });
+      if (order.cj.fundingStatus === 'paid' || order.cj.status === 'PAID') {
+        await writeSyncLog({ event: 'order.create', objectId: reference, success: true, message: 'Idempotent replay — already paid', tookMs: Date.now() - started });
+        return res.status(200).json({ ok: true, alreadyCreated: true, cj: order.cj });
+      }
+      const resumed = await finishCjFunding({ reference, orderRef, order, cj: order.cj, started });
+      return res.status(200).json(resumed);
     }
 
     // ---- Server-side product/mapping validation (README §41 — never
@@ -154,10 +279,14 @@ module.exports = async (req, res) => {
     }
 
     const cjResult = createR.data || {};
+    const requiredUSD = cjOrderAmountUSD(cjResult);
     const cj = {
       orderId: cjResult.orderId || cjResult.cjOrderId || null,
+      shipmentOrderId: cjResult.shipmentOrderId || null,
       orderNumber: cjResult.orderNumber || payload.orderNumber,
-      status: 'CREATED',
+      status: 'CREATED_UNPAID',
+      fundingStatus: 'pending',
+      requiredUSD,
       trackingNumber: '',
       carrier: '',
       variantId: cjMapping.variantId,
@@ -166,10 +295,24 @@ module.exports = async (req, res) => {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    await orderRef.set({ status: 'processing', cj }, { merge: true });
+    if (!cj.orderId) {
+      await orderRef.set({
+        status: 'cj_order_failed',
+        requiresManualReview: true,
+        cjError: { message: 'CJ created the order response without an orderId.', code: 'MISSING_CJ_ORDER_ID', at: FieldValue.serverTimestamp() },
+      }, { merge: true });
+      await writeSyncLog({ event: 'order.create', objectId: reference, success: false, message: 'CJ response missing orderId', requestId: createR.requestId, tookMs });
+      return res.status(200).json({ ok: false, error: 'cj_error', message: 'CJ did not return a usable supplier order id. The order has been held for admin review.' });
+    }
 
-    await writeSyncLog({ event: 'order.create', objectId: reference, success: true, message: `CJ order ${cj.orderId}`, requestId: createR.requestId, tookMs });
-    return res.status(200).json({ ok: true, alreadyCreated: false, cj });
+    // Save the supplier order BEFORE attempting payment. If this process dies
+    // after CJ created it, the retry sees cj.orderId and resumes payment only.
+    await orderRef.set({ status: 'supplier_created', cj }, { merge: true });
+    await writeSyncLog({ event: 'order.create', objectId: reference, success: true, message: `CJ order created: ${cj.orderId}`, requestId: createR.requestId, tookMs });
+
+    const funded = await finishCjFunding({ reference, orderRef, order, cj, started });
+    funded.alreadyCreated = false;
+    return res.status(200).json(funded);
   } catch (e) {
     await writeSyncLog({ event: 'order.create', objectId: reference, success: false, message: e.message, tookMs: Date.now() - started });
     return res.status(200).json({ ok: false, error: 'server_error', message: 'Unexpected error creating the supplier order.' });
@@ -178,3 +321,4 @@ module.exports = async (req, res) => {
 
 // Export the pure payload builder for focused unit tests; the default export remains the HTTP handler.
 module.exports.buildCjOrderPayload = buildCjOrderPayload;
+module.exports.canResumeSupplierOrderStatus = canResumeSupplierOrderStatus;

@@ -11,6 +11,7 @@ const files = [
   'api/commerce-pricing.js',
   'api/cj-shipping.js',
   'api/cj-order.js',
+  'api/cj-funding.js',
   'api/verify-paystack.js',
   'api/product-variants.js',
   'mcp/lib/productImport.js',

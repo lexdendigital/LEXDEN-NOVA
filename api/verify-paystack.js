@@ -442,17 +442,17 @@ module.exports = async function handler(req, res) {
   let deliveryDetails = null;
   if (delivery && typeof delivery === 'object') {
     const { name, phone, address, city, state, country } = delivery;
-    if (name && phone && address && country) {
+    if (name && phone && address && city && state && country) {
       deliveryDetails = {
-        name: String(name).slice(0, 200),
-        phone: String(phone).slice(0, 40),
-        address: String(address).slice(0, 500),
-        city: city ? String(city).slice(0, 120) : null,
-        state: state ? String(state).slice(0, 120) : null,
-        country: String(country).slice(0, 120),
+        name: String(name).trim().slice(0, 200),
+        phone: String(phone).trim().slice(0, 40),
+        address: String(address).trim().slice(0, 500),
+        city: String(city).trim().slice(0, 120),
+        state: String(state).trim().slice(0, 120),
+        country: String(country).trim().slice(0, 120),
       };
     } else {
-      console.warn('verify-paystack: delivery object present but missing required fields — order will be saved without it.');
+      console.warn('verify-paystack: delivery object present but missing a required address field.');
     }
   }
 
@@ -754,6 +754,7 @@ module.exports = async function handler(req, res) {
       status: 'paid',
       timestamp: FieldValue.serverTimestamp(),
       paystackChannel: paystackData.channel || null,
+      paystackDomain: paystackData.domain === 'live' || paystackData.domain === 'test' ? paystackData.domain : null,
       paidAt: paystackData.paid_at || null,
       delivery: deliveryDetails,
       affiliateRef: affiliateRef || null,
