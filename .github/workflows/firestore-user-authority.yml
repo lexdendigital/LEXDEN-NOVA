@@ -38,4 +38,6 @@ jobs:
         run: npm install --no-save --package-lock=false firebase@13.1.0 @firebase/rules-unit-testing@6.0.0 firebase-tools@15.34.2
 
       - name: Run Firestore Rules regression tests
+        env:
+          RUN_FIRESTORE_RULE_TESTS: '1'
         run: npx --no-install firebase emulators:exec --only firestore --project demo-lexden-nova-v301 --config firebase.test.json "node --test test/firestore-users-rules.test.js"
