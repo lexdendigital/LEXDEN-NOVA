@@ -56,6 +56,8 @@ const COUNTRY_ISO2 = { nigeria: 'NG', china: 'CN', 'united states': 'US', 'unite
 function countryToIso2(country) {
   if (!country) return null;
   const s = String(country).trim();
+  if (s.toUpperCase() === 'UK') return 'GB';
+  if (s.toUpperCase() === 'EU') return null; // warehouse regions must resolve to a country
   if (/^[A-Z]{2}$/.test(s)) return s;
   return COUNTRY_ISO2[s.toLowerCase()] || null;
 }
