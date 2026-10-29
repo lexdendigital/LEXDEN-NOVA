@@ -187,12 +187,21 @@ function selectShippingServices(options, settings = {}, context = {}) {
     ? Math.max(0, Number(context.processingDays))
     : policy.processingDays;
   const productAmountUSD = finiteNonNegative(context.productAmountUSD);
+  const productAmountMajor = finiteNonNegative(context.productAmountMajor);
+  const currency = String(context.currency || '').toUpperCase();
   const maxRatio = policy.highShippingItemPriceRatioBlock;
   const normalized = (options || []).map(option => {
     const aging = parseShippingAging(option.logisticAging);
     const cost = finiteNonNegative(option.logisticPrice);
     const express = isExpressShippingMethod(option.logisticName, settings);
-    const ratio = productAmountUSD > 0 && cost != null ? cost / productAmountUSD : null;
+    // Enforce the limit against the actual customer-facing shipping charge,
+    // including FX/payment-fee buffers, whenever checkout context is present.
+    const chargedShipping = cost != null && productAmountMajor > 0 && currency
+      ? calculateShippingCharge(cost, currency, settings)
+      : null;
+    const ratio = chargedShipping != null && productAmountMajor > 0
+      ? chargedShipping / productAmountMajor
+      : (productAmountUSD > 0 && cost != null ? cost / productAmountUSD : null);
     return {
       ...option,
       __aging: aging,
