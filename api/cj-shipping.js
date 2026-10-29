@@ -11,6 +11,8 @@ const { getCommercePricingPolicy, calculateShippingCharge, rateForCurrency, sele
 
 function countryToIso2(value) {
   const text = String(value || '').trim();
+  if (text.toUpperCase() === 'UK') return 'GB';
+  if (text.toUpperCase() === 'EU') return null; // a region is not a country-of-origin code
   if (/^[A-Z]{2}$/.test(text)) return text;
   return ({
     nigeria: 'NG', china: 'CN', 'united states': 'US', 'united states of america': 'US',
