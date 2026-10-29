@@ -852,7 +852,7 @@ function openDeliveryDetailsModal(product, selectedVariant, onSubmit){
     const city=$('#dd_city').value.trim();
     const state=$('#dd_state').value.trim();
     const country=$('#dd_country').value;
-    if(!name||!phone||!address||!country){if(errEl)errEl.textContent='Name, phone, address and country are required.';return;}
+    if(!name||!phone||!address||!city||!state||!country){if(errEl)errEl.textContent='Name, phone, address, city, state and country are required for delivery.';return;}
     let quoteDetails={};
     if(requiresCjQuote){
       const quoteId=routeSelect&&routeSelect.value;
