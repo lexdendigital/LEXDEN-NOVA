@@ -100,7 +100,8 @@ module.exports = async (req, res) => {
     if (!snap.exists) return res.status(200).json({ ok: false, error: 'unknown_order' });
     const order = snap.data();
 
-    if (order.status !== 'paid' && order.status !== 'processing') {
+    const supplierResumeStates = new Set(['paid', 'processing', 'supplier_created', 'funding_required']);
+    if (!supplierResumeStates.has(order.status)) {
       return res.status(200).json({ ok: false, error: 'not_paid', message: 'This order has not been verified as paid.' });
     }
     if (!order.delivery) {
