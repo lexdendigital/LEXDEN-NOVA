@@ -1,0 +1,41 @@
+name: V3.0.1 Firestore user authority tests
+
+on:
+  push:
+    branches:
+      - security/v3.0.1-user-authority-lockdown
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  firestore-user-authority:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Install locked application dependencies
+        run: npm ci
+
+      - name: Run existing repository tests
+        run: npm test
+
+      - name: Install isolated Firestore Rules test tooling
+        run: npm install --no-save --package-lock=false firebase@13.1.0 @firebase/rules-unit-testing@6.0.0 firebase-tools@15.34.2
+
+      - name: Run Firestore Rules regression tests
+        run: npx --no-install firebase emulators:exec --only firestore --project demo-lexden-nova-v301 --config firebase.test.json "node --test test/firestore-users-rules.test.js"
