@@ -113,7 +113,7 @@ function resolveSupplierMapping(product, supplierId, providerKey, novaVariantId,
   if (matches.length > 1) return { ok: false, code: 'AMBIGUOUS_SUPPLIER_MAPPING' };
   if (!matches.length) {
     if (options.allowLegacyCj === true && providerKey === 'cj' && physical.cj && physical.cj.productId
-      && String(physical.supplierId || '') === String(supplierId || '')) {
+      && (!String(physical.supplierId || '').trim() || String(physical.supplierId) === String(supplierId || ''))) {
       const legacyVariant = (Array.isArray(product.variants) ? product.variants : [])
         .find(v => String(v && v.id || '') === String(novaVariantId || ''));
       const externalVariantId = legacyVariant && legacyVariant.cjVariantId

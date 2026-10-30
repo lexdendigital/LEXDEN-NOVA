@@ -82,3 +82,16 @@ The current `createOrder` adapter method delegates to the existing main-store `a
 `api/fulfillment/product-mapping.js` validates stable NOVA supplier IDs, provider keys, provider-specific product IDs and independent variant mappings. It includes a deterministic migration preview for legacy CJ mappings. The preview never writes Firestore and marks legacy candidates for review; it does not approve them for new fulfillment.
 
 The CJ MCP importer now requires exactly one active supplier registry entry with `providerKey: 'cj'`. It writes that NOVA registry ID to `physical.supplierId`, adds a provider-neutral mapping and keeps every new import in Draft with `approvedForFulfillment: false`. It will refuse the import if the registry mapping is missing or ambiguous. The external CJ supplier ID remains distinct and is not used as the NOVA registry ID.
+
+
+## Provider-neutral shipping quotations
+
+`api/fulfillment/shipping-quotes.js` is the main-store quote service, exposed through `POST /api/fulfillment-shipping-quote`. The public route accepts product, variant, quantity, destination and checkout currency only. Supplier IDs, provider keys, external IDs, stock, warehouse origin, cost and delivery methods are resolved on the server.
+
+The service evaluates the configured primary supplier and then its configured backup before payment. Each candidate must be active, have a registered adapter with stock and shipping capabilities, pass a live health check, have an approved product/variant mapping (or an explicit legacy CJ mapping), have sufficient live stock at a country-identifiable warehouse, and return a real destination freight option.
+
+Each option is saved in `shippingQuotes` with provider-neutral mapping and destination fields as well as compatibility fields `logisticName`, `startCountryCode` and `endCountryCode`. The payment-verification batch must bind and reserve the exact selected quote. This batch does not change payment or order dispatch.
+
+International routes are capped at 15 order-to-door days including processing allowance, and slower Economy routes cannot bypass the limit. Domestic routes have a separate configurable maximum; otherwise they use the existing policy. The existing CJ shipping endpoint and its saved 45-day policy remain unchanged.
+
+Supplier product and freight amounts are converted to USD only when a saved exchange rate exists. The legacy routing `maxCost` is interpreted as USD total supplier cost including freight. `minMargin` uses gross contribution margin on the verified customer item and shipping revenue after supplier item and freight costs. Missing currencies, stock origins, or delivery estimates fail closed.

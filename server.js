@@ -129,7 +129,7 @@ const ENDPOINTS = [
   'cj-stock',
   'cj-order',
   'cj-orders',
-  'cj-shipping',
+  'cj-shipping',\n  'fulfillment-shipping-quote',
   'cj-tracking',
   'cj-webhook',
   'paystack-webhook',
