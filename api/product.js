@@ -49,7 +49,10 @@ module.exports = async (req, res) => {
   }
 
   const destUrl = id ? `${SITE_URL}#product/${encodeURIComponent(destinationProductId)}` : SITE_URL;
-  const canonicalUrl = `https://${req.headers.host}/product/${encodeURIComponent(canonicalProductId)}`;
+  // The full product page lives on the Pages host (see scripts/generate-product-share-pages.js).
+  // This Render URL is only a share/redirect link, so its canonical points there to keep
+  // Google from splitting one product across two hosts.
+  const canonicalUrl = `${SITE_URL.replace(/index\.html$/, '')}product/${encodeURIComponent(canonicalProductId)}/`;
 
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.setHeader('Cache-Control', 'public, max-age=60, s-maxage=300, stale-while-revalidate=600');

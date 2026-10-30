@@ -1,81 +1,88 @@
 #!/usr/bin/env node
-// Regenerates sitemap.xml from the SAME live Firestore data the admin
-// portal's "Sitemap" tab reads from — meant to be run by
-// .github/workflows/update-sitemap.yml on every push, so sitemap.xml
-// never goes stale even if nobody remembers to click "Download" by hand.
-//
-// Uses Firestore's public REST API (no service account, no secret keys —
-// read access to `catalog/*` is intentionally public in firestore.rules,
-// the same trusted pattern the app's own api/verify-paystack.js already
-// relies on). Node 18+ has global fetch, which is all this needs.
-//
-// Keep the two constants below in sync with index.html if you ever
-// rename the Firebase project or move the Vercel link-preview deploy.
-const FIRESTORE_PROJECT = 'lexden-nova';
-const SITE_URL = 'https://lexdendigital.github.io/LEXDEN-NOVA/index.html';
-const NOVA_LINKS_BASE = 'https://lexden-nova.onrender.com'; // see the matching note in index.html — this must stay in sync with that file
+'use strict';
 
-function fsValue(v) {
-  if (v == null) return null;
-  if ('stringValue' in v) return v.stringValue;
-  if ('integerValue' in v) return Number(v.integerValue);
-  if ('doubleValue' in v) return v.doubleValue;
-  if ('booleanValue' in v) return v.booleanValue;
-  if ('nullValue' in v) return null;
-  if ('arrayValue' in v) return (v.arrayValue.values || []).map(fsValue);
-  if ('mapValue' in v) return fsFields(v.mapValue.fields || {});
-  return null;
-}
-function fsFields(fields) {
-  const out = {};
-  for (const k in fields || {}) out[k] = fsValue(fields[k]);
-  return out;
-}
-async function getCatalogDoc(docId) {
-  const url = `https://firestore.googleapis.com/v1/projects/${FIRESTORE_PROJECT}/databases/(default)/documents/catalog/${docId}`;
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(`Firestore fetch failed for catalog/${docId}: ${r.status}`);
-  const data = await r.json();
-  return fsFields(data.fields || {});
+// Writes sitemap.xml for the public site. Run by
+// .github/workflows/sync-product-share-pages.yml right after the product pages
+// are generated, so the sitemap and the pages always agree.
+//
+// Rules that matter for Google:
+//  * One host only. Every URL is on the same host and path prefix as the
+//    sitemap itself (https://lexdendigital.github.io/LEXDEN-NOVA/).
+//  * Only pages that exist as real files. Product URLs come from the same
+//    eligibility rule as the page generator, so a URL is never listed
+//    without a page behind it.
+//  * Nothing noindex, nothing behind a #fragment (Google ignores fragments),
+//    no admin/creator/rider tools.
+//  * No <lastmod>, <changefreq> or <priority>. Google ignores the last two,
+//    and a lastmod that is not the real change date is treated as noise.
+const fs = require('node:fs');
+const path = require('node:path');
+const { PAGES_BASE, fetchLiveProducts, getEligibleProducts } = require('./generate-product-share-pages');
+
+const ROOT = path.resolve(__dirname, '..');
+const SKIP_DIRS = new Set([
+  'admin', 'api', 'assets', 'chatgpt', 'css', 'download', 'js', 'mcp', 'node_modules',
+  'policies', 'product', 'scripts', 'test', 'creator', 'rider',
+]);
+
+function escapeXml(value) {
+  return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
 }
 
-function escapeXml(s) {
-  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+function isNoindex(html) {
+  return /<meta[^>]+name=["']robots["'][^>]*content=["'][^"']*noindex/i.test(html);
+}
+
+// Static pages that are real, indexable files in the repo.
+function collectStaticPages(root) {
+  const urls = [PAGES_BASE + '/index.html'];
+  const stack = [{ dir: root, rel: '' }];
+  while (stack.length) {
+    const { dir, rel } = stack.pop();
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        if (rel === '' && SKIP_DIRS.has(entry.name)) continue;
+        if (entry.name.startsWith('.') || rel.split('/').length >= 2) continue;
+        stack.push({ dir: path.join(dir, entry.name), rel: rel ? rel + '/' + entry.name : entry.name });
+        continue;
+      }
+      if (rel === '' || !entry.name.endsWith('.html')) continue;
+      if (isNoindex(fs.readFileSync(path.join(dir, entry.name), 'utf8'))) continue;
+      const parts = rel.split('/').map(encodeURIComponent);
+      urls.push(entry.name === 'index.html'
+        ? PAGES_BASE + '/' + parts.join('/') + '/'
+        : PAGES_BASE + '/' + parts.join('/') + '/' + encodeURIComponent(entry.name));
+    }
+  }
+  return urls;
+}
+
+function productUrls(products) {
+  return getEligibleProducts(products).map(function (entry) {
+    return PAGES_BASE + '/product/' + encodeURIComponent(entry.routeId) + '/';
+  });
+}
+
+function buildSitemapXml(urls) {
+  const unique = Array.from(new Set(urls)).sort();
+  return '<?xml version="1.0" encoding="UTF-8"?>\n'
+    + '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+    + unique.map(function (loc) { return '  <url><loc>' + escapeXml(loc) + '</loc></url>'; }).join('\n')
+    + '\n</urlset>\n';
 }
 
 async function main() {
-  const [productsDoc, settingsDoc] = await Promise.all([
-    getCatalogDoc('products'),
-    getCatalogDoc('settings'),
-  ]);
-  const products = Array.isArray(productsDoc.list) ? productsDoc.list : [];
-  const feed = Array.isArray(settingsDoc.feed) ? settingsDoc.feed : [];
-  const today = new Date().toISOString().slice(0, 10);
-
-  // Mirrors buildSitemapEntries() in index.html — see the long comment
-  // above that function for exactly why /service/{id}, /feed and
-  // /contact are intentionally excluded (no real page exists for them).
-  const urls = [
-    { loc: SITE_URL, freq: 'daily', pri: '1.0' },
-    { loc: SITE_URL + '#products', freq: 'daily', pri: '0.9' },
-    ...products.filter(p => p && p.status !== 'draft').map(p => ({
-      loc: `${NOVA_LINKS_BASE}/product/${p.shareId || p.id}`, freq: 'weekly', pri: '0.9',
-    })),
-    { loc: SITE_URL + '#service', freq: 'weekly', pri: '0.6' },
-    ...feed.map(f => ({ loc: `${NOVA_LINKS_BASE}/feed/${f.id}`, freq: 'monthly', pri: '0.5' })),
-    { loc: SITE_URL + '#about', freq: 'monthly', pri: '0.5' },
-  ];
-
-  const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n`
-    + urls.map(u => `  <url><loc>${escapeXml(u.loc)}</loc><lastmod>${today}</lastmod><changefreq>${u.freq}</changefreq><priority>${u.pri}</priority></url>`).join('\n')
-    + `\n</urlset>\n`;
-
-  const fs = await import('node:fs/promises');
-  await fs.writeFile('sitemap.xml', xml, 'utf8');
-  console.log(`sitemap.xml written with ${urls.length} URLs.`);
+  const products = await fetchLiveProducts();
+  const urls = collectStaticPages(ROOT).concat(productUrls(products));
+  fs.writeFileSync(path.join(ROOT, 'sitemap.xml'), buildSitemapXml(urls), 'utf8');
+  console.log('sitemap.xml written with ' + new Set(urls).size + ' URLs.');
 }
 
-main().catch(err => {
-  console.error(err);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch(function (error) {
+    console.error(error && error.stack ? error.stack : error);
+    process.exitCode = 1;
+  });
+}
+
+module.exports = { buildSitemapXml, collectStaticPages, productUrls, isNoindex };

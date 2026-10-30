@@ -10,13 +10,41 @@ const {
 
 test('only live non-demo products become share preview routes', () => {
   const products = [
-    { id: 'p1', name: 'Demo course', status: 'published' },
+    { id: 'p1', name: 'Real course', status: 'published' },
+    { id: 'demo-1', name: 'Demo course', status: 'published', demo: true },
     { id: 'draft-1', name: 'Draft item', status: 'draft' },
     { id: 'cj-internal-1', shareId: 'p13', name: 'Crossbody bag', status: 'published' },
     { id: 'cj-internal-2', name: 'Charger', status: 'published' },
   ];
   const routes = getEligibleProducts(products);
-  assert.deepEqual(routes.map((entry) => entry.routeId), ['p13', 'cj-internal-2']);
+  assert.deepEqual(routes.map((entry) => entry.routeId), ['p1', 'p13', 'cj-internal-2']);
+});
+
+test('product page carries real content, JSON-LD and a same-host canonical without redirecting', () => {
+  const html = renderProductPreview({
+    id: 'p3',
+    name: 'Cartoon Course',
+    description: 'First paragraph.\n\nSecond <b>paragraph</b>.',
+    price: 6.16,
+    salePrice: 2.9,
+    itemCode: 'LXD-ANI-001',
+    specs: { Level: 'All' },
+    rating: 5,
+    reviewCount: 1,
+    image: 'https://example.com/a.jpg',
+  }, 'p3');
+
+  assert.match(html, /<h1>Cartoon Course<\/h1>/);
+  assert.match(html, /<p>Second paragraph \.<\/p>|<p>Second paragraph\.<\/p>/);
+  assert.match(html, /\$2\.90/);
+  assert.match(html, /<th scope="row">Level<\/th><td>All<\/td>/);
+  assert.match(html, /rel="canonical" href="https:\/\/lexdendigital\.github\.io\/LEXDEN-NOVA\/product\/p3\/"/);
+  assert.doesNotMatch(html, /http-equiv="refresh"/);
+  assert.doesNotMatch(html, /location\.replace/);
+  const ld = JSON.parse(html.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/)[1]);
+  assert.equal(ld['@type'], 'Product');
+  assert.equal(ld.offers.price, '2.90');
+  assert.equal(ld.aggregateRating.reviewCount, '1');
 });
 
 test('duplicate public share IDs fail instead of generating ambiguous previews', () => {

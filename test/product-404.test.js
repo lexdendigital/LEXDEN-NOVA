@@ -41,6 +41,6 @@ test('short public alias resolves product-specific OG metadata and short hash de
   assert.ok(r.body.includes('og:image'));
   assert.ok(r.body.includes('https://cdn.example.com/power-bank.jpg'));
   assert.ok(r.body.includes('og:url'));
-  assert.ok(r.body.includes('https://x.test/product/p2'));
+  assert.ok(r.body.includes('https://lexdendigital.github.io/LEXDEN-NOVA/product/p2/'));
   assert.ok(r.body.includes('#product/p2'));
 });

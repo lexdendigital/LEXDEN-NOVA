@@ -18,7 +18,9 @@ const APP_NAME = 'LEXDEN NOVA';
 const FALLBACK_IMAGE = 'https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=1200&h=630&fit=crop';
 const FALLBACK_DESCRIPTION = 'Discover products, digital courses and tools at LEXDEN NOVA.';
 const GENERATOR_MARKER = 'LEXDEN NOVA catalog-generated preview';
-const DEMO_PRODUCT_IDS = new Set(['p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7', 'p8']);
+// Demo items are marked with `demo: true` on the product itself. Real products
+// such as the p1 and p3-p8 courses must never be hidden by a hard-coded ID list.
+const DEMO_PRODUCT_IDS = new Set();
 const SAFE_ROUTE_ID = /^[A-Za-z0-9._~-]+$/;
 
 function firestoreValue(value) {
@@ -110,7 +112,7 @@ function getEligibleProducts(products) {
   for (const product of Array.isArray(products) ? products : []) {
     if (!product || product.id == null || !String(product.id).trim()) continue;
     const internalId = String(product.id).trim();
-    if (DEMO_PRODUCT_IDS.has(internalId)) continue;
+    if (DEMO_PRODUCT_IDS.has(internalId) || product.demo === true) continue;
     if (String(product.status || '').toLowerCase() === 'draft') continue;
 
     const routeId = String(product.shareId || internalId).trim();
@@ -127,13 +129,77 @@ function getEligibleProducts(products) {
   return eligible;
 }
 
+function positiveNumber(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+// The price a shopper is charged: the sale price when it is a real discount.
+function effectivePrice(product) {
+  const price = positiveNumber(product.price);
+  const sale = positiveNumber(product.salePrice);
+  if (sale !== null && (price === null || sale < price)) return sale;
+  return price;
+}
+
+function formatUsd(value) {
+  return value === null ? '' : '$' + value.toFixed(2);
+}
+
+function descriptionParagraphs(value, maxParagraphs) {
+  return String(value || '')
+    .split(/\n\s*\n/)
+    .map(function (part) { return plainText(part); })
+    .filter(Boolean)
+    .slice(0, maxParagraphs || 12);
+}
+
+function buildJsonLd(product, title, description, image, pageUrl) {
+  const price = effectivePrice(product);
+  const data = {
+    '@context': 'https://schema.org',
+    '@type': 'Product',
+    name: title,
+    description: description,
+    image: [productImage(product)],
+    url: pageUrl,
+  };
+  if (product.itemCode) data.sku = String(product.itemCode);
+  if (product.category) data.category = String(product.category);
+  if (product.seller) data.brand = { '@type': 'Brand', name: String(product.seller) };
+  if (price !== null) {
+    const outOfStock = product.physical && product.physical.stockStatus === 'out_of_stock';
+    data.offers = {
+      '@type': 'Offer',
+      url: pageUrl,
+      priceCurrency: 'USD',
+      price: price.toFixed(2),
+      availability: 'https://schema.org/' + (outOfStock ? 'OutOfStock' : 'InStock'),
+    };
+  }
+  // Only publish ratings backed by at least one stored review.
+  const rating = positiveNumber(product.rating);
+  const reviews = positiveNumber(product.reviewCount);
+  if (rating !== null && reviews !== null) {
+    data.aggregateRating = { '@type': 'AggregateRating', ratingValue: String(rating), reviewCount: String(reviews) };
+  }
+  // Keep the JSON safe inside a <script> element.
+  return JSON.stringify(data).replace(/</g, '\\u003c');
+}
+
 function renderProductPreview(product, routeId) {
   const title = plainText(product.seoTitle || product.name || APP_NAME) || APP_NAME;
   const description = firstParagraph(product.metaDescription || product.shortDescription || product.description, 200) || FALLBACK_DESCRIPTION;
   const image = socialImage(productImage(product));
   const pageUrl = PAGES_BASE + '/product/' + routeId + '/';
-  const canonicalUrl = RENDER_BASE + '/product/' + encodeURIComponent(routeId);
+  // One canonical host: the page's own URL, not the Render API server.
+  const canonicalUrl = pageUrl;
   const destination = '../../index.html#product/' + encodeURIComponent(routeId);
+  const price = effectivePrice(product);
+  const listPrice = positiveNumber(product.price);
+  const paragraphs = descriptionParagraphs(product.description || product.shortDescription, 12);
+  const specs = product.specs && typeof product.specs === 'object' ? Object.keys(product.specs) : [];
+  const jsonLd = buildJsonLd(product, title, description, image, pageUrl);
   const escapedTitle = escapeHtml(title);
   const escapedDescription = escapeHtml(description);
   const escapedImage = escapeHtml(image);
@@ -166,14 +232,24 @@ function renderProductPreview(product, routeId) {
     '  <meta name="twitter:title" content="' + escapedTitle + '">',
     '  <meta name="twitter:description" content="' + escapedDescription + '">',
     '  <meta name="twitter:image" content="' + escapedImage + '">',
-    '  <meta http-equiv="refresh" content="0; url=' + escapedDestination + '">',
-    '  <script>window.location.replace(' + JSON.stringify(destination) + ');</script>',
-    '  <style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#080b1c;color:#fff;font:16px/1.6 system-ui,sans-serif;padding:24px;box-sizing:border-box}main{max-width:520px;text-align:center}a{color:#00d9ff}</style>',
+    '  <script type="application/ld+json">' + jsonLd + '</script>',
+    '  <style>body{margin:0;background:#080b1c;color:#fff;font:16px/1.6 system-ui,sans-serif;padding:24px 16px;box-sizing:border-box}main{max-width:720px;margin:0 auto}img{max-width:100%;height:auto;border-radius:12px}a{color:#00d9ff}.price{font-size:1.5rem;font-weight:700}.was{opacity:.6;text-decoration:line-through;margin-left:8px}.cta{display:inline-block;margin:16px 0;padding:14px 24px;min-height:44px;box-sizing:border-box;background:#00d9ff;color:#080b1c;border-radius:10px;font-weight:700;text-decoration:none}table{border-collapse:collapse}th,td{text-align:left;padding:6px 12px 6px 0;vertical-align:top}</style>',
     '</head>',
     '<body>',
     '  <main>',
-    '    <h1>Opening ' + escapedTitle + '…</h1>',
-    '    <p>If the product does not open automatically, <a href="' + escapedDestination + '">open it in LEXDEN NOVA</a>.</p>',
+    '    <p><a href="../../index.html">&larr; ' + APP_NAME + '</a></p>',
+    '    <h1>' + escapedTitle + '</h1>',
+    '    <img src="' + escapedImage + '" alt="' + escapedTitle + '" width="1200" height="630">',
+    price !== null
+      ? '    <p class="price">' + escapeHtml(formatUsd(price)) + (listPrice !== null && listPrice > price ? '<span class="was">' + escapeHtml(formatUsd(listPrice)) + '</span>' : '') + '</p>'
+      : '',
+    '    <p><a class="cta" href="' + escapedDestination + '">View and buy on ' + APP_NAME + '</a></p>',
+    paragraphs.map(function (text) { return '    <p>' + escapeHtml(text) + '</p>'; }).join('\n'),
+    specs.length
+      ? '    <h2>Details</h2>\n    <table>\n' + specs.map(function (key) {
+        return '      <tr><th scope="row">' + escapeHtml(key) + '</th><td>' + escapeHtml(product.specs[key]) + '</td></tr>';
+      }).join('\n') + '\n    </table>'
+      : '',
     '  </main>',
     '</body>',
     '</html>',
@@ -262,6 +338,8 @@ if (require.main === module) {
 }
 
 module.exports = {
+  PAGES_BASE,
+  fetchLiveProducts,
   DEMO_PRODUCT_IDS,
   getEligibleProducts,
   renderProductPreview,
