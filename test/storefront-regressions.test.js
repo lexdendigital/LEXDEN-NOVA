@@ -65,3 +65,12 @@ test('inline storefront scripts parse without syntax errors', () => {
   assert.ok(executable.length > 0, 'expected inline storefront JavaScript');
   for (const [, attrs, source] of executable) assert.doesNotThrow(() => new Function(source), `script ${attrs || '(inline)'}`);
 });
+
+test('SEO canonicals and offer URLs point at the crawlable pages on the app host, not the Render link host', () => {
+  assert.match(html, /function pagesProductUrl\(p\)\{ return PAGES_ROOT \+ 'product\/'/);
+  assert.match(html, /const url = pagesProductUrl\(p\);\s*\n\s*const cat = DB\.categories/);
+  assert.match(html, /const url = pagesFeedUrl\(post\.id\);/);
+  assert.match(html, /url: pagesProductUrl\(p\),/);
+  assert.match(html, /hasMerchantReturnPolicy/);
+  assert.match(html, /brand:\{'@type':'Brand'/);
+});

@@ -166,8 +166,11 @@ function buildJsonLd(product, title, description, image, pageUrl) {
   };
   if (product.itemCode) data.sku = String(product.itemCode);
   if (product.category) data.category = String(product.category);
-  if (product.seller) data.brand = { '@type': 'Brand', name: String(product.seller) };
+  // Google asks for a brand or other global identifier. The seller is the real
+  // provider of the item; fall back to the store name when none is recorded.
+  data.brand = { '@type': 'Brand', name: String(product.seller || APP_NAME) };
   if (price !== null) {
+    const isPhysical = String(product.productType || '').toUpperCase() === 'PHYSICAL';
     const outOfStock = product.physical && product.physical.stockStatus === 'out_of_stock';
     data.offers = {
       '@type': 'Offer',
@@ -175,7 +178,29 @@ function buildJsonLd(product, title, description, image, pageUrl) {
       priceCurrency: 'USD',
       price: price.toFixed(2),
       availability: 'https://schema.org/' + (outOfStock ? 'OutOfStock' : 'InStock'),
+      // Mirrors the 14-day window published in legal/refunds.html.
+      hasMerchantReturnPolicy: {
+        '@type': 'MerchantReturnPolicy',
+        applicableCountry: 'NG',
+        returnPolicyCategory: 'https://schema.org/MerchantReturnFiniteReturnWindow',
+        merchantReturnDays: 14,
+        merchantReturnLink: PAGES_BASE + '/legal/refunds.html',
+      },
     };
+    // Digital items have no postage. Physical items are priced by a live shipping
+    // quote at checkout, so no fixed rate is published for them.
+    if (!isPhysical) {
+      data.offers.shippingDetails = {
+        '@type': 'OfferShippingDetails',
+        shippingRate: { '@type': 'MonetaryAmount', value: 0, currency: 'USD' },
+        shippingDestination: { '@type': 'DefinedRegion', addressCountry: 'NG' },
+        deliveryTime: {
+          '@type': 'ShippingDeliveryTime',
+          handlingTime: { '@type': 'QuantitativeValue', minValue: 0, maxValue: 0, unitCode: 'DAY' },
+          transitTime: { '@type': 'QuantitativeValue', minValue: 0, maxValue: 0, unitCode: 'DAY' },
+        },
+      };
+    }
   }
   // Only publish ratings backed by at least one stored review.
   const rating = positiveNumber(product.rating);

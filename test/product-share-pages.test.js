@@ -87,3 +87,16 @@ test('Cloudinary social previews use a crawler-friendly 1200x630 JPEG transform'
     'https://res.cloudinary.com/example/image/upload/c_fill,w_1200,h_630,f_jpg,q_auto/v1/catalog/item.webp',
   );
 });
+
+test('product JSON-LD carries brand, return policy and digital shipping details; physical items omit a fixed rate', () => {
+  const ld = (product) => JSON.parse(renderProductPreview(product, 'p3').match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/)[1]);
+  const digital = ld({ id: 'p3', name: 'Course', price: 6, seller: 'Selar' });
+  assert.equal(digital.brand.name, 'Selar');
+  assert.equal(digital.offers.hasMerchantReturnPolicy.merchantReturnDays, 14);
+  assert.match(digital.offers.hasMerchantReturnPolicy.merchantReturnLink, /legal\/refunds\.html$/);
+  assert.equal(digital.offers.shippingDetails.shippingRate.value, 0);
+  assert.equal(ld({ id: 'p3', name: 'Course', price: 6 }).brand.name, 'LEXDEN NOVA');
+  const physical = ld({ id: 'p9', name: 'Charger', price: 12, productType: 'PHYSICAL' });
+  assert.ok(physical.offers.hasMerchantReturnPolicy);
+  assert.equal(physical.offers.shippingDetails, undefined);
+});
