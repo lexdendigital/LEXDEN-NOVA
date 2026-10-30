@@ -39,11 +39,14 @@ function getShippingPolicy(settings = {}) {
 }
 
 function conservativeDeliveryDays(option = {}, processingFallback = 0) {
-  const direct = Number(option.totalMaxDays ?? option.estimatedOrderToDoorMaxDays);
+  const directRaw = option.totalMaxDays ?? option.estimatedOrderToDoorMaxDays;
+  const direct = directRaw == null || directRaw === '' ? NaN : Number(directRaw);
   if (Number.isFinite(direct) && direct >= 0) return direct;
 
-  const processing = Number(option.processingMaxDays ?? option.processingDays ?? processingFallback);
-  const transit = Number(option.transitMaxDays ?? option.transitDays);
+  const processingRaw = option.processingMaxDays ?? option.processingDays ?? processingFallback;
+  const transitRaw = option.transitMaxDays ?? option.transitDays;
+  const processing = processingRaw == null || processingRaw === '' ? NaN : Number(processingRaw);
+  const transit = transitRaw == null || transitRaw === '' ? NaN : Number(transitRaw);
   if (Number.isFinite(processing) && processing >= 0 && Number.isFinite(transit) && transit >= 0) {
     return processing + transit;
   }
