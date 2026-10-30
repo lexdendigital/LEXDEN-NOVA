@@ -39,7 +39,42 @@ function createCjAdapter(overrides={}){
   async function checkStock(input={}){return stock(input);}
   async function getWarehouseInventory(input={}){const s=await stock(input);return s.ok?{ok:true,message:'Live CJ warehouse inventory retrieved.',data:{externalVariantId:s.data.externalVariantId,warehouses:s.data.warehouses}}:s;}
   async function quoteShipping(input={}){const vid=required({id:input.externalVariantId||input.variantId},'id','External CJ variant ID');const origin=required(input,'originCountryCode','Shipping origin country code').toUpperCase();const destination=required(input,'destinationCountryCode','Shipping destination country code').toUpperCase();if(!/^[A-Z]{2}$/.test(origin)||!/^[A-Z]{2}$/.test(destination))return failure('INVALID_COUNTRY_CODE','CJ freight requires ISO-2 origin and destination codes.');const qty=input.quantity==null?1:Number(input.quantity);if(!Number.isInteger(qty)||qty<1)return failure('INVALID_QUANTITY','Shipping quantity must be a positive whole number.');const b=await callRoute('shipping',{method:'POST',body:{startCountryCode:origin,endCountryCode:destination,products:[{vid,quantity:qty}]}});if(!b||b.ok===false)return b||failure('CJ_EMPTY_RESPONSE','CJ returned no shipping quote.');return success({externalVariantId:vid,originCountryCode:origin,destinationCountryCode:destination,options:(Array.isArray(b.options)?b.options:[]).map(x=>({shippingMethod:cleanText(x.logisticName,160),supplierShippingCost:Number(x.logisticPrice),currency:cleanText(x.currency||'USD',3),deliveryRange:cleanText(x.logisticAging,80),originCountryCode:cleanText(x.startCountryCode||origin,2)}))});}
-  async function createOrder(input={}){const ref=required(input,'orderReference','Verified NOVA order reference');const b=await callRoute('order',{method:'POST',body:{reference:ref}});if(!b||b.ok===false){if(b&&b.error==='funding_required'&&b.cj&&b.cj.orderId)return {ok:true,message:'CJ created the order; CJ wallet funding needs attention.',data:{externalOrderId:String(b.cj.orderId),externalShipmentOrderId:cleanText(b.cj.shipmentOrderId,160),externalOrderNumber:cleanText(b.cj.orderNumber,160),supplierStatus:cleanText(b.cj.status,80)||'CREATED_UNPAID',fundingState:cleanText(b.cj.fundingStatus||b.fundingState,80)||'unknown',fundingRequired:true}};return b||failure('CJ_EMPTY_RESPONSE','CJ returned no order response.');}const cj=b.cj||{};const id=cleanText(cj.orderId,160);if(!id)return failure('CJ_MISSING_ORDER_ID','CJ did not return a supplier order ID.');return success({externalOrderId:id,externalShipmentOrderId:cleanText(cj.shipmentOrderId,160),externalOrderNumber:cleanText(cj.orderNumber,160),supplierStatus:cleanText(cj.status,80)||'UNKNOWN',fundingRequired:cj.fundingStatus!=='paid'});}
+  async function createOrder(input={}) {
+    const ref=required(input,'orderReference','Verified NOVA order reference');
+    // Inspect the full trusted legacy handler response before reducing failures
+    // to the generic envelope: CJ may have created its order successfully but
+    // be unable to pay it from the CJ wallet. That is a funding exception, not
+    // an absent external order.
+    const result=await invokeHandler(deps.handlers.order,{method:'POST',body:{reference:ref}});
+    if(!routeOk(result)) {
+      const raw=result&&result.body;
+      if(raw&&raw.error==='funding_required'&&raw.cj&&raw.cj.orderId) {
+        return {
+          ok:true,
+          message:'CJ created the order; CJ wallet funding needs attention.',
+          data:{
+            externalOrderId:String(raw.cj.orderId),
+            externalShipmentOrderId:cleanText(raw.cj.shipmentOrderId,160),
+            externalOrderNumber:cleanText(raw.cj.orderNumber,160),
+            supplierStatus:cleanText(raw.cj.status,80)||'CREATED_UNPAID',
+            fundingState:cleanText(raw.cj.fundingStatus||raw.fundingState,80)||'unknown',
+            fundingRequired:true
+          }
+        };
+      }
+      return routeFailure(result);
+    }
+    const cj=result.body.cj||{};
+    const id=cleanText(cj.orderId,160);
+    if(!id)return failure('CJ_MISSING_ORDER_ID','CJ did not return a supplier order ID.');
+    return success({
+      externalOrderId:id,
+      externalShipmentOrderId:cleanText(cj.shipmentOrderId,160),
+      externalOrderNumber:cleanText(cj.orderNumber,160),
+      supplierStatus:cleanText(cj.status,80)||'UNKNOWN',
+      fundingRequired:cj.fundingStatus!=='paid'
+    });
+  }
   async function getOrder(input={}){const ref=cleanText(input.orderReference,180);const ext=cleanText(input.externalOrderId,180);if(!ref&&!ext)throw Object.assign(new Error('A NOVA order reference or CJ order ID is required.'),{code:'INVALID_INPUT'});const b=await callRoute('orders',{query:ref?{reference:ref}:{cjOrderId:ext}});if(!b||b.ok===false)return b||failure('CJ_EMPTY_RESPONSE','CJ returned no order details.');const o=b.order||b;return success({externalOrderId:cleanText(o.orderId||o.cjOrderId||ext,160),externalOrderNumber:cleanText(o.orderNumber,160),supplierStatus:cleanText(o.orderStatus||o.status,80),trackingNumber:cleanText(o.trackNumber||o.trackingNumber,160),carrier:cleanText(o.logisticName||o.carrier,120)});}
   async function getTracking(input={}){const n=required(input,'trackingNumber','Tracking number');const b=await callRoute('tracking',{query:{trackNumber:n}});if(!b||b.ok===false)return b||failure('CJ_EMPTY_RESPONSE','CJ returned no tracking details.');return success({carrier:cleanText(b.carrier,120),supplierStatus:cleanText(b.status,80),events:(Array.isArray(b.events)?b.events:[]).map(e=>({timestamp:cleanText(e.time,80),description:cleanText(e.description,300),location:cleanText(e.location,160)}))});}
   async function getFundingRequirements(){if(typeof deps.cjFetch!=='function')return failure('CJ_CLIENT_UNAVAILABLE','Global CJ client unavailable.');const r=await deps.cjFetch('/shopping/pay/getBalance',{method:'GET'});if(!r||!r.ok)return failure(r&&r.code||'CJ_BALANCE_UNAVAILABLE',r&&r.message||'CJ wallet balance unavailable.');const amount=Number(r.data&&r.data.amount);if(!Number.isFinite(amount)||amount<0)return failure('CJ_BALANCE_INVALID','CJ returned an invalid wallet balance.');return {ok:true,message:'CJ wallet balance retrieved.',data:{currency:'USD',walletBalance:amount,providerFundingModel:'CJ_WALLET'}};}
