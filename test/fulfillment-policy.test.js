@@ -76,3 +76,7 @@ test('unknown stock, shipping or delivery estimate remains unverified',()=>{
 test('business-day ETA is normalized conservatively',()=>{
   assert.equal(conservativeDeliveryDays({deliveryRange:'3-7 business days'},2),12);
 });
+test('null and missing delivery values are never interpreted as zero days',()=>{
+  assert.equal(conservativeDeliveryDays({totalMaxDays:null,estimatedOrderToDoorMaxDays:null}),null);
+  assert.equal(conservativeDeliveryDays({transitDays:null}),null);
+});
