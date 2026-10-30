@@ -44,7 +44,7 @@ function routeIds(product) {
   for (const mapping of Array.isArray(physical.supplierMappings) ? physical.supplierMappings : []) {
     add(mapping && mapping.supplierId);
   }
-  add(physical.supplierId);
+  if (!ids.length) add(physical.supplierId);
   return { disabled: false, ids };
 }
 
@@ -423,6 +423,7 @@ function createShippingQuoteService(options = {}) {
       variantId: selection.variantId,
       quantity,
       currency,
+      supplier: { supplierId: doc.supplierId, providerKey: doc.providerKey, name: clean(best.supplier.name, 120) },
       selectedRoute: { supplierId: doc.supplierId, providerKey: doc.providerKey },
       eligibleRoutes: candidates.map(candidate => ({
         supplierId: String(candidate.supplier.id),
