@@ -39,7 +39,7 @@ function buildCjOrderPayload(orderRef, order, product, cjMapping, qty) {
     shippingCustomerName: d.name || '',
     shippingPhone: d.phone || '',
     email: order.email || '',
-    shippingZip: d.postalCode || d.zip || '',
+    shippingZip: String(d.postalCode || d.zip || '').trim(),
     logisticName: d.shippingMethod || '',
     payType: 3,
     remark: `LEXDEN NOVA order ${orderRef}`,
@@ -64,7 +64,7 @@ function countryToIso2(country) {
 
 
 function canResumeSupplierOrderStatus(status) {
-  return ['paid', 'processing', 'supplier_created', 'funding_required'].includes(status);
+  return ['paid', 'processing', 'supplier_created', 'funding_required', 'cj_order_failed', 'delivery_details_issue'].includes(status);
 }
 
 function paystackBalanceText(snapshot) {
@@ -296,6 +296,19 @@ module.exports = async (req, res) => {
     }
 
     // ---- Create the CJ order. ----
+    // CJ's live API currently rejects an empty shippingZip for Nigeria and
+    // rejects letters in that field. Never spend another paid order on a
+    // supplier request we already know CJ will reject.
+    const courierPostalCode = String(order.delivery.postalCode || order.delivery.zip || '').trim();
+    if (!courierPostalCode || !/^[0-9\s\-+()./]+$/.test(courierPostalCode)) {
+      await orderRef.set({
+        status: 'delivery_details_issue',
+        requiresManualReview: true,
+        cjError: { message: 'Missing or unsupported courier postal code for CJ.', code: 'INVALID_POSTAL_CODE', at: FieldValue.serverTimestamp() },
+      }, { merge: true });
+      await writeSyncLog({ event: 'order.create', objectId: reference, success: false, message: 'invalid_or_missing_shipping_zip', tookMs: Date.now() - started });
+      return res.status(200).json({ ok: false, error: 'delivery_details_issue', message: 'A valid courier postal code is required before this supplier order can be created.' });
+    }
     const payload = buildCjOrderPayload(reference, order, product, cjMapping, qty);
     const createR = await cjFetch('/shopping/order/createOrderV2', { method: 'POST', body: payload });
     const tookMs = Date.now() - started;
