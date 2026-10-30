@@ -4,7 +4,7 @@ This directory defines the provider-neutral adapter boundary for the main LEXDEN
 
 ## Current scope
 
-The first implementation batch contains only the adapter contract and in-memory registry. It does not connect suppliers, read credentials, change Firestore, quote shipping, create orders, or make any supplier eligible for checkout.
+The main-store adapter contract, in-memory registry, and global CJ adapter are implemented. The CJ adapter reuses the existing global `cjFetch` token lifecycle and legacy CJ route handlers. It does not import creator-owned credentials. Adapter registration means code is loaded; it does not establish API connectivity, supplier verification, quote eligibility, or generic checkout readiness. Product mapping helpers and a dry-run migration preview are also available; no production catalog migration has run.
 
 The registry is intentionally process-local. A registered adapter means that its code is loaded and structurally valid. It does not mean that credentials exist, that a remote API is reachable, or that a supplier has been verified.
 
@@ -17,6 +17,7 @@ Every adapter must implement:
 
 An adapter may declare these operations only when it implements them:
 
+- `getCategories`
 - `searchProducts`
 - `getProduct`
 - `getVariants`
@@ -66,3 +67,18 @@ Adapter response `data` must contain normalized fields suitable for the consumin
 ## Test adapter
 
 The only fake adapter is in `test/fixtures/fake-supplier-adapter.js`. It is a test fixture, not a production provider and must never be registered by a runtime service.
+
+
+## Global CJ adapter
+
+The global CJ adapter lives in `api/fulfillment/providers/cj.js` and is registered by `api/fulfillment/bootstrap.js` when the Render Express app starts. It reuses the existing main-store CJ HTTP handlers and `api/cj-shared.js`. It does not import creator-scoped CJ client modules.
+
+The currently implemented capabilities are category search, product search/details, variants, live stock, warehouse inventory, live freight calculation, legacy order creation, order lookup, tracking and CJ-wallet balance inspection. Cancellation, returns, refunds and provider-neutral webhook receipt are not declared because the current main-store CJ implementation does not expose a verified generic operation for them.
+
+The current `createOrder` adapter method delegates to the existing main-store `api/cj-order.js` handler. It therefore retains the existing paid-order, legacy CJ product mapping, reserved legacy quote, live-stock, and CJ-wallet funding checks. Generic supplier mapping and quote dispatch are not yet enabled by this adapter; those are later implementation batches. A CJ funding exception after actual order creation is preserved as a created external order with a funding-required result.
+
+## Product mapping and migration
+
+`api/fulfillment/product-mapping.js` validates stable NOVA supplier IDs, provider keys, provider-specific product IDs and independent variant mappings. It includes a deterministic migration preview for legacy CJ mappings. The preview never writes Firestore and marks legacy candidates for review; it does not approve them for new fulfillment.
+
+The CJ MCP importer now requires exactly one active supplier registry entry with `providerKey: 'cj'`. It writes that NOVA registry ID to `physical.supplierId`, adds a provider-neutral mapping and keeps every new import in Draft with `approvedForFulfillment: false`. It will refuse the import if the registry mapping is missing or ambiguous. The external CJ supplier ID remains distinct and is not used as the NOVA registry ID.
