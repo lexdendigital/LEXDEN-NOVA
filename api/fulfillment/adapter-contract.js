@@ -146,7 +146,7 @@ function normalizeAdapterResponse(providerKey, result, now = () => new Date()) {
       providerKey,
       requestId,
       code: null,
-      message: safeString(result.message, 500) || 'Success',
+      message: result.message ? safeMessage(result.message) : 'Success',
       data: result.data === undefined ? null : result.data,
       timestamp,
     };

@@ -2,7 +2,7 @@ name: Node tests
 
 on:
   push:
-    branches: [main]
+    branches: [main, feature/multi-supplier-fulfillment]
   pull_request:
     branches: [main]
 

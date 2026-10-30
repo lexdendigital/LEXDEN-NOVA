@@ -212,6 +212,45 @@ test('clear removes registrations from an isolated registry', () => {
   assert.deepEqual(registry.listProviders(), []);
 });
 
+test('rejects malformed adapter response envelopes', async () => {
+  const registry = createProviderRegistry();
+  registry.registerProvider('supplierx', {
+    getCapabilities() { return ['checkStock']; },
+    async healthCheck() { return { ok: true, data: {} }; },
+    async checkStock() { return { available: true }; },
+  });
+
+  const result = await registry.callProvider('supplierx', 'checkStock');
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'INVALID_ADAPTER_RESPONSE');
+  assert.equal(result.data, null);
+});
+
+test('unknown adapter lookup throws a typed registry error', () => {
+  const registry = createProviderRegistry();
+  assert.throws(
+    () => registry.getProvider('missing'),
+    error => error instanceof ProviderRegistryError && error.code === 'PROVIDER_NOT_REGISTERED'
+  );
+});
+
+test('sanitizes credential-like fragments in successful response messages', async () => {
+  const registry = createProviderRegistry();
+  registry.registerProvider('supplierx', {
+    getCapabilities() { return ['checkStock']; },
+    async healthCheck() { return { ok: true, data: {} }; },
+    async checkStock() {
+      return { ok: true, message: 'Connected accessToken=private-value', data: { available: true } };
+    },
+  });
+
+  const result = await registry.callProvider('supplierx', 'checkStock');
+
+  assert.equal(result.ok, true);
+  assert.equal(result.message.includes('private-value'), false);
+});
+
 test('sanitizes credential-like fragments in normalized provider messages', async () => {
   const registry = createProviderRegistry();
   registry.registerProvider('supplierx', {
