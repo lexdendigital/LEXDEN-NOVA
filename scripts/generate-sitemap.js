@@ -73,7 +73,10 @@ function buildSitemapXml(urls) {
 
 async function main() {
   const products = await fetchLiveProducts();
-  const urls = collectStaticPages(ROOT).concat(productUrls(products));
+  // feed/ and affiliate-program/ are picked up by collectStaticPages because the
+  // content generator has already written them; the product index is added here
+  // because the product/ folder is otherwise skipped (its pages come from the catalog).
+  const urls = collectStaticPages(ROOT).concat([PAGES_BASE + '/product/'], productUrls(products));
   fs.writeFileSync(path.join(ROOT, 'sitemap.xml'), buildSitemapXml(urls), 'utf8');
   console.log('sitemap.xml written with ' + new Set(urls).size + ' URLs.');
 }

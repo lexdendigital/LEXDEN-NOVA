@@ -237,7 +237,7 @@ function renderProductPreview(product, routeId) {
     '</head>',
     '<body>',
     '  <main>',
-    '    <p><a href="../../index.html">&larr; ' + APP_NAME + '</a></p>',
+    '    <nav aria-label="Site"><a href="../../index.html">&larr; ' + APP_NAME + '</a> &middot; <a href="../">All products</a> &middot; <a href="../../feed/">Feed</a> &middot; <a href="../../affiliate-program/">Affiliate programme</a></nav>',
     '    <h1>' + escapedTitle + '</h1>',
     '    <img src="' + escapedImage + '" alt="' + escapedTitle + '" width="1200" height="630">',
     price !== null
@@ -339,6 +339,15 @@ if (require.main === module) {
 
 module.exports = {
   PAGES_BASE,
+  APP_NAME,
+  GENERATOR_MARKER,
+  FIRESTORE_URL,
+  firestoreValue,
+  escapeHtml,
+  plainText,
+  productImage,
+  effectivePrice,
+  formatUsd,
   fetchLiveProducts,
   DEMO_PRODUCT_IDS,
   getEligibleProducts,

@@ -10,6 +10,7 @@ on:
     paths:
       - "scripts/generate-product-share-pages.js"
       - "scripts/generate-sitemap.js"
+      - "scripts/generate-content-pages.js"
       - ".github/workflows/sync-product-share-pages.yml"
 
 permissions:
@@ -38,6 +39,9 @@ jobs:
       - name: Generate per-product preview pages from live Firestore
         run: node scripts/generate-product-share-pages.js
 
+      - name: Generate feed, product index and affiliate programme pages
+        run: node scripts/generate-content-pages.js
+
       - name: Generate sitemap.xml from the same live catalog
         run: node scripts/generate-sitemap.js
 
@@ -47,7 +51,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add product/ sitemap.xml
+          git add product/ feed/ affiliate-program/ sitemap.xml
           if git diff --cached --quiet; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
             echo "Product pages and sitemap already match the live catalog."
