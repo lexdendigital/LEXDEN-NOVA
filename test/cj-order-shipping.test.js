@@ -13,6 +13,7 @@ test('CJ order payload receives the exact route chosen at checkout', () => {
       address: 'Example Street',
       name: 'Customer',
       phone: '08000000000',
+      postalCode: '102001',
       shippingMethod: 'CJPacket Postal',
       shippingOriginCountry: 'NG',
       shippingQuoteId: '12345678-1234-1234-1234-123456789abc',
@@ -24,14 +25,17 @@ test('CJ order payload receives the exact route chosen at checkout', () => {
   assert.equal(payload.shippingCountry, 'Nigeria');
   assert.equal(payload.fromCountryCode, 'NG');
   assert.equal(payload.email, 'buyer@example.com');
+  assert.equal(payload.shippingZip, '102001');
   assert.equal(payload.payType, 3);
   assert.equal(payload.products[0].vid, 'cj-variant-1');
 });
 
 
-test('funding holds remain resumable without recreating the CJ order', () => {
+test('supplier orders can resume from funding or recoverable delivery/CJ failures', () => {
   assert.equal(cjOrderHandler.canResumeSupplierOrderStatus('funding_required'), true);
   assert.equal(cjOrderHandler.canResumeSupplierOrderStatus('supplier_created'), true);
+  assert.equal(cjOrderHandler.canResumeSupplierOrderStatus('cj_order_failed'), true);
+  assert.equal(cjOrderHandler.canResumeSupplierOrderStatus('delivery_details_issue'), true);
   assert.equal(cjOrderHandler.canResumeSupplierOrderStatus('stock_issue'), false);
 });
 
@@ -76,4 +80,16 @@ test('warehouse parser unwraps nested CJ warehouse arrays', () => {
     data: { byWarehouse: [{ area: 'NG', qty: 3 }, { area: 'CN', qty: 20 }] },
   });
   assert.deepEqual(rows.map(row => row.area), ['NG', 'CN']);
+});
+
+
+test('CJ payload preserves courier postal code verbatim after trimming', () => {
+  const payload = cjOrderHandler.buildCjOrderPayload('LN-ZIP', {
+    delivery: {
+      country: 'Nigeria', state: 'Lagos', city: 'Lagos', address: 'Example',
+      name: 'Customer', phone: '08000000000', postalCode: ' 102001 ',
+      shippingMethod: 'CJPacket Postal', shippingOriginCountry: 'CN',
+    },
+  }, { id: 'nova-product' }, { variantId: 'cj-variant-1' }, 1);
+  assert.equal(payload.shippingZip, '102001');
 });
