@@ -63,6 +63,7 @@ const cjOrderHandler = require('./cj-order');
 const { resolveProductSelection } = require('./product-variants');
 const { validateProviderNeutralQuote } = require('./fulfillment/quote-validation');
 const { createFulfillmentDispatcher } = require('./fulfillment/order-dispatcher');
+const { getShippingPolicy } = require('./fulfillment/policy');
 const { paystackKeyCandidates } = require('./_paystackMode');
 // LEXDEN NOVA CREATOR (Stages D/E/F): creator-product purchases are a
 // second catalog (products/{id}), checked ONLY after the legacy lookup
@@ -620,7 +621,7 @@ module.exports = async function handler(req, res) {
     let trustedFulfillment = null;
 
     if (shippingQuote && shippingQuote.supplierId && shippingQuote.providerKey) {
-      const amountForQuoteValidation = Number.isSafeInteger(Number(paystackData.requested_amount))
+      const amountForQuoteValidation = paystackData.requested_amount != null && Number.isSafeInteger(Number(paystackData.requested_amount))
         ? Number(paystackData.requested_amount)
         : Number(paystackData.amount);
       const validated = validateProviderNeutralQuote({
@@ -637,6 +638,7 @@ module.exports = async function handler(req, res) {
         reference,
         quantity: 1,
         suppliers,
+        policy: getShippingPolicy(settingsData),
       });
       if (!validated.ok) {
         console.warn(`Provider-neutral shipping quote validation failed: ref=${reference} quote=${quoteId} code=${validated.code}`);
