@@ -63,9 +63,9 @@ function evaluateShippingPolicy({ shippingUSD, totalMaxDeliveryDays, stockVerifi
   const reasons = [];
   if (p.requireVerifiedStock && stockVerified !== true) reasons.push('STOCK_UNVERIFIED');
   if (p.requireVerifiedShipping && shippingVerified !== true) reasons.push('NO_SHIPPING_QUOTE');
-  if (!Number.isFinite(Number(shippingUSD))) reasons.push('SHIPPING_UNVERIFIED');
+  if (shippingUSD === null || shippingUSD === undefined || shippingUSD === '' || !Number.isFinite(Number(shippingUSD))) reasons.push('SHIPPING_UNVERIFIED');
   else if (Number(shippingUSD) > Number(p.maxShippingUSD)) reasons.push('SHIPPING_TOO_EXPENSIVE');
-  if (!Number.isFinite(Number(totalMaxDeliveryDays))) reasons.push('DELIVERY_UNVERIFIED');
+  if (totalMaxDeliveryDays === null || totalMaxDeliveryDays === undefined || totalMaxDeliveryDays === '' || !Number.isFinite(Number(totalMaxDeliveryDays))) reasons.push('DELIVERY_UNVERIFIED');
   else if (Number(totalMaxDeliveryDays) > Number(p.maxDeliveryDays)) reasons.push('DELIVERY_TOO_SLOW');
   return { eligible: reasons.length === 0, reasons };
 }
