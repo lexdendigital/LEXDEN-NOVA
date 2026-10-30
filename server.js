@@ -14,8 +14,12 @@
 const express = require('express');
 const cors = require('cors');
 const { mountMcp, recordServerError } = require('./mcp');
+const { registerBuiltInProviders } = require('./api/fulfillment/bootstrap');
 
 const app = express();
+
+// Register the global main-store CJ adapter; this does not verify credentials or remote connectivity.
+registerBuiltInProviders();
 
 // ---- In-memory recent-error ring buffer (feeds nova_get_recent_server_errors
 // via Claude's MCP connection) — Render's free tier has no log API, so this

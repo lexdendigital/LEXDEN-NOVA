@@ -7,6 +7,7 @@
 const PROVIDER_KEY_PATTERN = /^[a-z][a-z0-9_-]{1,63}$/;
 
 const OPERATIONS = Object.freeze([
+  'getCategories',
   'searchProducts',
   'getProduct',
   'getVariants',
