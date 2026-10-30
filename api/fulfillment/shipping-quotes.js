@@ -90,22 +90,12 @@ function supplierCost(mapping, variantMapping, physical, settings) {
   return usd == null ? null : { amount: Number(amount), currency: clean(currency, 3).toUpperCase(), usd };
 }
 
-function deliverySettings(settings) {
-  const root = settings && settings.content ? settings.content : (settings || {});
-  const saved = root.commercePricingPolicy || {};
-  const shipping = saved.shipping || {};
+function deliverySettings(settings = {}) {
+  // Compatibility helper: expose the centrally configured limit without
+  // inventing a default or mutating the legacy commerce-pricing settings.
   return {
-    max: 15,
-    settings: {
-      ...settings,
-      content: {
-        ...root,
-        commercePricingPolicy: {
-          ...saved,
-          shipping: { ...shipping, maxDeliveryDays: 15, allowEconomyOverMaxDays: false },
-        },
-      },
-    },
+    max: getShippingPolicy(settings).maxDeliveryDays,
+    settings,
   };
 }
 
@@ -403,7 +393,7 @@ function createShippingQuoteService(options = {}) {
       estimatedOrderToDoorMaxDays: best.totalMaxDeliveryDays,
       serviceLevel: 'verified',
       serviceLabel: 'NOVA Verified Delivery',
-      deliveryEstimate: best.totalMaxDeliveryDays + ' days or less',
+      deliveryEstimate: best.totalMaxDeliveryDays == null ? null : best.totalMaxDeliveryDays + ' days or less',
       requiresExplicitChoice: false,
       grossMarginPct: best.grossMarginPct,
       policyMaxDeliveryDays: policy.maxDeliveryDays,
