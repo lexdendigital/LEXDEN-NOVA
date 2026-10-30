@@ -61,6 +61,8 @@ const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const { queueEmailBackground } = require('./email-shared');
 const cjOrderHandler = require('./cj-order');
 const { resolveProductSelection } = require('./product-variants');
+const { validateProviderNeutralQuote } = require('./fulfillment/quote-validation');
+const { createFulfillmentDispatcher } = require('./fulfillment/order-dispatcher');
 const { paystackKeyCandidates } = require('./_paystackMode');
 // LEXDEN NOVA CREATOR (Stages D/E/F): creator-product purchases are a
 // second catalog (products/{id}), checked ONLY after the legacy lookup
@@ -100,11 +102,6 @@ function timestampMillis(value) {
   const parsed = Date.parse(value || '');
   return Number.isFinite(parsed) ? parsed : null;
 }
-function samePaidMinorUnits(paidMinor, majorAmount) {
-  return Number.isFinite(Number(majorAmount)) && Number(paidMinor) === Math.round(Number(majorAmount) * 100);
-}
-
-
 function fsValue(v) {
   if (v == null) return null;
   if ('stringValue' in v) return v.stringValue;
@@ -441,7 +438,7 @@ module.exports = async function handler(req, res) {
   // — nothing here can affect the existing digital checkout path.
   let deliveryDetails = null;
   if (delivery && typeof delivery === 'object') {
-    const { name, phone, address, city, state, country } = delivery;
+    const { name, phone, address, city, state, country, postalCode, digitalPostcode } = delivery;
     if (name && phone && address && city && state && country) {
       deliveryDetails = {
         name: String(name).trim().slice(0, 200),
@@ -450,6 +447,8 @@ module.exports = async function handler(req, res) {
         city: String(city).trim().slice(0, 120),
         state: String(state).trim().slice(0, 120),
         country: String(country).trim().slice(0, 120),
+        ...(postalCode ? { postalCode: String(postalCode).trim().slice(0, 32) } : {}),
+        ...(digitalPostcode ? { digitalPostcode: String(digitalPostcode).trim().slice(0, 40) } : {}),
       };
     } else {
       console.warn('verify-paystack: delivery object present but missing a required address field.');
@@ -544,6 +543,10 @@ module.exports = async function handler(req, res) {
           }).catch(e => console.error('creator earning retry failed:', e.message));
         }
       }
+      if (o.fulfillment && o.fulfillment.mode === 'API_SUPPLIER') {
+        createFulfillmentDispatcher().enqueueAndDispatch(db, reference)
+          .catch(e => console.error('provider-neutral supplier dispatch retry failed:', e.message));
+      }
       return res.status(200).json({ ok: true });
     }
   } catch (e) {
@@ -574,6 +577,9 @@ module.exports = async function handler(req, res) {
   }
 
   const amountMajor = paystackData.amount / 100;
+  const requestedAmountMinor = Number.isSafeInteger(Number(paystackData.requested_amount))
+    ? Number(paystackData.requested_amount)
+    : null;
 
   // ---- Reject underpayment. A verified-paid reference alone isn't proof
   // the shopper paid the RIGHT amount — only that some amount was paid.
@@ -587,10 +593,16 @@ module.exports = async function handler(req, res) {
   }
   let shippingQuote = null;
   let shippingQuoteValidated = false;
+  let providerFulfillment = null;
   const resolvedProduct = selection && selection.product;
-  const isLegacyCjPhysical = !!(!selection?.creator && resolvedProduct && resolvedProduct.productType === 'PHYSICAL' && resolvedProduct.physical && resolvedProduct.physical.cj && resolvedProduct.physical.cj.variantId);
+  const physicalMappings = resolvedProduct && resolvedProduct.physical && Array.isArray(resolvedProduct.physical.supplierMappings) ? resolvedProduct.physical.supplierMappings : [];
+  const isAutomatedPhysical = !!(!selection?.creator && resolvedProduct && resolvedProduct.productType === 'PHYSICAL' && resolvedProduct.physical && (physicalMappings.some(m => m && m.status === 'MAPPED' && m.approvedForFulfillment === true) || (resolvedProduct.physical.cj && (resolvedProduct.physical.cj.variantId || resolvedProduct.physical.cj.productId))));
   const quoteId = String(requestShippingQuoteId || (delivery && delivery.shippingQuoteId) || '').trim();
-  if (isLegacyCjPhysical) {
+  if (isAutomatedPhysical) {
+    const courierPostalCode = deliveryDetails && String(deliveryDetails.postalCode || '').trim();
+    if (!courierPostalCode || !/^[0-9\s\-+()./]+$/.test(courierPostalCode)) {
+      return res.status(200).json({ ok: false, error: 'A valid courier postal code is required for this CJ shipment. No supplier order was created. Contact support with your payment reference.' });
+    }
     if (!quoteId || !deliveryDetails) {
       console.warn(`CJ physical checkout has no validated shipping quote: ref=${reference} product=${productId}`);
       return res.status(200).json({ ok: false, error: 'This physical order has no valid shipping quote. It has not been fulfilled. Please contact support with your payment reference.' });
@@ -601,34 +613,85 @@ module.exports = async function handler(req, res) {
     const quoteRef = db.collection('shippingQuotes').doc(quoteId);
     const quoteSnap = await quoteRef.get();
     shippingQuote = quoteSnap.exists ? quoteSnap.data() : null;
-    const payTime = timestampMillis(paystackData.paid_at) || timestampMillis(paystackData.created_at) || Date.now();
-    const quoteCreatedAt = timestampMillis(shippingQuote && shippingQuote.createdAt);
-    const quoteExpiresAt = timestampMillis(shippingQuote && shippingQuote.expiresAt);
-    const countryCode = countryCodeForShipping(deliveryDetails.country);
-    const currentPrice = Number(selection.price);
-    const quotePrice = Number(shippingQuote && shippingQuote.productAmountMajor);
-    if (!shippingQuote || !['open', 'reserved'].includes(shippingQuote.status) || (shippingQuote.status === 'reserved' && shippingQuote.usedBy !== reference)
-      || String(shippingQuote.productId) !== String(productId)
-      || String(shippingQuote.variantId || '') !== String(selection.variantId || '')
-      || String(shippingQuote.currency) !== String(paidCurrency)
-      || String(shippingQuote.endCountryCode) !== String(countryCode || '')
-      || !shippingQuote.logisticName
-      || !Number.isFinite(quoteCreatedAt) || !Number.isFinite(quoteExpiresAt)
-      || payTime < quoteCreatedAt - 60_000 || payTime > quoteExpiresAt
-      || !Number.isFinite(quotePrice) || Math.round(quotePrice * 100) !== Math.round(currentPrice * 100)) {
-      console.warn(`CJ shipping quote validation failed: ref=${reference} quote=${quoteId} product=${productId}`);
-      return res.status(200).json({ ok: false, error: 'The shipping quote expired or no longer matches this item, option, country or price. No shipment was created. Contact support with your payment reference.' });
+
+    const settingsSnap = await db.doc('catalog/settings').get();
+    const settingsData = settingsSnap.exists ? settingsSnap.data() || {} : {};
+    const suppliers = Array.isArray(settingsData.suppliers) ? settingsData.suppliers : [];
+    let trustedFulfillment = null;
+
+    if (shippingQuote && shippingQuote.supplierId && shippingQuote.providerKey) {
+      const amountForQuoteValidation = Number.isSafeInteger(Number(paystackData.requested_amount))
+        ? Number(paystackData.requested_amount)
+        : Number(paystackData.amount);
+      const validated = validateProviderNeutralQuote({
+        quote: shippingQuote,
+        product: resolvedProduct,
+        selection,
+        delivery: deliveryDetails,
+        payment: {
+          currency: paidCurrency,
+          amountMinor: amountForQuoteValidation,
+          paidAt: paystackData.paid_at,
+          createdAt: paystackData.created_at,
+        },
+        reference,
+        quantity: 1,
+        suppliers,
+      });
+      if (!validated.ok) {
+        console.warn(`Provider-neutral shipping quote validation failed: ref=${reference} quote=${quoteId} code=${validated.code}`);
+        return res.status(200).json({
+          ok: false,
+          error: 'The saved delivery route is no longer valid for this item, address or payment. The payment was not sent to a supplier; contact support with your reference.',
+        });
+      }
+      trustedFulfillment = validated.fulfillment;
+      providerFulfillment = trustedFulfillment;
+      deliveryDetails = { ...deliveryDetails, ...validated.delivery };
+      shippingQuoteValidated = true;
+    } else {
+      // Compatibility path for a short-lived legacy CJ quote created before
+      // provider-neutral quoting was deployed. New quotes always include supplier/provider IDs.
+      const payTime = timestampMillis(paystackData.paid_at) || timestampMillis(paystackData.created_at) || Date.now();
+      const quoteCreatedAt = timestampMillis(shippingQuote && shippingQuote.createdAt);
+      const quoteExpiresAt = timestampMillis(shippingQuote && shippingQuote.expiresAt);
+      const countryCode = countryCodeForShipping(deliveryDetails.country);
+      const currentPrice = Number(selection.price);
+      const quotePrice = Number(shippingQuote && shippingQuote.productAmountMajor);
+      if (!shippingQuote || !['open', 'reserved'].includes(shippingQuote.status) || (shippingQuote.status === 'reserved' && shippingQuote.usedBy !== reference)
+        || String(shippingQuote.productId) !== String(productId)
+        || String(shippingQuote.variantId || '') !== String(selection.variantId || '')
+        || String(shippingQuote.currency) !== String(paidCurrency)
+        || String(shippingQuote.endCountryCode) !== String(countryCode || '')
+        || !shippingQuote.logisticName
+        || !Number.isFinite(quoteCreatedAt) || !Number.isFinite(quoteExpiresAt)
+        || payTime < quoteCreatedAt - 60_000 || payTime > quoteExpiresAt
+        || !Number.isFinite(quotePrice) || Math.round(quotePrice * 100) !== Math.round(currentPrice * 100)) {
+        return res.status(200).json({ ok: false, error: 'The shipping quote expired or no longer matches this item, option, country or price. No supplier order was created.' });
+      }
+      const quoteTotal = Number(shippingQuote.totalAmountMajor);
+      const quoteShipping = Number(shippingQuote.shippingAmountMajor);
+      if (!Number.isFinite(quoteTotal) || !Number.isFinite(quoteShipping) || quoteShipping < 0
+        || Math.round((quotePrice + quoteShipping) * 100) !== Math.round(quoteTotal * 100)) {
+        return res.status(200).json({ ok: false, error: 'The saved shipping total failed validation. No supplier order was created.' });
+      }
+      shippingQuoteValidated = true;
+      deliveryDetails.shippingQuoteId = quoteId;
+      deliveryDetails.shippingMethod = String(shippingQuote.logisticName);
+      deliveryDetails.shippingOriginCountry = countryCodeForShipping(shippingQuote.startCountryCode) || 'CN';
+      deliveryDetails.shippingAmountMajor = quoteShipping;
+      deliveryDetails.shippingCurrency = String(shippingQuote.currency);
+      deliveryDetails.shippingAmountUSD = Number(shippingQuote.shippingAmountUSD);
+      deliveryDetails.shippingETA = shippingQuote.logisticAging || null;
+      deliveryDetails.shippingServiceLevel = shippingQuote.serviceLevel || null;
+      deliveryDetails.shippingServiceLabel = shippingQuote.serviceLabel || 'NOVA Delivery';
+      deliveryDetails.shippingDeliveryEstimate = shippingQuote.deliveryEstimate || null;
+      deliveryDetails.shippingEstimatedMaxDays = Number.isFinite(Number(shippingQuote.estimatedOrderToDoorMaxDays))
+        ? Number(shippingQuote.estimatedOrderToDoorMaxDays) : null;
+      deliveryDetails.shippingProcessingAllowanceDays = Number.isFinite(Number(shippingQuote.processingAllowanceDays))
+        ? Number(shippingQuote.processingAllowanceDays) : null;
+      deliveryDetails.shippingQuoteExpiresAt = new Date(quoteExpiresAt).toISOString();
     }
-    const quoteTotal = Number(shippingQuote.totalAmountMajor);
-    const quoteShipping = Number(shippingQuote.shippingAmountMajor);
-    if (!Number.isFinite(quoteTotal) || !Number.isFinite(quoteShipping) || quoteShipping < 0
-      || Math.round((quotePrice + quoteShipping) * 100) !== Math.round(quoteTotal * 100)) {
-      return res.status(200).json({ ok: false, error: 'The saved shipping total failed validation. No shipment was created; contact support with your payment reference.' });
-    }
-    if (shippingQuote.blockedByPricingPolicy === true) {
-      return res.status(200).json({ ok: false, error: 'The selected shipping route exceeds the product affordability limit. The order was not fulfilled. Contact support with your payment reference.' });
-    }
-    shippingQuoteValidated = true;
     deliveryDetails.shippingQuoteId = quoteId;
     deliveryDetails.shippingMethod = String(shippingQuote.logisticName);
     deliveryDetails.shippingOriginCountry = countryCodeForShipping(shippingQuote.startCountryCode) || 'CN';
@@ -649,7 +712,7 @@ module.exports = async function handler(req, res) {
   // Creator products: the amount must match OUR price EXACTLY (integer minor units). A mismatch is
   // never fulfilled and never silently accepted; it is recorded so an admin can refund it.
   if (selection && selection.creator && expectedAmount !== null && expectedAmount !== undefined) {
-    const chk = checkout.checkAmount({ paidMinor: paystackData.amount, expectedMajor: expectedAmount });
+    const chk = checkout.checkAmount({ paidMinor: paystackData.amount, requestedMinor: requestedAmountMinor, expectedMajor: expectedAmount });
     if (!chk.ok) {
       console.warn(`Creator amount mismatch: ref=${reference} product=${productId} paid=${paystackData.amount} expected=${chk.expectedMinor}`);
       await checkout.openException(db, { orderId: reference, code: checkout.EXCEPTION_CODES.AMOUNT_MISMATCH, creatorId: selection.creator.creatorId, productId: selection.creator.productId, buyerUid: uid || null, amountMinor: paystackData.amount, details: { expectedMinor: chk.expectedMinor, direction: chk.direction || null } }).catch(e => console.error('exception write failed:', e.message));
@@ -663,7 +726,7 @@ module.exports = async function handler(req, res) {
     const tolerance = shippingQuoteValidated ? 0 : Math.max(1, Math.ceil(expectedAmount * 0.02)); // existing legacy tolerance; exact for live shipping quotes
     // CJ shipping quotes bind item + freight into one exact amount. Ordinary legacy/digital prices retain their prior tolerance.
     let blocked = shippingQuoteValidated
-      ? !samePaidMinorUnits(paystackData.amount, expectedAmount)
+      ? !checkout.checkAmount({ paidMinor: paystackData.amount, requestedMinor: requestedAmountMinor, expectedMajor: expectedAmount }).ok
       : selection.creator ? false : amountMajor < expectedAmount - tolerance;
     if (blocked && !selection.creator && !shippingQuoteValidated) {
       // Re-read the catalog FRESH before rejecting: the cached price may be
@@ -717,6 +780,18 @@ module.exports = async function handler(req, res) {
     }
   }
 
+  // For fees/commissions, use NOVA's merchandise price rather than Paystack's
+  // gross customer charge. With fee pass-through enabled, paystackData.amount
+  // includes Paystack's fee; that extra money is not seller/affiliate revenue.
+  const merchandiseAmountMajor = shippingQuoteValidated
+    ? Number(shippingQuote.productAmountMajor)
+    : Number(selection.price);
+  const expectedMinorForAudit = Number.isFinite(Number(expectedAmount)) ? Math.round(Number(expectedAmount) * 100) : null;
+  const paystackFeePassThrough = requestedAmountMinor !== null
+    && expectedMinorForAudit !== null
+    && requestedAmountMinor === expectedMinorForAudit
+    && Number(paystackData.amount) > expectedMinorForAudit;
+
   const orderProductName = selection.variantName
     ? `${selection.product.name || productName || 'Product'} — ${selection.variantName}`
     : selection.product.name || productName || null;
@@ -747,7 +822,10 @@ module.exports = async function handler(req, res) {
       variantName: selection.variantName || null,
       paystackReference: reference,
       amount: amountMajor,
-      productAmount: shippingQuoteValidated ? Number(shippingQuote.productAmountMajor) : amountMajor,
+      productAmount: merchandiseAmountMajor,
+      paystackRequestedAmount: requestedAmountMinor !== null ? requestedAmountMinor / 100 : null,
+      paystackFeePassedToCustomer: paystackFeePassThrough,
+      paystackFeePassedToCustomerAmount: paystackFeePassThrough ? (Number(paystackData.amount) - requestedAmountMinor) / 100 : 0,
       shippingAmount: shippingQuoteValidated ? Number(shippingQuote.shippingAmountMajor) : 0,
       shippingMethod: shippingQuoteValidated ? String(shippingQuote.logisticName) : null,
       priceBreakdown: shippingQuoteValidated ? {
@@ -766,6 +844,7 @@ module.exports = async function handler(req, res) {
       paidAt: paystackData.paid_at || null,
       delivery: deliveryDetails,
       affiliateRef: affiliateRef || null,
+      ...(providerFulfillment ? { fulfillment: providerFulfillment } : {}),
       // Only present for a creator-product purchase; read back by the
       // idempotency-retry block above.
       ...(exceptionOpen ? { exceptionOpen: true } : {}),
@@ -818,7 +897,7 @@ module.exports = async function handler(req, res) {
         await grantEntitlement(db, {
           orderId: reference, productId: selection.creator.productId, versionId: selection.creator.versionId,
           buyerUid: uid || null, buyerEmail: buyerEmail || null, assetIds: selection.creator.assetIds,
-          price: amountMajor, currency: paidCurrency, productTitle: orderProductName,
+          price: merchandiseAmountMajor, currency: paidCurrency, productTitle: orderProductName,
         });
       }
     } catch (e) {
@@ -865,8 +944,13 @@ module.exports = async function handler(req, res) {
   // legacy admin-curated catalog only. A creator's PHYSICAL_PRODUCT already
   // got its own fulfillment record above; a CJ_DROPSHIP one is placed in the
   // creator's OWN CJ account by api/supplier/orders.js (Stage G).
-  if (deliveryDetails && !selection.creator) {
-    createCjOrderInBackground(reference).catch(e => console.error('cj-order background trigger failed:', e.message));
+  if (providerFulfillment && !selection.creator) {
+    createFulfillmentDispatcher().enqueueAndDispatch(db, reference)
+      .catch(e => console.error('provider-neutral supplier dispatch failed:', e.message));
+  } else if (deliveryDetails && !selection.creator && resolvedProduct && resolvedProduct.physical && resolvedProduct.physical.cj) {
+    // Compatibility only for an already-paid legacy CJ quote that predates
+    // provider-neutral route snapshots.
+    createCjOrderInBackground(reference).catch(e => console.error('legacy cj-order background trigger failed:', e.message));
   }
 
   // ---- AFFILIATE PROGRAM: attribute commission, same fire-and-forget
@@ -874,7 +958,7 @@ module.exports = async function handler(req, res) {
   // already-successful payment response.
   attributeAffiliateCommission(db, {
     reference, buyerUid: uid, productId, variantId: selection.variantId, productName: orderProductName,
-    amountMajor: shippingQuoteValidated ? Number(shippingQuote.productAmountMajor) : amountMajor,
+    amountMajor: merchandiseAmountMajor,
     currency: paidCurrency, affiliateRef, affiliateRefSource,
   }).catch(e => console.error('affiliate commission attribution failed:', e.message));
 
@@ -885,7 +969,7 @@ module.exports = async function handler(req, res) {
     attributeCreatorEarning(db, {
       reference, creatorId: selection.creator.creatorId, productId: selection.creator.productId,
       productTitle: orderProductName, offeringType: selection.creator.offeringType,
-      amountMajor, currency: paidCurrency, exceptionOpen,
+      amountMajor: merchandiseAmountMajor, currency: paidCurrency, exceptionOpen,
     }).catch(e => console.error('creator earning attribution failed:', e.message));
   }
 
