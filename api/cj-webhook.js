@@ -14,7 +14,7 @@
 // silently break signature verification on subtle whitespace/key-order
 // differences.
 //
-// Configure this URL in CJ as: https://YOUR-PROJECT.vercel.app/api/cj-webhook
+// Configure this URL in CJ as: https://lexden-nova.onrender.com/api/cj-webhook
 
 module.exports.config = { api: { bodyParser: false } };
 
