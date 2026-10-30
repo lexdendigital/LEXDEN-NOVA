@@ -831,6 +831,7 @@ function openDeliveryDetailsModal(product, selectedVariant, onSubmit){
     +'<div class="form-field"><label>Delivery address</label><input id="dd_address" autocomplete="street-address" placeholder="Street address"></div>'
     +'<div class="form-field"><label>City</label><input id="dd_city" autocomplete="address-level2" placeholder="City"></div>'
     +'<div class="form-field"><label>State</label><input id="dd_state" autocomplete="address-level1" placeholder="State/Province"></div>'
+    +(requiresCjQuote?'<div class="form-field"><label>Courier postal code</label><input id="dd_postalCode" inputmode="numeric" autocomplete="postal-code" placeholder="e.g. 102001"><div class="text-2 small" style="margin-top:4px;">CJ currently accepts only numbers, symbols and spaces in this field. Use the courier-compatible postal code for this address; do not enter Nigeria\'s new alphanumeric Digital Postcode here.</div></div>':'')
     +'<div class="form-field"><label>Country</label>'+customSelect('dd_country',countries[0],countries.map(country=>({value:country,label:country})), '', ()=>{ if(requiresCjQuote) cjRefreshShippingEstimate(product,selectedVariant); })+'</div>'
     +routeField
     +'<p class="small text-2" id="dd_shippingEstimate" style="min-height:34px;"></p>'
@@ -852,7 +853,10 @@ function openDeliveryDetailsModal(product, selectedVariant, onSubmit){
     const city=$('#dd_city').value.trim();
     const state=$('#dd_state').value.trim();
     const country=$('#dd_country').value;
+    const postalCode=requiresCjQuote ? ($('#dd_postalCode')?.value||'').trim() : '';
     if(!name||!phone||!address||!city||!state||!country){if(errEl)errEl.textContent='Name, phone, address, city, state and country are required for delivery.';return;}
+    if(requiresCjQuote && !postalCode){if(errEl)errEl.textContent='Courier postal code is required before payment. No payment has been taken.';return;}
+    if(requiresCjQuote && !/^[0-9\s\-+()./]+$/.test(postalCode)){if(errEl)errEl.textContent='CJ only accepts numbers, symbols and spaces in the courier postal code field. No payment has been taken.';return;}
     let quoteDetails={};
     if(requiresCjQuote){
       const quoteId=routeSelect&&routeSelect.value;
@@ -866,7 +870,7 @@ function openDeliveryDetailsModal(product, selectedVariant, onSubmit){
       quoteDetails={shippingQuoteId:quote.quoteId,shippingMethod:quote.logisticName,shippingServiceLevel:quote.serviceLevel||null,shippingServiceLabel:quote.serviceLabel||'NOVA Delivery',shippingDeliveryEstimate:quote.deliveryEstimate||null,shippingEstimatedMaxDays:Number.isFinite(Number(quote.estimatedOrderToDoorMaxDays))?Number(quote.estimatedOrderToDoorMaxDays):null,shippingAmountMajor:Number(quote.shippingAmountMajor),shippingCurrency:quote.currency,shippingAmountUSD:Number(quote.logisticPrice),shippingETA:quote.logisticAging||null,shippingQuoteExpiresAt:quote.quoteExpiresAt};
     }
     closeDeliveryDetailsModal();
-    onSubmit(Object.assign({name,phone,address,city,state,country},quoteDetails));
+    onSubmit(Object.assign({name,phone,address,city,state,country},requiresCjQuote?{postalCode}:null,quoteDetails));
   };
   btn.addEventListener('click',submit);
 }

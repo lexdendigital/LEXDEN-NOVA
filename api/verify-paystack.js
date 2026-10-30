@@ -436,7 +436,7 @@ module.exports = async function handler(req, res) {
   // — nothing here can affect the existing digital checkout path.
   let deliveryDetails = null;
   if (delivery && typeof delivery === 'object') {
-    const { name, phone, address, city, state, country } = delivery;
+    const { name, phone, address, city, state, country, postalCode, digitalPostcode } = delivery;
     if (name && phone && address && city && state && country) {
       deliveryDetails = {
         name: String(name).trim().slice(0, 200),
@@ -445,6 +445,8 @@ module.exports = async function handler(req, res) {
         city: String(city).trim().slice(0, 120),
         state: String(state).trim().slice(0, 120),
         country: String(country).trim().slice(0, 120),
+        ...(postalCode ? { postalCode: String(postalCode).trim().slice(0, 32) } : {}),
+        ...(digitalPostcode ? { digitalPostcode: String(digitalPostcode).trim().slice(0, 40) } : {}),
       };
     } else {
       console.warn('verify-paystack: delivery object present but missing a required address field.');
@@ -589,6 +591,10 @@ module.exports = async function handler(req, res) {
   const isLegacyCjPhysical = !!(!selection?.creator && resolvedProduct && resolvedProduct.productType === 'PHYSICAL' && resolvedProduct.physical && resolvedProduct.physical.cj && resolvedProduct.physical.cj.variantId);
   const quoteId = String(requestShippingQuoteId || (delivery && delivery.shippingQuoteId) || '').trim();
   if (isLegacyCjPhysical) {
+    const courierPostalCode = deliveryDetails && String(deliveryDetails.postalCode || '').trim();
+    if (!courierPostalCode || !/^[0-9\s\-+()./]+$/.test(courierPostalCode)) {
+      return res.status(200).json({ ok: false, error: 'A valid courier postal code is required for this CJ shipment. No supplier order was created. Contact support with your payment reference.' });
+    }
     if (!quoteId || !deliveryDetails) {
       console.warn(`CJ physical checkout has no validated shipping quote: ref=${reference} product=${productId}`);
       return res.status(200).json({ ok: false, error: 'This physical order has no valid shipping quote. It has not been fulfilled. Please contact support with your payment reference.' });

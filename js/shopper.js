@@ -2518,6 +2518,24 @@ function orderDownloadHtml(o){
   if(!link) return '';
   return `<div style="margin-top:10px;"><button type="button" class="btn btn-primary btn-sm" onclick="forceDownloadFile('${jsStr(link)}','${jsStr(downloadFilenameFor(prod))}')">⬇️ Download</button></div>`;
 }
+function orderDisplayName(o){
+  return (o.items&&o.items[0]&&o.items[0].name) || o.productName || 'Order';
+}
+function orderDisplayAmount(o){
+  const n = Number(o.totalAmount ?? o.amount ?? 0);
+  return Number.isFinite(n) ? n : 0;
+}
+function orderDisplayDate(o){
+  const t=o&&o.timestamp;
+  try{
+    const d=t&&typeof t.toDate==='function'?t.toDate():t&&typeof t.seconds==='number'?new Date(t.seconds*1000):new Date(t);
+    return d instanceof Date && Number.isFinite(d.getTime()) ? d.toLocaleString() : '';
+  }catch(e){ return ''; }
+}
+function orderStatusLabel(status){
+  const labels={paid:'Payment confirmed',processing:'Processing',supplier_created:'Supplier order created',funding_required:'Supplier funding required',cj_order_failed:'Supplier order needs attention',delivery_details_issue:'Delivery details needed',success:'Completed',failed:'Failed'};
+  return labels[status]||String(status||'pending').replace(/_/g,' ');
+}
 async function loadOrdersIntoScreen(){
   const wrap = $('#ordersWrap');
   if(!wrap) return;
@@ -2530,13 +2548,13 @@ async function loadOrdersIntoScreen(){
     <div class="card" style="padding:14px;margin-bottom:10px;">
       <div class="flex" style="justify-content:space-between;align-items:flex-start;">
         <div>
-          <div style="font-weight:700;">${escapeHtml((o.items&&o.items[0]&&o.items[0].name)||'Order')}</div>
+          <div style="font-weight:700;">${escapeHtml(orderDisplayName(o))}</div>
           <div class="text-2 small mono">Ref: ${escapeHtml(o.paystackReference||o.reference||'')}</div>
-          <div class="text-2 small">${o.timestamp?new Date(o.timestamp).toLocaleString():''}</div>
+          <div class="text-2 small">${escapeHtml(orderDisplayDate(o))}</div>
         </div>
         <div style="text-align:right;">
-          <div style="font-weight:700;">${escapeHtml(o.currency||'NGN')} ${(o.totalAmount||0).toLocaleString()}</div>
-          <span class="small" style="color:${o.status==='success'?'var(--success)':o.status==='failed'?'var(--error)':'var(--warning)'};">${escapeHtml(o.status||'pending')}</span>
+          <div style="font-weight:700;">${escapeHtml(o.currency||'NGN')} ${orderDisplayAmount(o).toLocaleString()}</div>
+          <span class="small" style="color:${o.status==='success'?'var(--success)':o.status==='failed'?'var(--error)':'var(--warning)'};">${escapeHtml(orderStatusLabel(o.status))}</span>
         </div>
       </div>
       ${orderDownloadHtml(o)}
