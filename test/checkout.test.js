@@ -16,14 +16,29 @@ const world = (cs = 'ACTIVE', ps = 'PUBLISHED') => fake.makeDb({
 });
 const sel = { creator: { productId: 'p1', creatorId: 'c1', offeringType: 'PHYSICAL_PRODUCT', fulfillmentMode: 'SELLER_STOCK' } };
 
-test('amount must match exactly in kobo: under, over and exact', () => {
-  assert.equal(C.checkAmount({ paidMinor: 1000000, expectedMajor: 10000 }).ok, true);
-  const under = C.checkAmount({ paidMinor: 999999, expectedMajor: 10000 });
+test('amount verification accepts exact charge and authenticated Paystack fee pass-through only', () => {
+  const exact = C.checkAmount({ paidMinor: 1000000, requestedMinor: 1000000, expectedMajor: 10000 });
+  assert.equal(exact.ok, true); assert.equal(exact.match, 'EXACT');
+
+  const under = C.checkAmount({ paidMinor: 999999, requestedMinor: 1000000, expectedMajor: 10000 });
   assert.equal(under.ok, false); assert.equal(under.direction, 'UNDERPAID');
-  assert.equal(C.checkAmount({ paidMinor: 1000001, expectedMajor: 10000 }).direction, 'OVERPAID');
-  assert.equal(C.checkAmount({ paidMinor: 9800 * 100, expectedMajor: 10000 }).ok, false); // the old 2% tolerance is gone
-  assert.equal(C.checkAmount({ paidMinor: 1999, expectedMajor: 19.99 }).ok, true);
-  assert.equal(C.checkAmount({ paidMinor: 'x', expectedMajor: 5 }).ok, false);
+
+  const unexplainedOver = C.checkAmount({ paidMinor: 1000001, expectedMajor: 10000 });
+  assert.equal(unexplainedOver.ok, false); assert.equal(unexplainedOver.direction, 'OVERPAID');
+
+  // Production regression: NOVA requested NGN 27,835; Paystack charged
+  // NGN 28,360.41 after "Pass fees to customers". This must fulfil.
+  const feePassed = C.checkAmount({ paidMinor: 2836041, requestedMinor: 2783500, expectedMajor: 27835 });
+  assert.equal(feePassed.ok, true); assert.equal(feePassed.match, 'PAYSTACK_FEE_PASSTHROUGH');
+
+  // Partial-debit safety: requested_amount can still equal the intended total
+  // when Paystack actually charged less. Never fulfil from requested_amount alone.
+  const partialDebit = C.checkAmount({ paidMinor: 2000000, requestedMinor: 2783500, expectedMajor: 27835 });
+  assert.equal(partialDebit.ok, false); assert.equal(partialDebit.direction, 'UNDERPAID');
+
+  assert.equal(C.checkAmount({ paidMinor: 9800 * 100, requestedMinor: 10000 * 100, expectedMajor: 10000 }).ok, false);
+  assert.equal(C.checkAmount({ paidMinor: 1999, requestedMinor: 1999, expectedMajor: 19.99 }).ok, true);
+  assert.equal(C.checkAmount({ paidMinor: 'x', requestedMinor: 500, expectedMajor: 5 }).ok, false);
 });
 test('seller must be ACTIVE and product PUBLISHED', async () => {
   assert.equal((await C.checkSellable(world(), 'p1')).ok, true);

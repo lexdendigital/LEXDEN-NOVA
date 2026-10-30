@@ -20,13 +20,37 @@ const EXCEPTION_CODES = Object.freeze({
   DELIVERY_PROOF_PROBLEM: 'DELIVERY_PROOF_PROBLEM',
 });
 
-/** expectedMajor comes from OUR catalogue; paidMinor from Paystack's verified response. */
-function checkAmount({ paidMinor, expectedMajor }) {
+/**
+ * expectedMajor comes from OUR catalogue.
+ * paidMinor/requestedMinor come only from Paystack's server-side verify response.
+ *
+ * Paystack's "Pass fees to customers" setting may make `amount` larger than the
+ * amount NOVA requested. In that case `requested_amount` remains the intended
+ * transaction amount. We only accept that larger charge when requested_amount
+ * exactly matches NOVA's authoritative expected amount.
+ *
+ * Crucially, paidMinor must NEVER be below expectedMinor even when
+ * requested_amount matches. Paystack also exposes requested_amount for partial
+ * debits, where the actual customer charge can be lower than requested.
+ */
+function checkAmount({ paidMinor, requestedMinor = null, expectedMajor }) {
   let expectedMinor;
   try { expectedMinor = M.toMinor(expectedMajor); } catch { return { ok: false, code: 'BAD_EXPECTED_AMOUNT' }; }
-  if (!Number.isSafeInteger(paidMinor)) return { ok: false, code: 'BAD_PAID_AMOUNT', expectedMinor };
-  if (paidMinor === expectedMinor) return { ok: true, expectedMinor };
-  return { ok: false, code: 'AMOUNT_MISMATCH', expectedMinor, paidMinor, direction: paidMinor < expectedMinor ? 'UNDERPAID' : 'OVERPAID' };
+
+  const paid = Number(paidMinor);
+  const requested = requestedMinor == null ? null : Number(requestedMinor);
+  if (!Number.isSafeInteger(paid)) return { ok: false, code: 'BAD_PAID_AMOUNT', expectedMinor };
+
+  if (paid < expectedMinor) {
+    return { ok: false, code: 'AMOUNT_MISMATCH', expectedMinor, paidMinor: paid, requestedMinor: Number.isSafeInteger(requested) ? requested : null, direction: 'UNDERPAID' };
+  }
+  if (paid === expectedMinor) {
+    return { ok: true, expectedMinor, paidMinor: paid, requestedMinor: Number.isSafeInteger(requested) ? requested : null, match: 'EXACT' };
+  }
+  if (Number.isSafeInteger(requested) && requested === expectedMinor) {
+    return { ok: true, expectedMinor, paidMinor: paid, requestedMinor: requested, match: 'PAYSTACK_FEE_PASSTHROUGH' };
+  }
+  return { ok: false, code: 'AMOUNT_MISMATCH', expectedMinor, paidMinor: paid, requestedMinor: Number.isSafeInteger(requested) ? requested : null, direction: 'OVERPAID' };
 }
 
 async function checkSellable(db, productId) {
