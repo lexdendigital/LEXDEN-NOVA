@@ -2,7 +2,8 @@
 const { z } = require('zod');
 const { callHandler } = require('../lib/callHandler');
 const { getDb } = require('../../api/affiliate/shared');
-const { listCatalogDoc, upsertCatalogItem } = require('../lib/settings');
+const { listCatalogDoc, listSection, upsertCatalogItem } = require('../lib/settings');
+const { buildSupplierMapping, resolveRegisteredSupplier } = require('../../api/fulfillment/product-mapping');
 const { uniqueUrls, buildProductSpecs, stockStatusFrom, deriveCostBasedPricing } = require('../lib/productImport');
 const { rehostAll } = require('../lib/mediaRehost');
 const cjShared = require('../../api/cj-shared');
@@ -124,6 +125,15 @@ function register(server) {
     const firstVariant = variants[0] || {};
     const settingsSnapshot = await db.doc('catalog/settings').get();
     const settingsContent = settingsSnapshot.exists ? ((settingsSnapshot.data() || {}).content || {}) : {};
+    const registeredSuppliers = await listSection(db, 'suppliers');
+    const cjSupplierResolution = resolveRegisteredSupplier(registeredSuppliers, 'cj');
+    if (!cjSupplierResolution.ok) {
+      const message = cjSupplierResolution.code === 'PROVIDER_SUPPLIER_AMBIGUOUS'
+        ? 'More than one active NOVA supplier record has providerKey cj. Resolve the duplicate registry records before importing.'
+        : 'No active NOVA supplier record has providerKey cj. Register the main-store CJ supplier with its stable provider key before importing.';
+      throw Object.assign(new Error(message), { status: 409, code: cjSupplierResolution.code });
+    }
+    const cjSupplier = cjSupplierResolution.supplier;
     const supplierImages = uniqueUrls([
       ...(Array.isArray(source.images) ? source.images : []),
       ...variants.map(v => v.image),
@@ -227,10 +237,43 @@ function register(server) {
         dimensions,
         returnPolicy: '',
         supplier: source.supplierName || 'CJ Dropshipping',
-        supplierId: '', // CJ's supplierId is preserved in sourceData/specs; it is not a NOVA supplier-record ID.
+        supplierId: cjSupplier.id,
         supplierSku: firstVariant.sku || source.sku || '',
         supplierCost: firstVariant.sellPrice ?? source.sellPrice ?? null,
         supplierCurrency: firstVariant.sellPriceCurrency || source.supplierCurrency || '',
+        supplierMappings: [buildSupplierMapping({
+          supplierId: cjSupplier.id,
+          providerKey: 'cj',
+          externalProductId: productId,
+          externalVariantId: firstVariant.vid || null,
+          supplierSku: firstVariant.sku || source.sku || null,
+          supplierCost: firstVariant.sellPrice ?? source.sellPrice ?? null,
+          supplierCurrency: firstVariant.sellPriceCurrency || source.supplierCurrency || null,
+          sourceWarehouse: source.sourceWarehouse || source.warehouseId || null,
+          sourceCountryCode: /^[A-Za-z]{2}$/.test(String(source.sourceCountry || '')) ? String(source.sourceCountry).toUpperCase() : null,
+          lastStockVerifiedAt: firstVariant.vid && stockMap[firstVariant.vid] ? importedAt : null,
+          lastPriceVerifiedAt: (firstVariant.sellPrice ?? source.sellPrice) != null && (firstVariant.sellPriceCurrency || source.supplierCurrency) ? importedAt : null,
+          status: rootVariants.length && rootVariants.every(v => v.cjVariantId) ? 'MAPPED' : 'NEEDS_REVIEW',
+          approvedForFulfillment: false,
+          variantMappings: rootVariants.filter(v => v.cjVariantId).map(v => {
+            const sourceVariant = variants.find(item => String(item.vid || '') === String(v.cjVariantId)) || {};
+            const supplierCost = sourceVariant.sellPrice ?? null;
+            const supplierCurrency = sourceVariant.sellPriceCurrency || source.supplierCurrency || null;
+            return {
+              novaVariantId: v.id,
+              externalVariantId: v.cjVariantId,
+              supplierSku: sourceVariant.sku || v.sku || null,
+              supplierCost,
+              supplierCurrency,
+              sourceWarehouse: sourceVariant.sourceWarehouse || sourceVariant.warehouseId || null,
+              sourceCountryCode: /^[A-Za-z]{2}$/.test(String(source.sourceCountry || '')) ? String(source.sourceCountry).toUpperCase() : null,
+              lastStockVerifiedAt: stockMap[v.cjVariantId] ? importedAt : null,
+              lastPriceVerifiedAt: supplierCost != null && supplierCurrency ? importedAt : null,
+              status: 'MAPPED',
+              approvedForFulfillment: false,
+            };
+          }),
+        })],
         routing: null,
         cj: {
           productId,
@@ -267,6 +310,8 @@ function register(server) {
       },
       importSource: {
         supplier: 'CJ Dropshipping',
+        supplierId: cjSupplier.id,
+        providerKey: 'cj',
         productId,
         importedAt,
         sourceCategoryId: source.categoryId || '',

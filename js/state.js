@@ -722,7 +722,11 @@ function checkoutItemAmountMajor(product,variant,currency){
   return currency === 'NGN' ? Math.round(base * rate) : Math.round(base * rate * 100) / 100;
 }
 function isCjPhysicalProduct(product){
-  return !!(product && product.productType === 'PHYSICAL' && product.physical && product.physical.cj && product.physical.cj.variantId);
+  if(!(product && product.productType === 'PHYSICAL' && product.physical)) return false;
+  const mappings=Array.isArray(product.physical.supplierMappings)?product.physical.supplierMappings:[];
+  const hasApprovedMapping=mappings.some(m=>m&&m.status==='MAPPED'&&m.approvedForFulfillment===true&&m.supplierId&&m.providerKey);
+  const hasLegacyCj=!!(product.physical.cj&&(product.physical.cj.variantId||product.physical.cj.productId));
+  return hasApprovedMapping||hasLegacyCj;
 }
 
 function openCheckoutReviewModal(product,variant,delivery,onContinue,external=false){
@@ -831,7 +835,7 @@ function openDeliveryDetailsModal(product, selectedVariant, onSubmit){
     +'<div class="form-field"><label>Delivery address</label><input id="dd_address" autocomplete="street-address" placeholder="Street address"></div>'
     +'<div class="form-field"><label>City</label><input id="dd_city" autocomplete="address-level2" placeholder="City"></div>'
     +'<div class="form-field"><label>State</label><input id="dd_state" autocomplete="address-level1" placeholder="State/Province"></div>'
-    +(requiresCjQuote?'<div class="form-field"><label>Courier postal code</label><input id="dd_postalCode" inputmode="numeric" autocomplete="postal-code" placeholder="e.g. 102001"><div class="text-2 small" style="margin-top:4px;">CJ currently accepts only numbers, symbols and spaces in this field. Use the courier-compatible postal code for this address; do not enter Nigeria\'s new alphanumeric Digital Postcode here.</div></div>':'')
+    +'<div class="form-field"><label>Postal code <span class="text-2 small">(if available)</span></label><input id="dd_postalCode" autocomplete="postal-code" placeholder="Postal code"></div>'
     +'<div class="form-field"><label>Country</label>'+customSelect('dd_country',countries[0],countries.map(country=>({value:country,label:country})), '', ()=>{ if(requiresCjQuote) cjRefreshShippingEstimate(product,selectedVariant); })+'</div>'
     +routeField
     +'<p class="small text-2" id="dd_shippingEstimate" style="min-height:34px;"></p>'
@@ -844,7 +848,13 @@ function openDeliveryDetailsModal(product, selectedVariant, onSubmit){
   const routeSelect=$('#dd_shippingMethod');
   if(routeSelect) routeSelect.addEventListener('change',()=>updateCjShippingChoice(product,selectedVariant));
   $('#deliveryDetailsCancel').addEventListener('click',closeDeliveryDetailsModal);
-  if(requiresCjQuote) cjRefreshShippingEstimate(product,selectedVariant);
+  if(requiresCjQuote){
+    ['dd_address','dd_city','dd_state','dd_postalCode'].forEach(id=>{
+      const field=$('#'+id);
+      if(field) field.addEventListener('change',()=>cjRefreshShippingEstimate(product,selectedVariant));
+    });
+    cjRefreshShippingEstimate(product,selectedVariant);
+  }
   const submit=()=>{
     const errEl=$('#deliveryDetailsErr');
     const name=$('#dd_name').value.trim();
@@ -852,11 +862,9 @@ function openDeliveryDetailsModal(product, selectedVariant, onSubmit){
     const address=$('#dd_address').value.trim();
     const city=$('#dd_city').value.trim();
     const state=$('#dd_state').value.trim();
+    const postalCode=$('#dd_postalCode')?$('#dd_postalCode').value.trim():'';
     const country=$('#dd_country').value;
-    const postalCode=requiresCjQuote ? ($('#dd_postalCode')?.value||'').trim() : '';
     if(!name||!phone||!address||!city||!state||!country){if(errEl)errEl.textContent='Name, phone, address, city, state and country are required for delivery.';return;}
-    if(requiresCjQuote && !postalCode){if(errEl)errEl.textContent='Courier postal code is required before payment. No payment has been taken.';return;}
-    if(requiresCjQuote && !/^[0-9\s\-+()./]+$/.test(postalCode)){if(errEl)errEl.textContent='CJ only accepts numbers, symbols and spaces in the courier postal code field. No payment has been taken.';return;}
     let quoteDetails={};
     if(requiresCjQuote){
       const quoteId=routeSelect&&routeSelect.value;
@@ -870,7 +878,7 @@ function openDeliveryDetailsModal(product, selectedVariant, onSubmit){
       quoteDetails={shippingQuoteId:quote.quoteId,shippingMethod:quote.logisticName,shippingServiceLevel:quote.serviceLevel||null,shippingServiceLabel:quote.serviceLabel||'NOVA Delivery',shippingDeliveryEstimate:quote.deliveryEstimate||null,shippingEstimatedMaxDays:Number.isFinite(Number(quote.estimatedOrderToDoorMaxDays))?Number(quote.estimatedOrderToDoorMaxDays):null,shippingAmountMajor:Number(quote.shippingAmountMajor),shippingCurrency:quote.currency,shippingAmountUSD:Number(quote.logisticPrice),shippingETA:quote.logisticAging||null,shippingQuoteExpiresAt:quote.quoteExpiresAt};
     }
     closeDeliveryDetailsModal();
-    onSubmit(Object.assign({name,phone,address,city,state,country},requiresCjQuote?{postalCode}:null,quoteDetails));
+    onSubmit(Object.assign({name,phone,address,city,state,postalCode,country},quoteDetails));
   };
   btn.addEventListener('click',submit);
 }
@@ -882,13 +890,16 @@ async function cjRefreshShippingEstimate(product,selectedVariant){
   const routeSelect=$('#dd_shippingMethod');
   const btn=$('#deliveryDetailsBtn');
   if(!el||!isCjPhysicalProduct(product))return;
-  const vid=selectedVariant&&selectedVariant.cjVariantId?selectedVariant.cjVariantId:product.physical.cj.variantId;
-  if(!vid){el.textContent='This product option has no shipping mapping. Please contact support.';if(btn)btn.disabled=true;return;}
   const base=cjBackendUrl();
   if(!base){el.textContent='Shipping is temporarily unavailable. No payment has been taken.';if(btn)btn.disabled=true;return;}
   const countryEl=$('#dd_country');
   const country=countryEl?countryEl.value:'Nigeria';
   const iso2=({nigeria:'NG','united states':'US','united kingdom':'GB',ghana:'GH',kenya:'KE','south africa':'ZA'})[String(country).toLowerCase()];
+  const address=$('#dd_address')?$('#dd_address').value.trim():'';
+  const city=$('#dd_city')?$('#dd_city').value.trim():'';
+  const state=$('#dd_state')?$('#dd_state').value.trim():'';
+  const postalCode=$('#dd_postalCode')?$('#dd_postalCode').value.trim():'';
+  if(!address||!city||!state){el.textContent='Enter your street address, city and state so NOVA can verify delivery before payment.';if(btn)btn.disabled=true;return;}
   const currency=checkoutChargeCurrency();
   const requestSeq=++__cjShippingQuoteRequestSeq;
   if(btn)btn.disabled=true;
@@ -896,7 +907,7 @@ async function cjRefreshShippingEstimate(product,selectedVariant){
   if(routeSelect){routeSelect.disabled=true;routeSelect.innerHTML='';const opt=document.createElement('option');opt.value='';opt.textContent='Checking available routes…';routeSelect.appendChild(opt);}
   window.__cjShippingQuotes={};
   try{
-    const r=await withTimeout(cjApiPost('/cj-shipping',{startCountryCode:'CN',endCountryCode:iso2||'NG',products:[{vid:String(vid),quantity:1}],productId:String(product.id),variantId:selectedVariant&&selectedVariant.id||null,currency}),12000,'Shipping quote timed out.');
+    const r=await withTimeout(cjApiPost('/fulfillment-shipping-quote',{productId:String(product.id),variantId:selectedVariant&&selectedVariant.id||null,quantity:1,destinationCountryCode:iso2||'NG',destinationRegion:state,destinationCity:city,destinationPostalCode:postalCode,destinationAddress1:address,currency}),15000,'Shipping quote timed out.');
     if(requestSeq!==__cjShippingQuoteRequestSeq)return;
     if(!r||!r.ok||!Array.isArray(r.options)||!r.options.length){
       if(el)el.textContent=(r&&r.error)||'No valid shipping route is available for this destination. Try again later or choose another product.';
@@ -931,11 +942,11 @@ async function cjRefreshShippingEstimate(product,selectedVariant){
       }else{
         const placeholder=document.createElement('option');
         placeholder.value='';
-        placeholder.textContent='No Smart route meets the 45-day target. Select an alternative service to continue.';
+        placeholder.textContent='No supplier can currently verify a delivery option for this address. Check the address or contact support.';
         placeholder.selected=true;
         routeSelect.insertBefore(placeholder,routeSelect.firstChild);
         routeSelect.value='';
-        if(el)el.textContent='No route meets NOVA Smart Delivery’s 45-day target. An alternative service may be available; review its estimate and full cost, then select it deliberately.';
+        if(el)el.textContent='No supplier can currently verify a delivery option for this address. Check the address or contact support.';
         btn.disabled=true;
         return;
       }
@@ -963,7 +974,7 @@ function updateCjShippingChoice(product,selectedVariant){
   let message=(quote.serviceLabel||'NOVA Delivery')+': '+formatChargeMajor(quote.shippingAmountMajor,currency)+'. Total before payment: '+formatChargeMajor(Number(quote.productAmountMajor)+Number(quote.shippingAmountMajor),currency)+'.';
   if(quote.deliveryEstimate)message+=' Estimated order-to-door time: '+quote.deliveryEstimate+'. This is an estimate, not a guarantee.';
   else if(quote.logisticAging)message+=' Supplier transit estimate: '+quote.logisticAging+'; processing may add time.';
-  if(quote.requiresExplicitChoice===true)message+=' This is a slower alternative, not NOVA Smart Delivery. Continue only if you accept the longer estimate.';
+  if(quote.requiresExplicitChoice===true)message+=' This is a slower alternative, not NOVA Verified Delivery. Continue only if you accept the longer estimate.';
   const policy=(DB.content&&DB.content.commercePricingPolicy&&DB.content.commercePricingPolicy.shipping)||{};
   const warningRatio=Math.min(Number(policy.highShippingItemPriceRatioWarning)||0.25,0.25);
   const blockRatio=Math.min(Number(policy.highShippingItemPriceRatioBlock)||0.35,0.35);
