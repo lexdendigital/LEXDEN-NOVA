@@ -942,11 +942,11 @@ async function cjRefreshShippingEstimate(product,selectedVariant){
       }else{
         const placeholder=document.createElement('option');
         placeholder.value='';
-        placeholder.textContent='No verified route meets NOVA’s 15-day delivery limit. Select an alternative service to continue.';
+        placeholder.textContent='No supplier can currently verify a delivery option for this address. Check the address or contact support.';
         placeholder.selected=true;
         routeSelect.insertBefore(placeholder,routeSelect.firstChild);
         routeSelect.value='';
-        if(el)el.textContent='No route meets NOVA’s 15-day delivery limit. An alternative service may be available; review its estimate and full cost, then select it deliberately.';
+        if(el)el.textContent='No supplier can currently verify a delivery option for this address. Check the address or contact support.';
         btn.disabled=true;
         return;
       }
