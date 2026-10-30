@@ -1,19 +1,24 @@
 'use strict';
 
+// NOVA has no default price or delivery-time ceiling.
+// An authorized administrator may configure either value centrally.
+// null means "no configured business cap", not zero.
 const DEFAULT_SHIPPING_POLICY = Object.freeze({
-  maxDeliveryDays: 15,
-  maxShippingUSD: 15,
+  maxDeliveryDays: null,
+  maxShippingUSD: null,
   destinationCountry: 'NG',
   requireVerifiedStock: true,
   requireVerifiedShipping: true,
-  maxShippingUSDPerFulfillment: 15,
-  maxShippingUSDPerOrder: 15,
+  requireVerifiedDelivery: true,
+  maxShippingUSDPerFulfillment: null,
+  maxShippingUSDPerOrder: null,
 });
 
-const numberOr = (value, fallback) => {
+function optionalLimit(value) {
+  if (value === null || value === undefined || value === '') return null;
   const n = Number(value);
-  return Number.isFinite(n) && n >= 0 ? n : fallback;
-};
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
 
 function rootOf(settings = {}) {
   return settings && settings.content ? settings.content : (settings || {});
@@ -22,13 +27,14 @@ function rootOf(settings = {}) {
 function getShippingPolicy(settings = {}) {
   const saved = rootOf(settings).shippingPolicy || {};
   return Object.freeze({
-    maxDeliveryDays: Math.min(15, Math.max(1, numberOr(saved.maxDeliveryDays, 15))),
-    maxShippingUSD: Math.min(15, Math.max(0, numberOr(saved.maxShippingUSD, 15))),
-    destinationCountry: String(saved.destinationCountry || 'NG').trim().toUpperCase(),
+    maxDeliveryDays: optionalLimit(saved.maxDeliveryDays),
+    maxShippingUSD: optionalLimit(saved.maxShippingUSD),
+    destinationCountry: String(saved.destinationCountry || DEFAULT_SHIPPING_POLICY.destinationCountry).trim().toUpperCase(),
     requireVerifiedStock: saved.requireVerifiedStock !== false,
     requireVerifiedShipping: saved.requireVerifiedShipping !== false,
-    maxShippingUSDPerFulfillment: Math.min(15, Math.max(0, numberOr(saved.maxShippingUSDPerFulfillment, 15))),
-    maxShippingUSDPerOrder: Math.min(15, Math.max(0, numberOr(saved.maxShippingUSDPerOrder, 15))),
+    requireVerifiedDelivery: saved.requireVerifiedDelivery !== false,
+    maxShippingUSDPerFulfillment: optionalLimit(saved.maxShippingUSDPerFulfillment),
+    maxShippingUSDPerOrder: optionalLimit(saved.maxShippingUSDPerOrder),
   });
 }
 
@@ -58,15 +64,30 @@ function conservativeDeliveryDays(option = {}, processingFallback = 0) {
   return transitMax + (Number.isFinite(processing) && processing >= 0 ? processing : 0);
 }
 
-function evaluateShippingPolicy({ shippingUSD, totalMaxDeliveryDays, stockVerified, shippingVerified, policy }) {
+function evaluateShippingPolicy({ shippingUSD, totalMaxDeliveryDays, stockVerified, shippingVerified, deliveryVerified, policy }) {
   const p = policy || DEFAULT_SHIPPING_POLICY;
   const reasons = [];
+
   if (p.requireVerifiedStock && stockVerified !== true) reasons.push('STOCK_UNVERIFIED');
   if (p.requireVerifiedShipping && shippingVerified !== true) reasons.push('NO_SHIPPING_QUOTE');
-  if (shippingUSD === null || shippingUSD === undefined || shippingUSD === '' || !Number.isFinite(Number(shippingUSD))) reasons.push('SHIPPING_UNVERIFIED');
-  else if (Number(shippingUSD) > Number(p.maxShippingUSD)) reasons.push('SHIPPING_TOO_EXPENSIVE');
-  if (totalMaxDeliveryDays === null || totalMaxDeliveryDays === undefined || totalMaxDeliveryDays === '' || !Number.isFinite(Number(totalMaxDeliveryDays))) reasons.push('DELIVERY_UNVERIFIED');
-  else if (Number(totalMaxDeliveryDays) > Number(p.maxDeliveryDays)) reasons.push('DELIVERY_TOO_SLOW');
+
+  if (shippingUSD === null || shippingUSD === undefined || shippingUSD === '' || !Number.isFinite(Number(shippingUSD))) {
+    reasons.push('SHIPPING_UNVERIFIED');
+  } else if (p.maxShippingUSD !== null && Number(shippingUSD) > p.maxShippingUSD) {
+    reasons.push('SHIPPING_TOO_EXPENSIVE');
+  }
+
+  const hasDelivery = totalMaxDeliveryDays !== null
+    && totalMaxDeliveryDays !== undefined
+    && totalMaxDeliveryDays !== ''
+    && Number.isFinite(Number(totalMaxDeliveryDays));
+
+  if (p.requireVerifiedDelivery && (deliveryVerified === false || !hasDelivery)) {
+    reasons.push('DELIVERY_UNVERIFIED');
+  } else if (hasDelivery && p.maxDeliveryDays !== null && Number(totalMaxDeliveryDays) > p.maxDeliveryDays) {
+    reasons.push('DELIVERY_TOO_SLOW');
+  }
+
   return { eligible: reasons.length === 0, reasons };
 }
 
