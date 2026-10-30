@@ -21,13 +21,11 @@ function screenHome(){
       <button class="btn btn-primary" onclick="navigate('#products')">${escapeHtml(c.heroCta)} →</button>
     </div>
 
-    <div class="section" aria-labelledby="freeStartHeading">
+    ${freeResources.length ? `<div class="section" aria-labelledby="freeStartHeading">
       <div class="section-head"><h2 id="freeStartHeading">Start with something free</h2><a class="see-all" href="#products">Explore the library</a></div>
       <p class="text-2 small" style="margin:-4px 0 12px;">Useful digital tools and learning resources are available at no cost. Browse first; choose a paid option only when it fits your need.</p>
-      ${freeResources.length
-        ? `<div class="hscroll">${freeResources.map(p=>productCard(p,{small:true})).join('')}</div>`
-        : `<div class="card" style="padding:16px;"><strong>Free resources are being prepared.</strong><p class="text-2 small" style="margin-top:4px;">Explore tools, courses, books and templates across the Lexden Nova library.</p></div>`}
-    </div>
+      <div class="hscroll">${freeResources.map(p=>productCard(p,{small:true})).join('')}</div>
+    </div>` : ''}
 
     ${categoryLinks.length ? `<div class="section">
       <div class="section-head"><h2>Explore by what you need</h2><a class="see-all" href="#products">All categories</a></div>

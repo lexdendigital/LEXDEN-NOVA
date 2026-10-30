@@ -20,6 +20,11 @@ test('first visit has a free resource entry point', () => {
   assert.match(html, /Useful digital tools and learning resources are available at no cost/);
 });
 
+test('the free section only renders when free products exist, with no "being prepared" placeholder', () => {
+  assert.match(html, /\$\{freeResources\.length \? `<div class="section" aria-labelledby="freeStartHeading">/);
+  assert.ok(!html.includes('Free resources are being prepared'));
+});
+
 test('catalog separates digital, physical, and free discovery and searches product attributes', () => {
   assert.match(html, /function productSearchText\(p\)/);
   assert.match(html, /productKind\(p\)!=='physical'/);
