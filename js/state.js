@@ -1007,6 +1007,13 @@ function cjShippingQuoteCanRetry(response){
     && response.rejectedRoutes.some(route=>route&&transientReasons.has(String(route.reason||'').toUpperCase()));
 }
 
+function createCjShippingRequestId(){
+  try{
+    if(window.crypto&&typeof window.crypto.randomUUID==='function')return window.crypto.randomUUID();
+  }catch(e){}
+  return 'nova_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,14);
+}
+
 function renderCjShippingRetryLink(message,product,selectedVariant){
   const el=$('#dd_shippingEstimate');
   if(!el)return;
@@ -1020,12 +1027,12 @@ function renderCjShippingRetryLink(message,product,selectedVariant){
   link.style.cssText='color:var(--primary,#00d9ff);text-decoration:underline;text-underline-offset:3px;font-weight:700;cursor:pointer;margin-left:2px;';
   link.addEventListener('click',event=>{
     event.preventDefault();
-    cjRefreshShippingEstimate(product,selectedVariant);
+    cjRefreshShippingEstimate(product,selectedVariant,true);
   },{once:true});
   el.replaceChildren(detail,link);
 }
 
-async function cjRefreshShippingEstimate(product,selectedVariant){
+async function cjRefreshShippingEstimate(product,selectedVariant,isRetry){
   const el=$('#dd_shippingEstimate');
   const btn=$('#deliveryDetailsBtn');
   if(!el||!isCjPhysicalProduct(product))return;
@@ -1047,6 +1054,7 @@ async function cjRefreshShippingEstimate(product,selectedVariant){
   const state=$('#dd_state')?$('#dd_state').value.trim():'';
   const postalCode=$('#dd_postalCode')?$('#dd_postalCode').value.trim():'';
   if(!address||!city||!state){
+    window.__cjShippingQuoteAttempt=null;
     resetCjShippingPicker('Enter your address to check services…',true);
     el.textContent='Enter your street address, city and state so NOVA can check the available delivery services.';
     if(btn)btn.disabled=true;
@@ -1054,6 +1062,24 @@ async function cjRefreshShippingEstimate(product,selectedVariant){
   }
 
   const currency=checkoutChargeCurrency();
+  const quotePayload={
+    productId:String(product.id),
+    variantId:selectedVariant&&selectedVariant.id||null,
+    quantity:1,
+    destinationCountryCode:iso2||'NG',
+    destinationRegion:state,
+    destinationCity:city,
+    destinationPostalCode:postalCode,
+    destinationAddress1:address,
+    currency
+  };
+  const fingerprint=JSON.stringify(quotePayload);
+  const previousAttempt=window.__cjShippingQuoteAttempt;
+  const requestId=isRetry===true&&previousAttempt&&previousAttempt.fingerprint===fingerprint
+    ? previousAttempt.requestId
+    : createCjShippingRequestId();
+  window.__cjShippingQuoteAttempt={fingerprint,requestId};
+  quotePayload.requestId=requestId;
   if(btn)btn.disabled=true;
   el.textContent='Checking live NOVA Smart, Economy and Express services…';
 
@@ -1061,18 +1087,10 @@ async function cjRefreshShippingEstimate(product,selectedVariant){
     // One supplier quote can include health, stock and multiple freight calls.
     // CJ paces those calls, so the former 15-second ceiling could expire while
     // the provider-neutral routing service was still doing valid work.
+    // The same request ID is reused only for an explicit retry, allowing the
+    // backend to coalesce it with a still-running attempt or return its result.
     const requestTimeoutMs=65000;
-    const r=await withTimeout(cjApiPost('/fulfillment-shipping-quote',{
-      productId:String(product.id),
-      variantId:selectedVariant&&selectedVariant.id||null,
-      quantity:1,
-      destinationCountryCode:iso2||'NG',
-      destinationRegion:state,
-      destinationCity:city,
-      destinationPostalCode:postalCode,
-      destinationAddress1:address,
-      currency
-    },requestTimeoutMs),requestTimeoutMs+5000,'Shipping quote timed out. Please retry.');
+    const r=await withTimeout(cjApiPost('/fulfillment-shipping-quote',quotePayload,requestTimeoutMs),requestTimeoutMs+5000,'Shipping quote timed out. Please retry.');
     if(requestSeq!==__cjShippingQuoteRequestSeq)return;
 
     if(!r||!r.ok||!Array.isArray(r.options)||!r.options.length){
@@ -1081,8 +1099,9 @@ async function cjRefreshShippingEstimate(product,selectedVariant){
       const message=r&&r.error?String(r.error):unavailable;
       if(cjShippingQuoteCanRetry(r)){
         renderCjShippingRetryLink(message,product,selectedVariant);
-      }else if(el){
-        el.textContent=message+(/no payment has been taken/i.test(message)?'':' No payment has been taken.');
+      }else{
+        if(window.__cjShippingQuoteAttempt&&window.__cjShippingQuoteAttempt.requestId===requestId)window.__cjShippingQuoteAttempt=null;
+        if(el)el.textContent=message+(/no payment has been taken/i.test(message)?'':' No payment has been taken.');
       }
       if(btn)btn.disabled=true;
       return;
@@ -1096,6 +1115,7 @@ async function cjRefreshShippingEstimate(product,selectedVariant){
       return;
     }
 
+    if(window.__cjShippingQuoteAttempt&&window.__cjShippingQuoteAttempt.requestId===requestId)window.__cjShippingQuoteAttempt=null;
     if(el)el.textContent='Choose one of the available NOVA services. Each option shows its own shipping price, carrier route and delivery estimate.';
     if(btn)btn.disabled=true;
   }catch(error){
