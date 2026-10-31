@@ -937,16 +937,18 @@ async function cjRefreshShippingEstimate(product,selectedVariant){
       const firstEligible=serviceOptions.find(option=>!option.disabled);
       if(!firstEligible){routeSelect.value='';if(el)el.textContent='No delivery service meets NOVA’s affordability limit for this item. Choose a better-priced or locally stocked alternative.';if(btn)btn.disabled=true;return;}
       const smartOption=serviceOptions.find(option=>!option.disabled&&option.dataset.serviceLevel==='smart');
-      if(smartOption){
-        routeSelect.value=smartOption.value;
+      const verifiedOption=serviceOptions.find(option=>!option.disabled&&option.dataset.serviceLevel==='verified');
+      const defaultOption=smartOption||verifiedOption;
+      if(defaultOption){
+        routeSelect.value=defaultOption.value;
       }else{
         const placeholder=document.createElement('option');
         placeholder.value='';
-        placeholder.textContent='No supplier can currently verify a delivery option for this address. Check the address or contact support.';
+        placeholder.textContent='Choose a delivery service to continue.';
         placeholder.selected=true;
         routeSelect.insertBefore(placeholder,routeSelect.firstChild);
         routeSelect.value='';
-        if(el)el.textContent='No supplier can currently verify a delivery option for this address. Check the address or contact support.';
+        if(el)el.textContent='Choose a delivery service to continue. Review any slower delivery estimate before selecting a route.';
         btn.disabled=true;
         return;
       }
