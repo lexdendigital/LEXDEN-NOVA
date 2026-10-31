@@ -66,6 +66,9 @@ function hashCode(code, email) {
   if (!secret) throw new Error("Missing OTP_SIGNING_SECRET");
   return crypto.createHmac("sha256", secret).update(`${email}|${code}`).digest("hex");
 }
+function otpDocumentId(email) {
+  return crypto.createHash("sha256").update("otp-email|" + email).digest("hex");
+}
 
 module.exports = async function handler(req, res) {
   setCors(req, res);
@@ -84,7 +87,7 @@ module.exports = async function handler(req, res) {
   }
 
   const db = admin.firestore();
-  const ref = db.collection("email_otps").doc(email);
+  const ref = db.collection("email_otps").doc(otpDocumentId(email));
 
   try {
     const snap = await ref.get();
