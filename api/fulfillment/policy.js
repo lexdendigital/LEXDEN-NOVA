@@ -38,38 +38,58 @@ function getShippingPolicy(settings = {}) {
   });
 }
 
-function conservativeDeliveryDays(option = {}, processingFallback = 0) {
-  const directRaw = option.totalMaxDays ?? option.estimatedOrderToDoorMaxDays;
-  const direct = directRaw == null || directRaw === '' ? NaN : Number(directRaw);
-  if (Number.isFinite(direct) && direct >= 0) return direct;
+function conservativeDeliveryBounds(option = {}, processingFallback = 0) {
+  const directMaxRaw = option.totalMaxDays ?? option.estimatedOrderToDoorMaxDays;
+  const directMax = directMaxRaw == null || directMaxRaw === '' ? NaN : Number(directMaxRaw);
+  if (Number.isFinite(directMax) && directMax >= 0) {
+    const directMinRaw = option.totalMinDays ?? option.estimatedOrderToDoorMinDays;
+    const directMin = directMinRaw == null || directMinRaw === '' ? directMax : Number(directMinRaw);
+    if (!Number.isFinite(directMin) || directMin < 0 || directMin > directMax) return null;
+    return { minDays: directMin, maxDays: directMax };
+  }
 
   const processingRaw = option.processingMaxDays ?? option.processingDays ?? processingFallback;
-  const transitRaw = option.transitMaxDays ?? option.transitDays;
+  const transitMaxRaw = option.transitMaxDays ?? option.transitDays;
+  const transitMinRaw = option.transitMinDays ?? option.transitDays ?? transitMaxRaw;
   const processing = processingRaw == null || processingRaw === '' ? NaN : Number(processingRaw);
-  const transit = transitRaw == null || transitRaw === '' ? NaN : Number(transitRaw);
-  if (Number.isFinite(processing) && processing >= 0 && Number.isFinite(transit) && transit >= 0) {
-    return processing + transit;
+  const transitMin = transitMinRaw == null || transitMinRaw === '' ? NaN : Number(transitMinRaw);
+  const transitMax = transitMaxRaw == null || transitMaxRaw === '' ? NaN : Number(transitMaxRaw);
+  if (Number.isFinite(processing) && processing >= 0
+    && Number.isFinite(transitMin) && transitMin >= 0
+    && Number.isFinite(transitMax) && transitMax >= transitMin) {
+    return { minDays: processing + transitMin, maxDays: processing + transitMax };
   }
 
   const text = String(option.deliveryRange || option.logisticAging || '').trim();
   // CJ commonly returns bare ranges such as "12-50" without a "days" suffix.
-  // Treat a unitless numeric range as calendar days; explicitly stated business
-  // days are converted conservatively to calendar days.
+  // Treat unitless ranges as calendar days; explicitly stated business days
+  // are conservatively converted to calendar-day bounds.
   const range = text.match(/^\s*(\d+)\s*(?:-|–|—|to)\s*(\d+)\s*(?:(business\s*)?(?:days?|d))?\s*$/i);
+  const processingDays = Number.isFinite(processing) && processing >= 0 ? processing : 0;
   if (range) {
     const min = Number(range[1]);
     const max = Number(range[2]);
     if (!Number.isFinite(min) || !Number.isFinite(max) || max < min) return null;
-    const transitMax = range[3] ? Math.ceil(max * 7 / 5) : max;
-    return transitMax + (Number.isFinite(processing) && processing >= 0 ? processing : 0);
+    const businessDays = !!range[3];
+    const transitMinDays = businessDays ? Math.ceil(min * 7 / 5) : min;
+    const transitMaxDays = businessDays ? Math.ceil(max * 7 / 5) : max;
+    return {
+      minDays: transitMinDays + processingDays,
+      maxDays: transitMaxDays + processingDays,
+    };
   }
 
   const one = text.match(/^\s*(\d+)\s*(?:(business\s*)?(?:days?|d))?\s*$/i);
   if (!one) return null;
   const days = Number(one[1]);
   if (!Number.isFinite(days) || days < 0) return null;
-  const transitMax = one[2] ? Math.ceil(days * 7 / 5) : days;
-  return transitMax + (Number.isFinite(processing) && processing >= 0 ? processing : 0);
+  const transitDays = one[2] ? Math.ceil(days * 7 / 5) : days;
+  return { minDays: transitDays + processingDays, maxDays: transitDays + processingDays };
+}
+
+function conservativeDeliveryDays(option = {}, processingFallback = 0) {
+  const bounds = conservativeDeliveryBounds(option, processingFallback);
+  return bounds ? bounds.maxDays : null;
 }
 
 function evaluateShippingPolicy({ shippingUSD, totalMaxDeliveryDays, stockVerified, shippingVerified, deliveryVerified, policy }) {
@@ -103,5 +123,6 @@ module.exports = {
   DEFAULT_SHIPPING_POLICY,
   getShippingPolicy,
   conservativeDeliveryDays,
+  conservativeDeliveryBounds,
   evaluateShippingPolicy,
 };
