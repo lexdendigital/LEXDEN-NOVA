@@ -995,7 +995,7 @@ function cjShippingQuoteCanRetry(response){
   const code=String(response&&response.code||'').toUpperCase();
   const transientCodes=new Set([
     'TIMEOUT','NETWORK_ERROR','INVALID_RESPONSE','HTTP_SERVER_ERROR','HTTP_GATEWAY_ERROR',
-    'RATE_LIMITED','AUTH_ERROR','AUTH_FAILED','REFRESH_FAILED','SHIPPING_QUOTE_FAILED'
+    'RATE_LIMITED','AUTH_ERROR','AUTH_FAILED','REFRESH_FAILED','SHIPPING_QUOTE_FAILED','QUOTE_IN_PROGRESS'
   ]);
   if(transientCodes.has(code))return true;
   const transientReasons=new Set([
@@ -1042,6 +1042,7 @@ async function cjRefreshShippingEstimate(product,selectedVariant,isRetry){
 
   const base=cjBackendUrl();
   if(!base){
+    window.__cjShippingQuoteAttempt=null;
     el.textContent='Shipping is temporarily unavailable. No payment has been taken.';
     if(btn)btn.disabled=true;
     return;
@@ -1109,6 +1110,7 @@ async function cjRefreshShippingEstimate(product,selectedVariant,isRetry){
 
     const count=renderCjShippingServices(r.options,currency,product,selectedVariant);
     if(!count){
+      if(window.__cjShippingQuoteAttempt&&window.__cjShippingQuoteAttempt.requestId===requestId)window.__cjShippingQuoteAttempt=null;
       resetCjShippingPicker('No delivery services available',true);
       if(el)el.textContent='NOVA could not display a valid live delivery quote for this address. No payment has been taken.';
       if(btn)btn.disabled=true;
