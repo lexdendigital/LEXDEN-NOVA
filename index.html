@@ -119,7 +119,41 @@ setInterval(function(){if(!document.hidden)fetch(b+'/health',{mode:'no-cors',cac
 <script src="js/core.js"></script>
 <script src="js/support.js"></script>
 <script src="js/shopper.js"></script>
-<script src="js/nova-ai.js"></script>
+<script>
+/* NOVA AI is loaded after the page is interactive (it is ~27 KB gzip the shopper does not need
+   to see the catalogue). Until it arrives, these stubs keep every caller working: the first call
+   loads the script, then replays itself against the real function. */
+(function(){
+  var state = 0; // 0 idle, 1 loading, 2 loaded
+  var waiting = [];
+  var names = ['toggleNova','openNova','sendNovaMessage','quickNovaByIndex','clearNovaHistory'];
+  function load(cb){
+    if(cb) waiting.push(cb);
+    if(state === 2){ flush(); return; }
+    if(state === 1) return;
+    state = 1;
+    var s = document.createElement('script');
+    s.src = 'js/nova-ai.js';
+    s.onload = function(){ state = 2; try{ if(typeof ensureNovaWidget === 'function') ensureNovaWidget(); }catch(e){} flush(); };
+    s.onerror = function(){ state = 0; waiting = []; };
+    document.head.appendChild(s);
+  }
+  function flush(){ var q = waiting; waiting = []; q.forEach(function(f){ try{ f(); }catch(e){ console.error(e); } }); }
+  window.ensureNovaWidget = function(){ /* real one runs after load */ };
+  names.forEach(function(n){
+    var stub = function(){
+      var a = arguments;
+      if(n === 'toggleNova' && !a[0]) return;
+      load(function(){ if(window[n] !== stub) window[n].apply(window, a); });
+    };
+    window[n] = stub;
+  });
+  var kick = function(){ load(); };
+  window.addEventListener('load', function(){
+    if('requestIdleCallback' in window) requestIdleCallback(kick, { timeout: 4000 }); else setTimeout(kick, 2500);
+  });
+})();
+</script>
 <script src="js/update.js"></script>
 <script src="js/boot.js"></script>
 </body>
