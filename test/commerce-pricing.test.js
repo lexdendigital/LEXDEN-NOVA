@@ -123,37 +123,35 @@ test('never pretends a slow-only route meets Smart; Economy requires explicit ac
   assert.equal(services[0].estimatedOrderToDoorMaxDays, 65);
 });
 
-test('suppresses a financially absurd express route but permits an affordable fast option', () => {
+test('offers a valid Express route even when its shipping price is above the item-price ratio warning', () => {
   const services = selectShippingServices([
     { logisticName: 'PostNL', logisticPrice: 6.00, logisticAging: '10-30' },
     { logisticName: 'DHL Official', logisticPrice: 85.41, logisticAging: '3-7' },
   ], settings, { productAmountUSD: 30 });
 
-  assert.equal(services.some(service => service.logisticName === 'DHL Official'), false);
-
-  const affordable = selectShippingServices([
-    { logisticName: 'PostNL', logisticPrice: 6.00, logisticAging: '10-30' },
-    { logisticName: 'DHL Official', logisticPrice: 4.00, logisticAging: '3-7' },
-  ], settings, { productAmountUSD: 30 });
-
-  const express = affordable.find(service => service.serviceLevel === 'express');
+  const express = services.find(service => service.serviceLevel === 'express');
   assert.ok(express);
+  assert.equal(express.logisticName, 'DHL Official');
+  assert.equal(express.logisticPrice, 85.41);
   assert.equal(express.serviceLabel, 'NOVA Express');
   assert.equal(express.requiresExplicitChoice, true);
   assert.equal(express.estimatedOrderToDoorMaxDays, 12);
 });
 
-test('rejects unknown delivery estimates and routes whose freight ratio breaks affordability rules', () => {
+test('rejects unknown delivery estimates but retains valid routes with high freight ratios', () => {
   const services = selectShippingServices([
     { logisticName: 'Unknown Carrier', logisticPrice: 2.00, logisticAging: 'unknown' },
     { logisticName: 'CJPacket Liquid Line', logisticPrice: 6.00, logisticAging: '20-60' },
   ], settings, { productAmountUSD: 10 });
 
-  assert.deepEqual(services, []);
+  assert.equal(services.length, 1);
+  assert.equal(services[0].serviceLevel, 'economy');
+  assert.equal(services[0].logisticName, 'CJPacket Liquid Line');
+  assert.equal(services[0].requiresExplicitChoice, true);
 });
 
 
-test('checks affordability after NGN conversion and checkout fee buffers, not raw freight alone', () => {
+test('retains routes when NGN conversion and checkout fees push shipping above 35% of item price', () => {
   const services = selectShippingServices([
     { logisticName: 'PostNL', logisticPrice: 2.55, logisticAging: '10-20' },
   ], settings, {
@@ -163,9 +161,9 @@ test('checks affordability after NGN conversion and checkout fee buffers, not ra
     processingDays: 5,
   });
 
-  // Raw freight is 34% of the USD item price, but the actual NGN amount
-  // charged after FX and payment-fee buffers exceeds the 35% hard cap.
-  assert.deepEqual(services, []);
+  assert.equal(services.length, 1);
+  assert.equal(services[0].serviceLevel, 'smart');
+  assert.equal(services[0].logisticName, 'PostNL');
 });
 
 test('legacy admin values cannot weaken NOVA delivery and affordability guardrails', () => {
@@ -187,8 +185,8 @@ test('legacy admin values cannot weaken NOVA delivery and affordability guardrai
   assert.equal(policy.maxDeliveryDays, 45);
   assert.equal(policy.processingDays, DEFAULT_POLICY.shipping.processingDays);
   assert.equal(policy.highShippingItemPriceRatioWarning, 0.25);
-  assert.equal(policy.highShippingItemPriceRatioBlock, 0.35);
-  assert.equal(policy.enforceShippingRatioBlock, true);
+  assert.equal(Object.hasOwn(policy, 'highShippingItemPriceRatioBlock'), false);
+  assert.equal(Object.hasOwn(policy, 'enforceShippingRatioBlock'), false);
   assert.equal(policy.smartMaxShippingPremiumPct, 0.4);
   assert.equal(policy.economyMinSavingUSD, 2.5);
   assert.equal(policy.economyMinSavingPct, 0.2);

@@ -7,7 +7,7 @@ const crypto = require('node:crypto');
 const { setCors, cjFetch, writeSyncLog } = require('./cj-shared');
 const { getDb } = require('./affiliate/shared');
 const { resolveProductSelection } = require('./product-variants');
-const { getCommercePricingPolicy, calculateShippingCharge, rateForCurrency, selectShippingServices, sortShippingOptions, shippingRatio } = require('./commerce-pricing');
+const { getCommercePricingPolicy, calculateShippingCharge, selectShippingServices, sortShippingOptions, shippingRatio } = require('./commerce-pricing');
 
 function countryToIso2(value) {
   const text = String(value || '').trim();
@@ -216,21 +216,14 @@ module.exports = async (req, res) => {
       const quoteTtlMs = policy.shipping.quoteTtlMinutes * 60 * 1000;
       const createdAt = new Date();
       const expiresAt = new Date(createdAt.getTime() + quoteTtlMs);
-      const displayRate = rateForCurrency(settingsDoc, currency);
-      const productAmountUSD = currency === 'USD'
-        ? Number(selection.price)
-        : (displayRate ? Number(selection.price) / displayRate : null);
       options = selectShippingServices(options, settingsDoc, {
-        productAmountUSD,
-        productAmountMajor: Number(selection.price),
-        currency,
         processingDays: policy.shipping.processingDays,
       });
       if (!options.length) {
         await writeSyncLog({
           event: 'shipping.calc',
           success: true,
-          message: 'No route meets NOVA service-level, speed and affordability rules',
+          message: 'No route meets NOVA service-level and delivery-time rules',
           tookMs: Date.now() - started,
           detail: { endCountryCode, productId: product.id, currency, rawRouteCount: raw.length },
         });
@@ -245,10 +238,8 @@ module.exports = async (req, res) => {
         if (shippingAmountMajor == null) continue;
         const productAmountMajor = Number(selection.price);
         const ratio = shippingRatio(shippingAmountMajor, productAmountMajor);
-        // Recheck after FX and payment-fee buffers. Do not send checkout options
-        // that already violate the shopper-facing affordability cap.
-        if (policy.shipping.enforceShippingRatioBlock && ratio !== null
-          && ratio >= policy.shipping.highShippingItemPriceRatioBlock) continue;
+        // Keep the ratio as quote metadata for the storefront warning/analytics.
+        // Valid carrier quotes are not discarded because shipping exceeds an item-price percentage.
         const quoteId = crypto.randomUUID();
         const totalAmountMajor = roundTotal(productAmountMajor + shippingAmountMajor, currency);
         const blockedByPricingPolicy = false;
@@ -297,7 +288,7 @@ module.exports = async (req, res) => {
       if (!quoteOptions.length) {
         return res.status(200).json({
           ok: false,
-          error: 'No route meets NOVA’s delivery and affordability rules after fees and currency conversion. Choose a locally stocked alternative or another product.',
+          error: 'No valid carrier quote could be priced after currency conversion and payment-fee calculation.',
         });
       }
       await writeSyncLog({
