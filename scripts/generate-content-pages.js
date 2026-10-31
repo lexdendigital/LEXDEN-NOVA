@@ -52,7 +52,7 @@ function nav(depth) {
 
 function shell(opts) {
   const url = PAGES_BASE + opts.route;
-  const image = opts.image ? socialImage(opts.image) : '';
+  const image = opts.image ? socialImage(opts.image) : PAGES_BASE + '/assets/og-home.png';
   return [
     '<!doctype html>',
     '<html lang="en">',
