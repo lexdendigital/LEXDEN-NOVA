@@ -219,7 +219,7 @@ test('worker: preserves product-view, checkout and signup due timings', async ()
   assert.equal(r.queued, 3);
   assert.equal(Object.keys(db._store.emailQueue).length, 3);
   assert.equal(db._store.productViewEvents.co.stage, 1);
-  assert.equal(db._store.productViewEvents.co.nextAttemptAt, NOW + 22 * 60 * 60 * 1000);
+  assert.equal(Date.parse(db._store.productViewEvents.co.nextAttemptAt), NOW + 22 * 60 * 60 * 1000);
   assert.equal(db._store.productViewEvents.future.stage, 0);
 });
 
