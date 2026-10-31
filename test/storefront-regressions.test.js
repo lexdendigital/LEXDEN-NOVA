@@ -71,6 +71,7 @@ test('SEO canonicals and offer URLs point at the crawlable pages on the app host
   assert.match(html, /const url = pagesProductUrl\(p\);\s*\n\s*const cat = DB\.categories/);
   assert.match(html, /const url = pagesFeedUrl\(post\.id\);/);
   assert.match(html, /url: pagesProductUrl\(p\),/);
-  assert.match(html, /hasMerchantReturnPolicy/);
+  assert.match(html, /hasMerchantReturnPolicy: returnPolicySchema\(p\)/);
+  assert.match(html, /function returnPolicySchema\(p\)/);
   assert.match(html, /brand:\{'@type':'Brand'/);
 });

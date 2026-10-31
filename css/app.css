@@ -864,7 +864,7 @@ img{max-width:100%;display:block;}
    Same technique the old hero already used (::before, absolutely
    positioned, inset:0) so nothing about the hero's box model, height, or
    button position moves; only what paints inside it changes. */
-.hero{position:relative;border-radius:22px;overflow:hidden;padding:26px 22px;margin-bottom:22px;min-height:190px;display:flex;flex-direction:column;justify-content:flex-end;background:linear-gradient(150deg,#0b0818,#171034 60%,#1c1030);border:1px solid rgba(255,255,255,0.07);box-shadow:var(--shadow-elevated);}
+.hero{position:relative;border-radius:22px;overflow:hidden;padding:20px 20px;margin-bottom:16px;min-height:150px;display:flex;flex-direction:column;justify-content:flex-end;background:linear-gradient(150deg,#0b0818,#171034 60%,#1c1030);border:1px solid rgba(255,255,255,0.07);box-shadow:var(--shadow-elevated);}
 .hero::before{
   content:'';position:absolute;inset:-20%;
   background:
@@ -1106,7 +1106,7 @@ img{max-width:100%;display:block;}
 .log-row{font-size:12.5px;color:var(--text-2);padding:8px 0;border-bottom:1px dashed var(--border);}
 
 /* ============ NOVA AI CHAT ============ */
-.nova-fab{position:fixed;right:16px;bottom:calc(var(--nav-h) + var(--safe-bottom) + 16px);width:56px;height:56px;border-radius:50%;background:var(--grad-aurora);display:flex;align-items:center;justify-content:center;font-size:24px;box-shadow:0 8px 24px rgba(0,217,255,0.3),0 4px 16px rgba(255,61,143,0.18);z-index:400;animation:novaFloat 3s ease-in-out infinite;transition:transform .15s var(--ease),width .15s var(--ease),border-radius .15s var(--ease);color:#050214;gap:8px;}
+.nova-fab{position:fixed;right:16px;bottom:calc(var(--nav-h) + var(--safe-bottom) + 16px);width:48px;height:48px;border-radius:50%;background:var(--grad-aurora);display:flex;align-items:center;justify-content:center;font-size:21px;box-shadow:0 8px 24px rgba(0,217,255,0.3),0 4px 16px rgba(255,61,143,0.18);z-index:400;animation:novaFloat 3s ease-in-out infinite;transition:transform .15s var(--ease),width .15s var(--ease),border-radius .15s var(--ease);color:#050214;gap:8px;}
 .nova-fab:active{transform:scale(0.9);}
 /* label hidden on phones, shown on wide screens (declared BEFORE the media query so it can be overridden) */
 .nova-fab .fab-label{display:none;}

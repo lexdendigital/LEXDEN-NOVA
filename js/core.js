@@ -367,6 +367,21 @@ function publicProductUrl(p){
 const PAGES_ROOT = SITE_URL.replace(/index\.html$/, '');
 function pagesProductUrl(p){ return PAGES_ROOT + 'product/' + encodeURIComponent(publicProductId(p)) + '/'; }
 function pagesFeedUrl(id){ return PAGES_ROOT + 'feed/' + encodeURIComponent(id) + '/'; }
+// A product's own stated policy wins (e.g. "7-day return ... customer pays return shipping");
+// otherwise use the 14-day window published in legal/refunds.html. Keep in sync with
+// returnPolicyFor() in scripts/generate-product-share-pages.js.
+function returnPolicySchema(p){
+  const text = String((p.physical && p.physical.returnPolicy) || p.refundPolicy || '');
+  const m = /(\d{1,3})\s*-?\s*day/i.exec(text);
+  const days = m ? Number(m[1]) : 14;
+  const policy = {
+    '@type':'MerchantReturnPolicy', applicableCountry:'NG',
+    returnPolicyCategory:'https://schema.org/MerchantReturnFiniteReturnWindow',
+    merchantReturnDays: days > 0 ? days : 14, merchantReturnLink: PAGES_ROOT + 'legal/refunds.html',
+  };
+  if(/customer pays return shipping/i.test(text)) policy.returnFees = 'https://schema.org/ReturnShippingFees';
+  return policy;
+}
 function productToSchema(p){
   const stats = liveRatingStats(p);
   const isPhysical = String(p.productType || '').toUpperCase() === 'PHYSICAL';
@@ -376,12 +391,7 @@ function productToSchema(p){
     priceCurrency:'USD',
     availability: 'https://schema.org/InStock',
     url: pagesProductUrl(p),
-    // Mirrors the 14-day window published in legal/refunds.html.
-    hasMerchantReturnPolicy: {
-      '@type':'MerchantReturnPolicy', applicableCountry:'NG',
-      returnPolicyCategory:'https://schema.org/MerchantReturnFiniteReturnWindow',
-      merchantReturnDays:14, merchantReturnLink: PAGES_ROOT + 'legal/refunds.html',
-    },
+    hasMerchantReturnPolicy: returnPolicySchema(p),
   };
   // Digital items have no postage. Physical items are priced by a live quote at checkout,
   // so no fixed shipping rate is published for them.

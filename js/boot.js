@@ -85,7 +85,14 @@ function init(){
   // attribution.
   setTimeout(()=>{ retryPendingPayments(true); }, 1500);
   setTimeout(warmBackend, 800);
-  setTimeout(maybeShowNewsletterPopup, 5000);
+  // Newsletter pop-up: only for an engaged visitor (see state.js). Count this visit, then
+  // check on a calm timer and again after each navigation, once a product has been viewed.
+  trackNewsletterEngagement('session');
+  setTimeout(maybeShowNewsletterPopup, 20000);
+  window.addEventListener('hashchange', ()=>{
+    if(location.hash.startsWith('#product/')) trackNewsletterEngagement('product');
+    else setTimeout(maybeShowNewsletterPopup, 1500);
+  });
   document.addEventListener('keydown', e=>{ if(e.key==='Escape' && appState.novaOpen) toggleNova(false); });
   // Close the custom price-range popover on any outside click/tap, same
   // UX a native <select> gives you for free — needed here since this is a

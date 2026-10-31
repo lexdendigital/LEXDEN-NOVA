@@ -1127,10 +1127,40 @@ function closeSignInPromptModal(){ $('#signInPromptOverlay')?.remove(); }
    security rule added (same pattern as feedLikes/leads) before writes
    will actually succeed in production — until then this fails silently,
    same as every other best-effort cloud push in this app. */
+/* UPDATE: the pop-up no longer fires 5s after the very first load. A first-time visitor
+   who has not looked at anything yet is not asked for an email (it covered the page and
+   hurt both usability and Google's "intrusive interstitial" guidance). It now appears only
+   once the visitor is engaged: this is at least their second visit, or they have opened
+   two products. It never shows over a product, checkout, login or admin screen. */
+const NEWSLETTER_MIN_VISITS = 2;
+const NEWSLETTER_MIN_PRODUCT_VIEWS = 2;
+function newsletterCounter(key){
+  try{ return Number(localStorage.getItem(key)) || 0; }catch(e){ return 0; }
+}
+function newsletterBump(key){
+  try{ localStorage.setItem(key, String(newsletterCounter(key) + 1)); }catch(e){}
+}
+// Called once per browser session (boot) and on every route change.
+function trackNewsletterEngagement(kind){
+  if(kind === 'session'){
+    try{
+      if(sessionStorage.getItem('ln_session_counted')) return;
+      sessionStorage.setItem('ln_session_counted', '1');
+    }catch(e){ return; }
+    newsletterBump('ln_visits');
+  } else if(kind === 'product'){
+    newsletterBump('ln_product_views');
+  }
+}
+function newsletterVisitorEngaged(){
+  return newsletterCounter('ln_visits') >= NEWSLETTER_MIN_VISITS
+      || newsletterCounter('ln_product_views') >= NEWSLETTER_MIN_PRODUCT_VIEWS;
+}
 function maybeShowNewsletterPopup(){
-  if(localStorage.getItem('ln_newsletter_seen')) return;
+  try{ if(localStorage.getItem('ln_newsletter_seen')) return; }catch(e){}
+  if(!newsletterVisitorEngaged()) return;
   const hash = location.hash;
-  const blockedRoutes = ['#login','#signup','#checkout','#admin'];
+  const blockedRoutes = ['#login','#signup','#checkout','#admin','#product'];
   if(blockedRoutes.some(r=>hash.startsWith(r))) return;
   if(appState.novaOpen) return; // don't stack on top of the chat sheet
   showNewsletterModal();
@@ -1139,13 +1169,18 @@ function showNewsletterModal(){
   if($('#newsletterOverlay')) return;
   const overlay = document.createElement('div');
   overlay.id = 'newsletterOverlay';
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
+  overlay.setAttribute('aria-labelledby', 'newsletterTitle');
   overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:950;display:flex;align-items:center;justify-content:center;padding:20px;';
+  // Escape closes it, like any dialog.
+  overlay.addEventListener('keydown', e=>{ if(e.key==='Escape') dismissNewsletterModal(); });
   const prefillEmail = (window.__fbShopper && window.__fbShopper.email) || '';
   overlay.innerHTML = `
     <div class="card" style="max-width:380px;width:100%;padding:22px;position:relative;">
-      <button type="button" aria-label="Close" onclick="dismissNewsletterModal()" style="position:absolute;top:10px;right:10px;width:28px;height:28px;border-radius:50%;border:none;background:var(--bg-2,rgba(127,127,127,.15));color:inherit;font-size:15px;line-height:1;cursor:pointer;">✕</button>
+      <button type="button" aria-label="Close" onclick="dismissNewsletterModal()" style="position:absolute;top:4px;right:4px;width:44px;height:44px;border-radius:50%;border:none;background:transparent;color:inherit;font-size:17px;line-height:1;cursor:pointer;">✕</button>
       <div style="font-size:32px;margin-bottom:8px;text-align:center;">📩</div>
-      <h2 class="font-display" style="margin-bottom:6px;text-align:center;">Stay in the loop</h2>
+      <h2 class="font-display" id="newsletterTitle" style="margin-bottom:6px;text-align:center;">Stay in the loop</h2>
       <p class="text-2 small" style="margin-bottom:16px;text-align:center;">Get new drops, deals and updates from LEXDEN NOVA straight to your inbox — no spam, unsubscribe any time.</p>
       <div class="form-field" style="margin-bottom:14px;">
         <label>Your email</label>

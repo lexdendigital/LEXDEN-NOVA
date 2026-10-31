@@ -100,3 +100,16 @@ test('product JSON-LD carries brand, return policy and digital shipping details;
   assert.ok(physical.offers.hasMerchantReturnPolicy);
   assert.equal(physical.offers.shippingDetails, undefined);
 });
+
+test('return policy in structured data follows the product\'s own stated policy', () => {
+  const ld = (product) => JSON.parse(renderProductPreview(product, 'p9').match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/)[1]);
+  const stated = ld({
+    id: 'p9', name: 'Earbuds', price: 12, productType: 'PHYSICAL',
+    physical: { returnPolicy: '7-day return for eligible physical items; customer pays return shipping unless applicable law requires otherwise.' },
+  }).offers.hasMerchantReturnPolicy;
+  assert.equal(stated.merchantReturnDays, 7);
+  assert.equal(stated.returnFees, 'https://schema.org/ReturnShippingFees');
+  const fallback = ld({ id: 'p3', name: 'Course', price: 6 }).offers.hasMerchantReturnPolicy;
+  assert.equal(fallback.merchantReturnDays, 14);
+  assert.equal(fallback.returnFees, undefined);
+});

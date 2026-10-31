@@ -154,6 +154,24 @@ function descriptionParagraphs(value, maxParagraphs) {
     .slice(0, maxParagraphs || 12);
 }
 
+// Structured data must match what the product page itself promises. A product's own
+// stated policy wins (e.g. "7-day return ... customer pays return shipping"); when it
+// states nothing, use the 14-day window published in legal/refunds.html.
+function returnPolicyFor(product) {
+  const text = String((product.physical && product.physical.returnPolicy) || product.refundPolicy || '');
+  const match = /(\d{1,3})\s*-?\s*day/i.exec(text);
+  const days = match ? Number(match[1]) : 14;
+  const policy = {
+    '@type': 'MerchantReturnPolicy',
+    applicableCountry: 'NG',
+    returnPolicyCategory: 'https://schema.org/MerchantReturnFiniteReturnWindow',
+    merchantReturnDays: days > 0 ? days : 14,
+    merchantReturnLink: PAGES_BASE + '/legal/refunds.html',
+  };
+  if (/customer pays return shipping/i.test(text)) policy.returnFees = 'https://schema.org/ReturnShippingFees';
+  return policy;
+}
+
 function buildJsonLd(product, title, description, image, pageUrl) {
   const price = effectivePrice(product);
   const data = {
@@ -178,14 +196,7 @@ function buildJsonLd(product, title, description, image, pageUrl) {
       priceCurrency: 'USD',
       price: price.toFixed(2),
       availability: 'https://schema.org/' + (outOfStock ? 'OutOfStock' : 'InStock'),
-      // Mirrors the 14-day window published in legal/refunds.html.
-      hasMerchantReturnPolicy: {
-        '@type': 'MerchantReturnPolicy',
-        applicableCountry: 'NG',
-        returnPolicyCategory: 'https://schema.org/MerchantReturnFiniteReturnWindow',
-        merchantReturnDays: 14,
-        merchantReturnLink: PAGES_BASE + '/legal/refunds.html',
-      },
+      hasMerchantReturnPolicy: returnPolicyFor(product),
     };
     // Digital items have no postage. Physical items are priced by a live shipping
     // quote at checkout, so no fixed rate is published for them.
