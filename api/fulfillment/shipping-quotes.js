@@ -70,7 +70,7 @@ function warehouseRows(data, mapping, quantity) {
     if (!Number.isFinite(available) || available < quantity) return [];
     const country = iso2(
       row.countryCode || row.sourceCountryCode || row.originCountryCode ||
-      row.country || row.area || row.warehouseCountryCode
+      row.country || row.area || row.warehouseCountryCode || (/^[A-Za-z]{2}$/.test(String(row.warehouse || '').trim()) ? row.warehouse : null)
     ) || iso2(mapping.sourceCountryCode);
     if (!country) return [];
     return [{
