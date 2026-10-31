@@ -684,7 +684,7 @@ function render(){
     body = screenHome();
   }
 
-  app.innerHTML = topBanner() + shellHeader() + body + shellBottomNav() + '<div class="status-fill" style="display:none"></div>';
+  app.innerHTML = '<a class="skip-link" href="#main" onclick="var m=document.getElementById(\'main\');if(m){m.focus();}return false;">Skip to content</a>' + topBanner() + '<header class="lx-landmark">' + shellHeader() + '</header><main id="main" class="lx-landmark" tabindex="-1">' + body + '</main>' + shellBottomNav() + '<div class="status-fill" style="display:none"></div>';
   afterRender(hash);
 }
 
@@ -953,16 +953,16 @@ function shellHeader(){
     <span class="brand logo-press">${logo}<span>${escapeHtml(c.appName||'LEXDEN NOVA')}</span></span>
     <div class="links">${topNavLinks(appState.route)}</div>
     <div class="header-icons">
-      <button class="icon-btn" onclick="toggleThemeBtn()" title="Toggle theme">${icon(appState.theme==='dark'?'moon':'sun')}</button>
-      <a class="icon-btn" href="#wishlist" title="Wishlist">${icon('heart')}</a>
-      <a class="icon-btn${appState.route==='#profile'?' active':''}" href="#profile" title="Profile">${icon('user')}</a>
+      <button class="icon-btn" onclick="toggleThemeBtn()" title="Toggle theme" aria-label="Toggle light or dark theme">${icon(appState.theme==='dark'?'moon':'sun')}</button>
+      <a class="icon-btn" href="#wishlist" title="Wishlist" aria-label="Wishlist">${icon('heart')}</a>
+      <a class="icon-btn${appState.route==='#profile'?' active':''}" href="#profile" title="Profile" aria-label="Profile">${icon('user')}</a>
     </div>
   </div>
   <div class="app-header">
     <span class="brand logo-press">${logo}<span>${escapeHtml(c.appName||'LEXDEN NOVA')}</span></span>
     <div class="header-icons">
-      <button class="icon-btn" onclick="navigate('#products')">${icon('search')}</button>
-      <a class="icon-btn" href="#wishlist" style="position:relative">${icon('heart')}<span class="badge-dot" style="display:${DB.wishlist.length?'block':'none'}"></span></a>
+      <button class="icon-btn" onclick="navigate('#products')" aria-label="Search products">${icon('search')}</button>
+      <a class="icon-btn" href="#wishlist" aria-label="Wishlist" style="position:relative">${icon('heart')}<span class="badge-dot" style="display:${DB.wishlist.length?'block':'none'}"></span></a>
     </div>
   </div>`;
 }

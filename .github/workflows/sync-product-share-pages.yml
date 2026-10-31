@@ -10,6 +10,7 @@ on:
     paths:
       - "scripts/generate-product-share-pages.js"
       - "scripts/generate-sitemap.js"
+      - "scripts/generate-catalog.js"
       - "scripts/generate-content-pages.js"
       - ".github/workflows/sync-product-share-pages.yml"
 
@@ -42,6 +43,9 @@ jobs:
       - name: Generate feed, product index and affiliate programme pages
         run: node scripts/generate-content-pages.js
 
+      - name: Generate catalog.json and llms.txt for AI assistants
+        run: node scripts/generate-catalog.js
+
       - name: Generate sitemap.xml from the same live catalog
         run: node scripts/generate-sitemap.js
 
@@ -51,7 +55,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add product/ feed/ affiliate-program/ sitemap.xml
+          git add product/ feed/ affiliate-program/ sitemap.xml catalog.json llms.txt
           if git diff --cached --quiet; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
             echo "Product pages and sitemap already match the live catalog."

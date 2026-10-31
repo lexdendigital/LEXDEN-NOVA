@@ -31,8 +31,8 @@ function ensureNovaWidget(){
     <div class="nova-head">
       <div class="who"><div class="avatar-ai">✨</div><div><div style="font-weight:700;font-size:14px;">NOVA AI</div><div class="small text-2">Here to help you choose</div></div></div>
       <div class="flex gap-8">
-        <button class="icon-btn btn-sm" title="Clear history" onclick="clearNovaHistory()">🗑️</button>
-        <button class="icon-btn" onclick="toggleNova(false)">✕</button>
+        <button class="icon-btn btn-sm" title="Clear history" aria-label="Clear chat history" onclick="clearNovaHistory()">🗑️</button>
+        <button class="icon-btn" onclick="toggleNova(false)" aria-label="Close NOVA AI">✕</button>
       </div>
     </div>
     <div class="nova-body" id="novaBody"></div>

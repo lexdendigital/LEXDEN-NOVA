@@ -532,7 +532,7 @@ img{max-width:100%;display:block;}
 }
 .app-logo-img{width:26px;height:26px;border-radius:8px;object-fit:cover;flex-shrink:0;box-shadow:0 0 8px var(--accent-glow),0 0 16px var(--magenta-glow);}
 .header-icons{display:flex;align-items:center;gap:14px;}
-.icon-btn{width:36px;height:36px;display:flex;align-items:center;justify-content:center;border-radius:50%;font-size:18px;transition:transform .15s var(--ease),background .15s;position:relative;}
+.icon-btn{width:44px;height:44px;display:flex;align-items:center;justify-content:center;border-radius:50%;font-size:18px;transition:transform .15s var(--ease),background .15s;position:relative;}
 .ic-svg{width:20px;height:20px;flex-shrink:0;}
 .nav-item .ic-svg{width:22px;height:22px;}
 .list-row .ic-svg{width:18px;height:18px;}
@@ -1334,3 +1334,9 @@ img{max-width:100%;display:block;}
   .product-card{transition:none;}
   .product-card:hover,.product-card:focus-visible{transform:none;}
 }
+
+/* Accessibility: landmarks must not change layout; skip link appears on keyboard focus */
+.lx-landmark{display:contents;}
+.skip-link{position:fixed;left:8px;top:-60px;z-index:2000;background:var(--accent);color:#050214;padding:10px 16px;border-radius:10px;font-weight:700;text-decoration:none;}
+.skip-link:focus{top:8px;}
+#main:focus{outline:none;}
