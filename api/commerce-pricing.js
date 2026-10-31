@@ -183,13 +183,24 @@ function selectShippingServices(options, settings = {}, context = {}) {
     const aging = parseShippingAging(option.logisticAging);
     const cost = finiteNonNegative(option.logisticPrice);
     const express = isExpressShippingMethod(option.logisticName, settings);
+    const suppliedMin = finiteNonNegative(option.estimatedOrderToDoorMinDays ?? option.totalMinDeliveryDays);
+    const suppliedMax = finiteNonNegative(option.estimatedOrderToDoorMaxDays ?? option.totalMaxDeliveryDays);
+    const hasPrecomputedDoorDays = suppliedMax !== null;
+    const minDoorDays = hasPrecomputedDoorDays
+      ? (suppliedMin === null ? suppliedMax : suppliedMin)
+      : (aging ? aging.minDays + processingDays : null);
+    const maxDoorDays = hasPrecomputedDoorDays
+      ? suppliedMax
+      : (aging ? aging.maxDays + processingDays : null);
+    const validDoorDays = Number.isFinite(minDoorDays) && minDoorDays >= 0
+      && Number.isFinite(maxDoorDays) && maxDoorDays >= minDoorDays;
     return {
       ...option,
-      __aging: aging,
+      __aging: aging || (validDoorDays ? { minDays: minDoorDays, maxDays: maxDoorDays } : null),
       __cost: cost,
       __express: express,
-      __minDoorDays: aging ? aging.minDays + processingDays : null,
-      __maxDoorDays: aging ? aging.maxDays + processingDays : null,
+      __minDoorDays: validDoorDays ? minDoorDays : null,
+      __maxDoorDays: validDoorDays ? maxDoorDays : null,
     };
   }).filter(option => option.__aging && option.__cost != null && option.__cost >= 0);
 
