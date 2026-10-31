@@ -3,8 +3,8 @@ import {
   getFirestore, doc, getDoc, setDoc, collection, getDocs, deleteDoc, query, where, orderBy, updateDoc, increment, limit
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {
-  getAuth, signInAnonymously, onAuthStateChanged, signInWithEmailAndPassword,
-  createUserWithEmailAndPassword, updateProfile,
+  getAuth, onAuthStateChanged, signInWithEmailAndPassword,
+  createUserWithEmailAndPassword, updateProfile, setPersistence, browserLocalPersistence,
   signInWithPopup, signInWithRedirect, getRedirectResult, GoogleAuthProvider, signOut,
   fetchSignInMethodsForEmail, sendPasswordResetEmail,
   EmailAuthProvider, reauthenticateWithCredential, getAdditionalUserInfo
@@ -94,6 +94,7 @@ const fbApp = initializeApp(firebaseConfig);
 const fbDb = getFirestore(fbApp);
 const fbAuth = getAuth(fbApp);
 const googleProvider = new GoogleAuthProvider();
+let authPersistenceReady = Promise.resolve();
 
 // BUGFIX (shopper sign-in "disappearing" after a few hours, reported on an
 // installed Android PWA): Firebase Auth persists the session in IndexedDB.
@@ -117,6 +118,25 @@ window.__novaLog = function(msg){
   }catch(e){}
   console.log(msg);
 };
+
+// AUTH SESSION LOCKDOWN:
+// NOVA has only two shopper states: a real Firebase account, or a guest.
+// Guest browsing does NOT need an anonymous Firebase Auth account: the
+// guest-facing Firestore reads/counters are already public by design, while
+// wishlists/orders/profile/creator features already require a real shopper.
+// Explicit LOCAL persistence protects the real account across reloads and
+// browser/PWA restarts. Most importantly, there is now no background
+// anonymous-auth request that can finish after a real login/signup and
+// replace the newly-authenticated currentUser.
+authPersistenceReady = setPersistence(fbAuth, browserLocalPersistence)
+  .then(()=>window.__novaLog('Firebase Auth persistence: LOCAL'))
+  .catch(err=>{
+    // Do not block sign-in if a particular embedded browser refuses storage.
+    // Firebase can still authenticate for the current run; the diagnostic log
+    // records that persistence itself needs attention on that device.
+    window.__novaLog('Firebase Auth LOCAL persistence failed: ' + (err && (err.code || err.message) || 'unknown'));
+  });
+window.__fbAuthPersistenceReady = authPersistenceReady;
 
 if(navigator.storage && navigator.storage.persist){
   navigator.storage.persist().then(granted=>{
@@ -228,6 +248,7 @@ function isStandalonePWA(){
 const GSI_PENDING_KEY = 'ln_gsi_pending';
 window.__signInWithGoogle = async function(){
   try{
+    await authPersistenceReady;
     const result = await signInWithPopup(fbAuth, googleProvider);
     // Google accounts are pre-verified by Google itself, so only Welcome
     // applies here (never Email Verification) — and only for a brand-new
@@ -326,6 +347,7 @@ window.__checkEmailExists = async function(email){
 // below is what actually decides admin vs shopper for any given account,
 // so a shopper email/password account is never mistaken for an admin one.
 window.__emailSignIn = async function(email, password){
+  await authPersistenceReady;
   const result = await signInWithEmailAndPassword(fbAuth, email, password);
   return result.user;
 };
@@ -482,6 +504,7 @@ window.__sendPasswordReset = async function(email){
 // display name, then hands back the user so the caller can save the
 // extra profile fields (address, occupation, photo) to Firestore.
 window.__emailSignUp = async function(email, password, displayName){
+  await authPersistenceReady;
   const result = await createUserWithEmailAndPassword(fbAuth, email, password);
   if(displayName){
     try{ await updateProfile(result.user, { displayName }); }catch(e){ console.warn('updateProfile failed', e); }
@@ -518,20 +541,14 @@ function isAdminUser(user){
     && (user.email||'').toLowerCase() === ADMIN_EMAIL.toLowerCase();
 }
 
-// BUGFIX (this was the actual cause of "signed in with Google, but the
-// Profile tab shows signed out again"): signInAnonymously() used to be
-// called unconditionally, right here, at page load — running in parallel
-// with (not after) the Google redirect sign-in completing. Whichever one
-// finished second WON, because signInAnonymously() always replaces
-// whatever user is currently signed in. If it landed after the redirect's
-// real Google user was set, it silently signed the shopper right back out
-// into a fresh anonymous session — with no error, which is exactly what
-// was reported. Firebase only ever fires onAuthStateChanged(null) once it
-// has fully resolved that there is truly no session at all (nothing
-// persisted, no pending redirect) — so starting the anonymous browsing
-// session from inside that branch below, instead of eagerly here, makes
-// the race impossible: anonymous sign-in can now never run before or
-// during a real sign-in.
+// AUTH SESSION LOCKDOWN:
+// Earlier versions automatically created an anonymous Firebase identity when
+// Firebase reported no persisted user. That added a second Auth identity for
+// ordinary guests and allowed a background guest-auth request to overlap a
+// user-triggered Google/email login. Whichever Auth operation completed last
+// became currentUser. NOVA does not require anonymous Auth for guest browsing,
+// so automatic guest authentication is removed completely. A null Auth state
+// now stays null until the shopper explicitly signs in.
 onAuthStateChanged(fbAuth, user => {
   // Never carry one account's creator status / payment-mode cache to the next.
   if(!window.__lastAuthUid || window.__lastAuthUid !== (user && user.uid)){ window.__creatorAppCache = null; window.__creatorAppError = null; window.__creatorAppFetching = false; window.__paymentModeCache = null; window.__paymentModeError = null; window.__lastAuthUid = user ? user.uid : null; try{ window.__resetCreatorWorkspace && window.__resetCreatorWorkspace(); }catch(e){} }
@@ -641,25 +658,19 @@ onAuthStateChanged(fbAuth, user => {
         }
       });
     }
-  } else if(user){
-    // Anonymous browsing session.
-    window.__fbUid = user.uid;
-    window.__fbAdminEmail = null;
-    window.__fbShopper = null;
-    // The admin's Firebase session genuinely ended (real sign-out, token
-    // revoked, or Android evicted local storage) — drop the UI flag too so
-    // a stale "unlocked" admin screen never lingers past the real session.
-    if(appState.adminAuthed){ appState.adminAuthed = false; window.__adminCloudAuthed = false; }
   } else {
-    // Firebase has now fully confirmed there is no session of any kind —
-    // not persisted, not anonymous, not a completing redirect. Only now is
-    // it safe to start an anonymous browsing session (see the BUGFIX note
-    // above onAuthStateChanged for why this used to run eagerly instead).
+    // No authenticated account. Stay a true guest: do not create or switch
+    // Firebase Auth identities in the background. This also safely handles a
+    // legacy anonymous session restored from an older NOVA version by exposing
+    // no shopper UID/data for it; account-only features stay closed until an
+    // explicit real sign-in occurs.
     window.__fbUid = null;
     window.__fbAdminEmail = null;
     window.__fbShopper = null;
+    if(user && user.isAnonymous){
+      window.__novaLog('Legacy anonymous Auth session ignored; guest mode retained.');
+    }
     if(appState.adminAuthed){ appState.adminAuthed = false; window.__adminCloudAuthed = false; }
-    signInAnonymously(fbAuth).catch(err => console.warn("Anon sign-in failed", err));
   }
   // Once we know who we are, pull the shared data and refresh the screen
   window.__novaCloudSync && window.__novaCloudSync();
@@ -679,8 +690,7 @@ window.__googleSignOut = async function(){
   // only that account's own liked posts from the cloud.
   DB.likedPosts = [];
   DB.wishlist = [];
-  // No need to also call signInAnonymously() here — signing out fires
-  // onAuthStateChanged(null) above, which now starts the anonymous
-  // session itself.
+  // signOut() now returns NOVA to a true unauthenticated guest state.
+  // No anonymous replacement identity is created afterward.
   await signOut(fbAuth);
 };
