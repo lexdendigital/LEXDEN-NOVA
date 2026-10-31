@@ -826,7 +826,7 @@ function openDeliveryDetailsModal(product, selectedVariant, onSubmit){
   overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:900;display:flex;align-items:center;justify-content:center;padding:20px;overflow-y:auto;';
   const countries=(product.physical&&product.physical.shippingCountries&&product.physical.shippingCountries.length)?product.physical.shippingCountries:['Nigeria'];
   const requiresCjQuote=isCjPhysicalProduct(product);
-  const routeField=requiresCjQuote ? '<div class="form-field"><label for="dd_shippingMethod">Delivery service</label><select id="dd_shippingMethod" style="width:100%;"><option value="">Checking delivery services…</option></select></div>' : '';
+  const routeField=requiresCjQuote ? '<div class="form-field"><label>Delivery service</label>'+customSelect('dd_shippingMethod','',[],'Choose an available NOVA service…')+'</div>' : '';
   overlay.innerHTML='<div class="card" style="max-width:420px;width:100%;padding:20px;max-height:90vh;overflow-y:auto;">'
     +'<h2 class="font-display" style="margin-bottom:4px;">Where should we ship this?</h2>'
     +'<p class="text-2 small" style="margin-bottom:14px;">'+escapeHtml(product.name)+' is a physical item. We will show the shipping fee before you pay.</p>'
@@ -846,7 +846,16 @@ function openDeliveryDetailsModal(product, selectedVariant, onSubmit){
   $('#dd_name').focus();
   const btn=$('#deliveryDetailsBtn');
   const routeSelect=$('#dd_shippingMethod');
-  if(routeSelect) routeSelect.addEventListener('change',()=>updateCjShippingChoice(product,selectedVariant));
+  const routePicker=$('#csel_dd_shippingMethod');
+  const routeTrigger=routePicker&&routePicker.querySelector('.csel-btn');
+  const routePanel=routePicker&&routePicker.querySelector('.csel-panel');
+  if(routeTrigger){
+    routeTrigger.setAttribute('aria-haspopup','listbox');
+    routeTrigger.setAttribute('aria-expanded','false');
+    routeTrigger.setAttribute('aria-controls','dd_shippingMethodOptions');
+    routeTrigger.addEventListener('click',()=>routeTrigger.setAttribute('aria-expanded',routePicker.classList.contains('open')?'true':'false'));
+  }
+  if(routePanel){routePanel.id='dd_shippingMethodOptions';routePanel.setAttribute('role','listbox');}
   $('#deliveryDetailsCancel').addEventListener('click',closeDeliveryDetailsModal);
   if(requiresCjQuote){
     ['dd_address','dd_city','dd_state','dd_postalCode'].forEach(id=>{
@@ -885,13 +894,116 @@ function openDeliveryDetailsModal(product, selectedVariant, onSubmit){
 function closeDeliveryDetailsModal(){ $('#deliveryDetailsOverlay')?.remove(); }
 
 let __cjShippingQuoteRequestSeq=0;
+
+function resetCjShippingPicker(label, disabled){
+  const routeSelect=$('#dd_shippingMethod');
+  const picker=$('#csel_dd_shippingMethod');
+  const trigger=picker&&picker.querySelector('.csel-btn');
+  const labelEl=trigger&&trigger.querySelector('span');
+  const panel=picker&&picker.querySelector('.csel-panel');
+  if(routeSelect)routeSelect.value='';
+  if(labelEl)labelEl.textContent=label||'Choose an available NOVA service…';
+  if(trigger){
+    trigger.classList.add('placeholder');
+    trigger.disabled=disabled!==false;
+    trigger.setAttribute('aria-expanded','false');
+  }
+  if(panel)panel.innerHTML='';
+  closeAllCustomSelects();
+  window.__cjShippingQuotes={};
+}
+
+function renderCjShippingServices(options, currency, product, selectedVariant){
+  const routeSelect=$('#dd_shippingMethod');
+  const picker=$('#csel_dd_shippingMethod');
+  const trigger=picker&&picker.querySelector('.csel-btn');
+  const labelEl=trigger&&trigger.querySelector('span');
+  const panel=picker&&picker.querySelector('.csel-panel');
+  if(!routeSelect||!picker||!trigger||!panel)return 0;
+
+  routeSelect.value='';
+  panel.innerHTML='';
+  window.__cjShippingQuotes={};
+  let count=0;
+
+  (Array.isArray(options)?options:[]).forEach(option=>{
+    if(!option||!option.quoteId||!Number.isFinite(Number(option.shippingAmountMajor)))return;
+    window.__cjShippingQuotes[option.quoteId]=option;
+
+    const item=document.createElement('button');
+    item.type='button';
+    item.className='csel-opt nova-shipping-option';
+    item.setAttribute('role','option');
+    item.setAttribute('aria-selected','false');
+    item.dataset.quoteId=String(option.quoteId);
+
+    const name=document.createElement('span');
+    name.className='nova-shipping-option-name';
+    name.textContent=String(option.serviceLabel||'NOVA Delivery');
+
+    const price=document.createElement('strong');
+    price.className='nova-shipping-option-price';
+    price.textContent=formatChargeMajor(option.shippingAmountMajor,currency);
+
+    const details=document.createElement('span');
+    details.className='nova-shipping-option-details';
+    const carrier=String(option.logisticName||option.shippingMethod||'Supplier route');
+    const estimate=String(option.deliveryEstimate||'Delivery estimate unavailable');
+    details.textContent=carrier+' · '+estimate;
+
+    item.appendChild(name);
+    item.appendChild(price);
+    item.appendChild(details);
+    item.addEventListener('click',()=>selectCjShippingService(option.quoteId,product,selectedVariant));
+    panel.appendChild(item);
+    count++;
+  });
+
+  if(labelEl)labelEl.textContent=count?'Choose a delivery service…':'No NOVA delivery services available';
+  trigger.classList.add('placeholder');
+  trigger.disabled=count===0;
+  trigger.setAttribute('aria-expanded','false');
+  closeAllCustomSelects();
+  return count;
+}
+
+function selectCjShippingService(quoteId,product,selectedVariant){
+  const routeSelect=$('#dd_shippingMethod');
+  const picker=$('#csel_dd_shippingMethod');
+  const trigger=picker&&picker.querySelector('.csel-btn');
+  const labelEl=trigger&&trigger.querySelector('span');
+  const quote=window.__cjShippingQuotes&&window.__cjShippingQuotes[quoteId];
+  if(!routeSelect||!quote||!trigger)return;
+
+  routeSelect.value=String(quoteId);
+  if(labelEl)labelEl.textContent=String(quote.serviceLabel||'NOVA Delivery')+' · '+formatChargeMajor(quote.shippingAmountMajor,quote.currency||checkoutChargeCurrency());
+  trigger.classList.remove('placeholder');
+  trigger.setAttribute('aria-expanded','false');
+  if(picker){
+    picker.querySelectorAll('.nova-shipping-option').forEach(item=>{
+      const active=item.dataset.quoteId===String(quoteId);
+      item.classList.toggle('active',active);
+      item.setAttribute('aria-selected',active?'true':'false');
+    });
+  }
+  closeAllCustomSelects();
+  updateCjShippingChoice(product,selectedVariant);
+}
+
 async function cjRefreshShippingEstimate(product,selectedVariant){
   const el=$('#dd_shippingEstimate');
-  const routeSelect=$('#dd_shippingMethod');
   const btn=$('#deliveryDetailsBtn');
   if(!el||!isCjPhysicalProduct(product))return;
+  const requestSeq=++__cjShippingQuoteRequestSeq;
+  window.__cjShippingQuotes={};
+  resetCjShippingPicker('Checking NOVA delivery services…',true);
+
   const base=cjBackendUrl();
-  if(!base){el.textContent='Shipping is temporarily unavailable. No payment has been taken.';if(btn)btn.disabled=true;return;}
+  if(!base){
+    el.textContent='Shipping is temporarily unavailable. No payment has been taken.';
+    if(btn)btn.disabled=true;
+    return;
+  }
   const countryEl=$('#dd_country');
   const country=countryEl?countryEl.value:'Nigeria';
   const iso2=({nigeria:'NG','united states':'US','united kingdom':'GB',ghana:'GH',kenya:'KE','south africa':'ZA'})[String(country).toLowerCase()];
@@ -899,65 +1011,53 @@ async function cjRefreshShippingEstimate(product,selectedVariant){
   const city=$('#dd_city')?$('#dd_city').value.trim():'';
   const state=$('#dd_state')?$('#dd_state').value.trim():'';
   const postalCode=$('#dd_postalCode')?$('#dd_postalCode').value.trim():'';
-  if(!address||!city||!state){el.textContent='Enter your street address, city and state so NOVA can verify delivery before payment.';if(btn)btn.disabled=true;return;}
+  if(!address||!city||!state){
+    resetCjShippingPicker('Enter your address to check services…',true);
+    el.textContent='Enter your street address, city and state so NOVA can check the available delivery services.';
+    if(btn)btn.disabled=true;
+    return;
+  }
+
   const currency=checkoutChargeCurrency();
-  const requestSeq=++__cjShippingQuoteRequestSeq;
   if(btn)btn.disabled=true;
-  if(el)el.textContent='Checking live shipping prices…';
-  if(routeSelect){routeSelect.disabled=true;routeSelect.innerHTML='';const opt=document.createElement('option');opt.value='';opt.textContent='Checking available routes…';routeSelect.appendChild(opt);}
-  window.__cjShippingQuotes={};
+  el.textContent='Checking live NOVA Smart, Economy and Express services…';
+
   try{
-    const r=await withTimeout(cjApiPost('/fulfillment-shipping-quote',{productId:String(product.id),variantId:selectedVariant&&selectedVariant.id||null,quantity:1,destinationCountryCode:iso2||'NG',destinationRegion:state,destinationCity:city,destinationPostalCode:postalCode,destinationAddress1:address,currency}),15000,'Shipping quote timed out.');
+    const r=await withTimeout(cjApiPost('/fulfillment-shipping-quote',{
+      productId:String(product.id),
+      variantId:selectedVariant&&selectedVariant.id||null,
+      quantity:1,
+      destinationCountryCode:iso2||'NG',
+      destinationRegion:state,
+      destinationCity:city,
+      destinationPostalCode:postalCode,
+      destinationAddress1:address,
+      currency
+    }),15000,'Shipping quote timed out.');
     if(requestSeq!==__cjShippingQuoteRequestSeq)return;
+
     if(!r||!r.ok||!Array.isArray(r.options)||!r.options.length){
-      if(el)el.textContent=(r&&r.error)||'No valid shipping route is available for this destination. Try again later or choose another product.';
-      if(routeSelect){routeSelect.innerHTML='';const opt=document.createElement('option');opt.value='';opt.textContent='No valid route available';routeSelect.appendChild(opt);routeSelect.disabled=true;}
-      if(btn)btn.disabled=true;return;
+      resetCjShippingPicker('No delivery services available',true);
+      const unavailable='No NOVA delivery service is currently available for this product and destination.';
+      if(el)el.textContent=(r&&r.error&&r.code!=='NO_ELIGIBLE_SUPPLIER'&&r.code!=='NO_ELIGIBLE_NOVA_SERVICE')?String(r.error):unavailable+' No payment has been taken.';
+      if(btn)btn.disabled=true;
+      return;
     }
-    window.__cjShippingQuotes={};
-    if(routeSelect)routeSelect.innerHTML='';
-    r.options.forEach(option=>{
-      if(!option.quoteId||!Number.isFinite(Number(option.shippingAmountMajor)))return;
-      window.__cjShippingQuotes[option.quoteId]=option;
-      if(!routeSelect)return;
-      const elOption=document.createElement('option');
-      elOption.value=option.quoteId;
-      elOption.dataset.serviceLevel=String(option.serviceLevel||'');
-      const serviceLabel=option.serviceLabel||'NOVA Delivery';
-      const eta=option.deliveryEstimate?(' · estimated '+option.deliveryEstimate):'';
-      const blocked=option.blockedByPricingPolicy===true;
-      elOption.disabled=blocked;
-      elOption.textContent=serviceLabel+' · '+formatChargeMajor(option.shippingAmountMajor,currency)+eta+(blocked?' · unavailable at this delivery cost':'');
-      routeSelect.appendChild(elOption);
-    });
-    if(routeSelect){
-      routeSelect.disabled=false;
-      const serviceOptions=Array.from(routeSelect.options);
-      if(!serviceOptions.length){routeSelect.disabled=true;if(el)el.textContent='CJ returned no usable delivery service prices. No payment has been taken.';if(btn)btn.disabled=true;return;}
-      const firstEligible=serviceOptions.find(option=>!option.disabled);
-      if(!firstEligible){routeSelect.value='';if(el)el.textContent='No delivery service meets NOVA’s affordability limit for this item. Choose a better-priced or locally stocked alternative.';if(btn)btn.disabled=true;return;}
-      const smartOption=serviceOptions.find(option=>!option.disabled&&option.dataset.serviceLevel==='smart');
-      const verifiedOption=serviceOptions.find(option=>!option.disabled&&option.dataset.serviceLevel==='verified');
-      const defaultOption=smartOption||verifiedOption;
-      if(defaultOption){
-        routeSelect.value=defaultOption.value;
-      }else{
-        const placeholder=document.createElement('option');
-        placeholder.value='';
-        placeholder.textContent='Choose a delivery service to continue.';
-        placeholder.selected=true;
-        routeSelect.insertBefore(placeholder,routeSelect.firstChild);
-        routeSelect.value='';
-        if(el)el.textContent='Choose a delivery service to continue. Review any slower delivery estimate before selecting a route.';
-        btn.disabled=true;
-        return;
-      }
+
+    const count=renderCjShippingServices(r.options,currency,product,selectedVariant);
+    if(!count){
+      resetCjShippingPicker('No delivery services available',true);
+      if(el)el.textContent='NOVA could not display a valid live delivery quote for this address. No payment has been taken.';
+      if(btn)btn.disabled=true;
+      return;
     }
-    updateCjShippingChoice(product,selectedVariant);
+
+    if(el)el.textContent='Choose one of the available NOVA services. Each option shows its own shipping price, carrier route and delivery estimate.';
+    if(btn)btn.disabled=true;
   }catch(error){
     if(requestSeq!==__cjShippingQuoteRequestSeq)return;
+    resetCjShippingPicker('Could not load delivery services',true);
     if(el)el.textContent=(error&&error.message?String(error.message):'Shipping lookup failed.')+' No payment has been taken. Please retry.';
-    if(routeSelect){routeSelect.innerHTML='';const opt=document.createElement('option');opt.value='';opt.textContent='Could not calculate shipping';routeSelect.appendChild(opt);routeSelect.disabled=true;}
     if(btn)btn.disabled=true;
   }
 }
@@ -969,17 +1069,22 @@ function updateCjShippingChoice(product,selectedVariant){
   const quote=window.__cjShippingQuotes&&window.__cjShippingQuotes[routeSelect.value];
   if(!quote){btn.disabled=true;return;}
   const expires=Date.parse(quote.quoteExpiresAt||'');
-  if(!Number.isFinite(expires)||expires<=Date.now()){el.textContent='The shipping quote has expired. Refresh the options before paying.';btn.disabled=true;return;}
+  if(!Number.isFinite(expires)||expires<=Date.now()){
+    el.textContent='The selected delivery quote has expired. Refresh the available services before paying.';
+    btn.disabled=true;
+    return;
+  }
   const currency=checkoutChargeCurrency();
   const itemAmount=checkoutItemAmountMajor(product,selectedVariant,currency);
   const ratio=itemAmount>0?Number(quote.shippingAmountMajor)/itemAmount:null;
-  let message=(quote.serviceLabel||'NOVA Delivery')+': '+formatChargeMajor(quote.shippingAmountMajor,currency)+'. Total before payment: '+formatChargeMajor(Number(quote.productAmountMajor)+Number(quote.shippingAmountMajor),currency)+'.';
+  let message=(quote.serviceLabel||'NOVA Delivery')+': '+formatChargeMajor(quote.shippingAmountMajor,currency)+'. Carrier route: '+String(quote.logisticName||quote.shippingMethod||'Supplier route')+'. Total before payment: '+formatChargeMajor(Number(quote.productAmountMajor)+Number(quote.shippingAmountMajor),currency)+'.';
   if(quote.deliveryEstimate)message+=' Estimated order-to-door time: '+quote.deliveryEstimate+'. This is an estimate, not a guarantee.';
   else if(quote.logisticAging)message+=' Supplier transit estimate: '+quote.logisticAging+'; processing may add time.';
-  if(quote.requiresExplicitChoice===true)message+=' This is a slower alternative, not NOVA Verified Delivery. Continue only if you accept the longer estimate.';
+  if(quote.serviceLevel==='economy')message+=' You selected NOVA Economy, a lower-cost route that may take longer. Review the estimate before continuing.';
+  if(quote.serviceLevel==='express')message+=' You selected NOVA Express at its separately quoted shipping price.';
   const policy=(DB.content&&DB.content.commercePricingPolicy&&DB.content.commercePricingPolicy.shipping)||{};
   const warningRatio=Math.min(Number(policy.highShippingItemPriceRatioWarning)||0.25,0.25);
-  if(ratio!==null&&ratio>=warningRatio)message+=' Shipping is high relative to this item price, so compare routes before paying.';
+  if(ratio!==null&&ratio>=warningRatio)message+=' Shipping is high relative to this item price, so compare the available routes before paying.';
   el.textContent=message;
   btn.disabled=false;
 }
