@@ -73,6 +73,26 @@ test('unknown stock, shipping or delivery estimate remains unverified',()=>{
   assert.equal(evaluateShippingPolicy({shippingUSD:5,totalMaxDeliveryDays:null,stockVerified:true,shippingVerified:true,deliveryVerified:true,policy:p}).eligible,false);
 });
 
+test('CJ unitless delivery ranges are treated as calendar days with processing allowance',()=>{
+  assert.equal(conservativeDeliveryDays({logisticAging:'12-50'},5),55);
+  assert.equal(conservativeDeliveryDays({deliveryRange:'20-60'},5),65);
+  assert.equal(conservativeDeliveryDays({deliveryRange:'15-45 days'},5),50);
+  assert.equal(conservativeDeliveryDays({deliveryRange:'12-50 business days'},5),75);
+  assert.equal(conservativeDeliveryDays({deliveryRange:'50'},5),55);
+  assert.equal(conservativeDeliveryDays({deliveryRange:'60-20'},5),null);
+
+  const gate=evaluateShippingPolicy({
+    shippingUSD:24.79,
+    totalMaxDeliveryDays:conservativeDeliveryDays({logisticAging:'12-50'},5),
+    stockVerified:true,
+    shippingVerified:true,
+    deliveryVerified:true,
+    policy:getShippingPolicy({}),
+  });
+  assert.equal(gate.eligible,true);
+  assert.deepEqual(gate.reasons,[]);
+});
+
 test('business-day ETA is normalized conservatively',()=>{
   assert.equal(conservativeDeliveryDays({deliveryRange:'3-7 business days'},2),12);
 });
