@@ -1,6 +1,6 @@
 'use strict';
-const {setCors}=require('../cj-shared');
-const {createShippingQuoteService}=require('./shipping-quotes');
+const {setCors}=require('./cj-shared');
+const {createShippingQuoteService}=require('./fulfillment/shipping-quotes');
 const service=createShippingQuoteService();
 module.exports=async function(req,res){
 setCors(req,res);res.setHeader('Content-Type','application/json; charset=utf-8');res.setHeader('Cache-Control','no-store');
