@@ -63,6 +63,13 @@ async function suppressEvent(db, eventId, reason, nowMs) {
     lifecycleState: 'suppressed', suppressionReason: reason, lastProcessedAt: new Date(nowMs),
   }, { merge: true });
 }
+async function suppressionReasonForEvent(db, event, deps) {
+  if (!validTrustedEvent(event)) return 'invalid_server_schema';
+  if (event.eventType === 'signup_started') {
+    return await accountExists(event.email, deps) ? 'account_created' : null;
+  }
+  return await hasBought(db, event) ? 'order_completed' : null;
+}
 async function enqueueStage(db, eventId, event, nowMs) {
   const eventRef = db.collection('productViewEvents').doc(eventId);
   const stage = Number(event.stage || 0);
@@ -111,18 +118,12 @@ async function runLifecycleEmails(db, options = {}) {
   for (const doc of snap.docs) {
     const event = doc.data() || {};
     try {
-      if (!validTrustedEvent(event)) {
-        await suppressEvent(db, doc.id, 'invalid_server_schema', nowMs);
-        out.ignored += 1; continue;
-      }
-      if (event.eventType === 'signup_started') {
-        if (await accountExists(event.email, deps)) {
-          await suppressEvent(db, doc.id, 'account_created', nowMs);
-          out.suppressed += 1; continue;
-        }
-      } else if (await hasBought(db, event)) {
-        await suppressEvent(db, doc.id, 'order_completed', nowMs);
-        out.suppressed += 1; continue;
+      const suppression = await suppressionReasonForEvent(db, event, deps);
+      if (suppression) {
+        await suppressEvent(db, doc.id, suppression, nowMs);
+        if (suppression === 'invalid_server_schema') out.ignored += 1;
+        else out.suppressed += 1;
+        continue;
       }
       const result = await enqueueStage(db, doc.id, event, nowMs);
       if (result.status === 'QUEUED') out.queued += 1;
@@ -135,4 +136,4 @@ async function runLifecycleEmails(db, options = {}) {
   }
   return out;
 }
-module.exports = { runLifecycleEmails, validTrustedEvent, buildPayload, hasBought, accountExists, BATCH_LIMIT, TRUSTED_SOURCE };
+module.exports = { runLifecycleEmails, validTrustedEvent, buildPayload, hasBought, accountExists, suppressionReasonForEvent, suppressEvent, BATCH_LIMIT, TRUSTED_SOURCE };

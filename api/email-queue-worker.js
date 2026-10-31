@@ -28,6 +28,14 @@ async function updateIfLeaseMatches(db, ref, leaseToken, values) {
     return true;
   });
 }
+async function lifecycleSuppression(db, item, deps) {
+  if (!item.lifecycleEventId) return null; // unrelated transactional email
+  const eventRef = db.collection('productViewEvents').doc(String(item.lifecycleEventId));
+  const eventSnap = await eventRef.get();
+  if (!eventSnap.exists) return 'missing_lifecycle_event';
+  const lifecycle = deps && deps.lifecycleWorker ? deps.lifecycleWorker : require('./lifecycle-worker');
+  return lifecycle.suppressionReasonForEvent(db, eventSnap.data() || {}, deps || {});
+}
 async function processEmailQueue(db, options = {}) {
   const now = typeof options.now === 'function' ? options.now : Date.now;
   const nowMs = Number.isFinite(options.nowMs) ? options.nowMs : now();
@@ -47,6 +55,24 @@ async function processEmailQueue(db, options = {}) {
       const claim = await claimItem(db, ref, now());
       if (!claim) { out.skipped += 1; continue; }
       out.claimed += 1;
+
+      // Lifecycle mail gets a final suppression check after the lease is
+      // acquired and immediately before provider delivery. This closes the
+      // purchase/account-created race between lifecycle sweep and queue drain.
+      const suppression = await lifecycleSuppression(db, claim.item, options.deps || {});
+      if (suppression) {
+        const cancelled = await updateIfLeaseMatches(db, ref, claim.leaseToken, {
+          status: 'cancelled',
+          cancelledAt: now(),
+          cancellationReason: suppression,
+          leaseToken: null,
+          leaseUntil: 0,
+        });
+        if (cancelled) out.cancelled = (out.cancelled || 0) + 1;
+        else out.skipped += 1;
+        continue;
+      }
+
       const result = await send(claim.item.payload);
       if (result && result.ok) {
         const saved = await updateIfLeaseMatches(db, ref, claim.leaseToken, { status: 'sent', sentAt: now(), leaseToken: null, leaseUntil: 0 });
@@ -70,4 +96,4 @@ async function processEmailQueue(db, options = {}) {
   }
   return out;
 }
-module.exports = { processEmailQueue, backoffMs, claimItem, updateIfLeaseMatches, MAX_ATTEMPTS, BATCH_LIMIT, LEASE_MS };
+module.exports = { processEmailQueue, backoffMs, claimItem, updateIfLeaseMatches, lifecycleSuppression, MAX_ATTEMPTS, BATCH_LIMIT, LEASE_MS };
