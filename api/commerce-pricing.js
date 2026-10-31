@@ -24,8 +24,6 @@ const DEFAULT_POLICY = Object.freeze({
     economyMinSavingPct: 0.20,
     allowEconomyOverMaxDays: true,
     highShippingItemPriceRatioWarning: 0.25,
-    highShippingItemPriceRatioBlock: 0.35,
-    enforceShippingRatioBlock: true,
   },
 });
 
@@ -78,17 +76,12 @@ function getCommercePricingPolicy(settings = {}) {
         boundedPct(Number(rawShipping.economyMinSavingPct) * 100, defaults.shipping.economyMinSavingPct * 100, 100) / 100
       ),
       allowEconomyOverMaxDays: rawShipping.allowEconomyOverMaxDays !== false,
-      // Legacy settings may contain permissive 60%/150% values. Keep the agreed
-      // affordability warning/block as hard ceilings while allowing stricter admin values.
+      // Keep a soft warning for transparency; shipping-price ratios never
+      // suppress otherwise valid carrier quotes.
       highShippingItemPriceRatioWarning: Math.min(
         boundedPct(Number(rawShipping.highShippingItemPriceRatioWarning) * 100, defaults.shipping.highShippingItemPriceRatioWarning * 100, 500) / 100,
         defaults.shipping.highShippingItemPriceRatioWarning
       ),
-      highShippingItemPriceRatioBlock: Math.min(
-        boundedPct(Number(rawShipping.highShippingItemPriceRatioBlock) * 100, defaults.shipping.highShippingItemPriceRatioBlock * 100, 500) / 100,
-        defaults.shipping.highShippingItemPriceRatioBlock
-      ),
-      enforceShippingRatioBlock: true,
     },
   };
 }
@@ -176,8 +169,8 @@ function isExpressShippingMethod(name, settings = {}) {
  * - Economy: a slower, cheaper route only when savings are material. It can exceed
  *   the Smart target, so the customer must explicitly choose it and sees the honest
  *   expanded estimate. If there is no Smart route, Economy is never preselected.
- * - Express: a verified fast route is surfaced only when its shipping-to-item
- *   cost ratio remains below the hard affordability cap.
+ * - Express: a verified fast route is surfaced when its delivery estimate is valid;
+ *   its separately quoted shipping price is shown without a ratio-based cap.
  *
  * An unknown aging estimate is never described as a known delivery promise.
  */
@@ -186,34 +179,19 @@ function selectShippingServices(options, settings = {}, context = {}) {
   const processingDays = Number.isFinite(Number(context.processingDays))
     ? Math.max(0, Number(context.processingDays))
     : policy.processingDays;
-  const productAmountUSD = finiteNonNegative(context.productAmountUSD);
-  const productAmountMajor = finiteNonNegative(context.productAmountMajor);
-  const currency = String(context.currency || '').toUpperCase();
-  const maxRatio = policy.highShippingItemPriceRatioBlock;
   const normalized = (options || []).map(option => {
     const aging = parseShippingAging(option.logisticAging);
     const cost = finiteNonNegative(option.logisticPrice);
     const express = isExpressShippingMethod(option.logisticName, settings);
-    // Use the customer-facing shipping amount (including FX/payment-fee
-    // buffers) when checkout context is available. Raw supplier freight alone
-    // understates what the shopper actually pays.
-    const chargedShipping = cost != null && productAmountMajor > 0 && currency
-      ? calculateShippingCharge(cost, currency, settings)
-      : null;
-    const ratio = chargedShipping != null && productAmountMajor > 0
-      ? chargedShipping / productAmountMajor
-      : (productAmountUSD > 0 && cost != null ? cost / productAmountUSD : null);
     return {
       ...option,
       __aging: aging,
       __cost: cost,
       __express: express,
-      __ratio: ratio,
       __minDoorDays: aging ? aging.minDays + processingDays : null,
       __maxDoorDays: aging ? aging.maxDays + processingDays : null,
     };
-  }).filter(option => option.__aging && option.__cost != null && option.__cost >= 0
-    && option.__ratio != null && option.__ratio <= maxRatio);
+  }).filter(option => option.__aging && option.__cost != null && option.__cost >= 0);
 
   const standard = normalized.filter(option => !option.__express);
   const smartEligible = standard.filter(option => option.__maxDoorDays <= policy.maxDeliveryDays);
@@ -230,7 +208,7 @@ function selectShippingServices(options, settings = {}, context = {}) {
 
   const selected = [];
   const toPublicService = (option, serviceLevel, serviceLabel, requiresExplicitChoice, reason) => {
-    const { __aging, __cost, __express, __ratio, __minDoorDays, __maxDoorDays, ...publicOption } = option;
+    const { __aging, __cost, __express, __minDoorDays, __maxDoorDays, ...publicOption } = option;
     return {
       ...publicOption,
       serviceLevel,
