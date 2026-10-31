@@ -108,3 +108,14 @@ Open the "Debug: all affiliate records" panel in Admin → Affiliate
 Program, and use the new error codes — they now tell you (and me, if
 you paste them back) exactly which of the causes above it actually is,
 instead of a dead-end "check your connection."
+
+
+---
+
+## V3.0.2 email lifecycle security note
+
+The old recovery design allowed a browser to create `productViewEvents` directly and allowed the two processing routes to run without scheduler authentication. V3.0.2 replaces direct browser writes with `POST /api/lifecycle-event`, locks `productViewEvents` against all regular Firebase client access, authenticates both processing routes with `CRON_SECRET`, and routes internal scheduling directly through shared workers.
+
+The previous advice above to call `/api/process-email-queue` and `/api/process-abandon-emails` as plain unauthenticated GET requests is therefore obsolete after V3.0.2. Any external scheduler must send the cron secret in a header.
+
+Firestore Rules and indexes are **not deployed merely by merging this repository change**. After review/merge, deploy the committed `firestore.rules` and `firestore.indexes.json` separately using the Firebase project’s normal controlled deployment process. See `EMAIL-LIFECYCLE-V3.0.2.md` for the exact checklist.
