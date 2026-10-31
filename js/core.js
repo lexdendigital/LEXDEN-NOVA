@@ -684,7 +684,7 @@ function render(){
     body = screenHome();
   }
 
-  app.innerHTML = '<a class="skip-link" href="#main" onclick="var m=document.getElementById(\'main\');if(m){m.focus();}return false;">Skip to content</a>' + topBanner() + '<header class="lx-landmark">' + shellHeader() + '</header><main id="main" class="lx-landmark" tabindex="-1">' + body + '</main>' + shellBottomNav() + '<div class="status-fill" style="display:none"></div>';
+  app.innerHTML = '<a class="skip-link" href="#main" onclick="var m=document.getElementById(\'main\');if(m){m.focus();}return false;">Skip to content</a>' + topBanner() + '<header class="lx-landmark">' + shellHeader() + '</header><main id="main" class="lx-landmark" tabindex="-1">' + body + '</main>' + shellFooter() + shellBottomNav() + '<div class="status-fill" style="display:none"></div>';
   afterRender(hash);
 }
 
@@ -965,6 +965,22 @@ function shellHeader(){
       <a class="icon-btn" href="#wishlist" aria-label="Wishlist" style="position:relative">${icon('heart')}<span class="badge-dot" style="display:${DB.wishlist.length?'block':'none'}"></span></a>
     </div>
   </div>`;
+}
+function shellFooter(){
+  const c = DB.content || {};
+  const name = escapeHtml(c.appName || 'LEXDEN NOVA');
+  return `<footer class="lx-footer">
+    <nav aria-label="Policies and information">
+      <a href="legal/terms.html">Terms</a>
+      <a href="legal/privacy.html">Privacy</a>
+      <a href="legal/refunds.html">Refunds &amp; returns</a>
+      <a href="legal/complaints.html">Complaints</a>
+      <a href="legal/index.html">All policies</a>
+      <a href="affiliate-program/">Affiliate programme</a>
+      <a href="feed/">Feed</a>
+    </nav>
+    <p>&copy; ${new Date().getFullYear()} ${name}</p>
+  </footer>`;
 }
 function shellBottomNav(){
   return `<nav class="bottom-nav" aria-label="Primary">${navLinks(appState.route)}</nav>`;
