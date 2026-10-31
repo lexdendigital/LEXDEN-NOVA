@@ -13,6 +13,7 @@
 
 const express = require('express');
 const cors = require('cors');
+const { securityHeaders, createRateLimiter, isAllowedOrigin, cronAuthorized } = require('./server-security');
 const { mountMcp, recordServerError } = require('./mcp');
 const { registerBuiltInProviders } = require('./api/fulfillment/bootstrap');
 
@@ -47,23 +48,16 @@ app.set('trust proxy', 1); // Render sits behind a proxy/load balancer
 // consistently everywhere. A route's own res.setHeader() call always
 // overrides this if both run.
 const DEFAULT_ORIGINS = ['https://lexdendigital.github.io'];
+app.use(securityHeaders);
+app.use(createRateLimiter());
 const envOrigins = (process.env.CORS_ALLOWED_ORIGINS || '')
   .split(',').map(s => s.trim()).filter(Boolean);
 const ALLOWED_ORIGINS = envOrigins.length ? envOrigins : DEFAULT_ORIGINS;
 
 app.use(cors({
-  origin(origin, cb) {
-    if (!origin) return cb(null, true); // curl, health checks, server-to-server (CJ/Paystack webhooks)
-    if (ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
-    try {
-      const host = new URL(origin).hostname;
-      // Any GitHub Pages site and this Render service's own domain (handy
-      // for testing endpoints directly from the browser).
-      if (host.endsWith('.github.io') || host.endsWith('.onrender.com')) return cb(null, true);
-      if (host === 'localhost' || host === '127.0.0.1') return cb(null, true);
-    } catch { /* malformed Origin header — fall through to reject */ }
-    cb(null, false);
-  },
+  // Only our own storefront origin (plus this service and localhost) may call
+  // the API with credentials; other *.github.io sites are no longer trusted.
+  origin(origin, cb) { cb(null, isAllowedOrigin(origin, ALLOWED_ORIGINS)); },
   credentials: true,
 }));
 
@@ -169,8 +163,24 @@ const AFFILIATE_ENDPOINTS = {
   'affiliate-signup': './api/affiliate/signup',
   'process-abandon-emails': './api/affiliate/abandon-emails',
 };
+// The email sweep sends real emails. When CRON_SECRET is configured (16+ chars) it must
+// be presented; the in-process scheduler below sends it. Without a secret the old open
+// behaviour is kept so reminders do not silently stop, and a warning is logged.
+function guardSweep(handler) {
+  return function (req, res) {
+    const secret = process.env.CRON_SECRET;
+    if (secret && secret.length >= 16 && !cronAuthorized(req, secret)) {
+      return res.status(401).json({ ok: false, error: 'Unauthorized.' });
+    }
+    return handler(req, res);
+  };
+}
+if (!process.env.CRON_SECRET || process.env.CRON_SECRET.length < 16) {
+  console.warn('SECURITY: CRON_SECRET is not set (16+ chars); /api/process-abandon-emails is open. Set it in Render.');
+}
 for (const [name, path] of Object.entries(AFFILIATE_ENDPOINTS)) {
-  app.all(`/api/${name}`, require(path));
+  const handler = require(path);
+  app.all(`/api/${name}`, name === 'process-abandon-emails' ? guardSweep(handler) : handler);
 }
 
 // ---- LEXDEN NOVA CREATOR (Stage A: data model + auth + state machine) ----
@@ -302,7 +312,7 @@ if (process.env.CREATOR_CRON_IN_PROCESS === 'true') {
 if (process.env.LIFECYCLE_CRON_IN_PROCESS === 'true') {
   const lifecycleUrl = `http://127.0.0.1:${PORT}/api/process-abandon-emails`;
   const runLifecycleSweep = () => {
-    fetch(lifecycleUrl, { headers: { 'cache-control': 'no-cache' } })
+    fetch(lifecycleUrl, { headers: { 'cache-control': 'no-cache', 'x-cron-secret': process.env.CRON_SECRET || '' } })
       .then(async (r) => {
         const body = await r.text();
         if (!r.ok) throw new Error(`HTTP ${r.status}: ${body.slice(0, 300)}`);
