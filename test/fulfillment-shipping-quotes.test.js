@@ -64,6 +64,8 @@ test('returns separately persisted Smart, Economy and Express quotes with exact 
     assert.equal(saved.quoteId,option.quoteId);
     assert.equal(saved.serviceLevel,option.serviceLevel);
     assert.equal(saved.logisticName,option.logisticName);
+    assert.equal(saved.deliveryEstimate,option.deliveryEstimate);
+    assert.equal(saved.estimatedOrderToDoorMaxDays,option.estimatedOrderToDoorMaxDays);
     assert.equal(saved.supplierId,option.supplierId);
     assert.equal(saved.externalVariantId,'EXT-V1');
   }
