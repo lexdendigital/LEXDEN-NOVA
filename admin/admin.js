@@ -162,6 +162,8 @@ async function tryAdminLogin(){
   }
 }
 async function adminLogout(){
+  window.__explicitSignOut = true;
+  try{ localStorage.removeItem('ln_signed_in_uid'); }catch(e){}
   appState.adminAuthed = false;
   navigate('#home');
   if(window.__fb){

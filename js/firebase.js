@@ -44,13 +44,17 @@ window.__fbAuthResolved = false;
 // auth state resolves after that (a few seconds late is normal on a bad
 // connection), the listener below still updates everything correctly the
 // moment it does.
+// A device that had a signed-in account last time gets longer before falling back to guest,
+// so a slow connection does not show the signed-out view to someone who is still signed in.
+let __wasSignedIn = false;
+try{ __wasSignedIn = !!localStorage.getItem('ln_signed_in_uid'); }catch(e){}
 setTimeout(()=>{
   if(!window.__fbAuthResolved){
     window.__fbAuthResolved = true;
     console.warn('onAuthStateChanged had not fired after 7s — falling back to guest view.');
     if(typeof window.render === 'function') window.render();
   }
-}, 7000);
+}, __wasSignedIn ? 20000 : 7000);
 
 // Cloudinary unsigned-upload target — replaces Firebase Storage for product
 // media (admin) and avatar (sign-up) uploads. The "lexden-nova" preset must
@@ -599,6 +603,7 @@ onAuthStateChanged(fbAuth, user => {
     // A shopper signed in — either with Google or with email/password
     // via the Sign Up / Login screens.
     const provider = user.providerData.some(p=>p.providerId==='google.com') ? 'google' : 'password';
+    try{ localStorage.setItem('ln_signed_in_uid', user.uid); }catch(e){}
     window.__fbUid = user.uid;
     window.__fbAdminEmail = null;
     window.__fbShopper = { uid:user.uid, name:user.displayName||'', email:user.email||'', photoURL:user.photoURL||'', provider };
@@ -667,6 +672,13 @@ onAuthStateChanged(fbAuth, user => {
     window.__fbUid = null;
     window.__fbAdminEmail = null;
     window.__fbShopper = null;
+    // Diagnostics: a sign-out the shopper did not ask for is logged (see #debuglog) so a real
+    // session loss can be told apart from a slow load.
+    try{
+      if(!user && localStorage.getItem('ln_signed_in_uid') && !window.__explicitSignOut){
+        window.__novaLog('UNEXPECTED sign-out: Firebase reported no session although this device was signed in. online=' + navigator.onLine + ' standalone=' + (window.matchMedia && matchMedia('(display-mode: standalone)').matches));
+      }
+    }catch(e){}
     if(user && user.isAnonymous){
       window.__novaLog('Legacy anonymous Auth session ignored; guest mode retained.');
     }
@@ -677,6 +689,8 @@ onAuthStateChanged(fbAuth, user => {
 });
 
 window.__googleSignOut = async function(){
+  window.__explicitSignOut = true;
+  try{ localStorage.removeItem('ln_signed_in_uid'); }catch(e){}
   // BUGFIX: likes (and wishlist) were being read from this DEVICE's
   // localStorage (ln_liked_posts / ln_wishlist) and merged into whichever
   // account happened to be signed in — see pullFeedLikesFromCloud()'s

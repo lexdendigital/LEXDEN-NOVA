@@ -9,6 +9,10 @@ let __reloading = false;
 function safeToReloadNow(){
   const h = location.hash || '';
   if(/^#(admin|checkout|pay|signup|login)/.test(h)) return false;
+  // Never reload under a signed-in person: a reload re-checks the session over the network and,
+  // on a slow connection, briefly shows the signed-out view, which reads as "I was logged out".
+  // They get the "update available" banner and refresh when they choose.
+  if(window.__fbShopper || window.__fbAdminEmail) return false;
   const ae = document.activeElement;
   if(ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName)) return false;
   if(document.querySelector('.modal-overlay, .modal, #installStepsModal')) return false;
