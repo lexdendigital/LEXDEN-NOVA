@@ -377,10 +377,19 @@ async function channelSyncJob(db, ctx) {
 }
 
 async function emailQueueJob(db, ctx) {
-  const { callHandler } = require('../../mcp/lib/callHandler');
-  const handler = ctx.deps && ctx.deps.emailQueueHandler ? ctx.deps.emailQueueHandler : require('../process-email-queue');
-  const r = await callHandler(handler, { method: 'GET' });
-  return { status: r.status };
+  // Internal execution deliberately calls the shared worker directly. The
+  // public route is only an authenticated wrapper around this same job lock.
+  const processor = ctx.deps && (ctx.deps.emailQueueProcessor || ctx.deps.emailQueueHandler)
+    ? (ctx.deps.emailQueueProcessor || ctx.deps.emailQueueHandler)
+    : require('../email-queue-worker').processEmailQueue;
+  return processor(db, { nowMs: ctx.nowMs, limit: ctx.limit, sendEmailFast: ctx.deps && ctx.deps.sendEmailFast });
+}
+
+async function lifecycleEmailJob(db, ctx) {
+  const processor = ctx.deps && ctx.deps.lifecycleEmailProcessor
+    ? ctx.deps.lifecycleEmailProcessor
+    : require('../lifecycle-worker').runLifecycleEmails;
+  return processor(db, { nowMs: ctx.nowMs, limit: ctx.limit, deps: ctx.deps || {} });
 }
 
 const JOBS = {
@@ -393,7 +402,8 @@ const JOBS = {
   reservations: { run: reservationsJob, minIntervalMs: 5 * 60 * 1000 },
   channelSync: { run: channelSyncJob, minIntervalMs: 5 * 60 * 1000 },
   emailQueue: { run: emailQueueJob, minIntervalMs: 5 * 60 * 1000 },
+  lifecycleEmails: { run: lifecycleEmailJob, minIntervalMs: 15 * 60 * 1000 },
   creatorWeeklyEmail: { run: creatorWeeklyEmailJob, minIntervalMs: 7 * DAY },
 };
 
-module.exports = { JOBS, supplierHealthJob, cjOrderJob, linkHealthJob, slaJob, reconciliationJob, holdsJob, reservationsJob, channelSyncJob, emailQueueJob, creatorWeeklyEmailJob, checkProductLink, pauseProduct };
+module.exports = { JOBS, supplierHealthJob, cjOrderJob, linkHealthJob, slaJob, reconciliationJob, holdsJob, reservationsJob, channelSyncJob, emailQueueJob, lifecycleEmailJob, creatorWeeklyEmailJob, checkProductLink, pauseProduct };

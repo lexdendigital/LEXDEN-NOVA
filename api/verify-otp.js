@@ -66,6 +66,9 @@ function hashCode(code, email) {
   if (!secret) throw new Error("Missing OTP_SIGNING_SECRET");
   return crypto.createHmac("sha256", secret).update(`${email}|${code}`).digest("hex");
 }
+function otpDocumentId(email) {
+  return crypto.createHash("sha256").update("otp-email|" + email).digest("hex");
+}
 
 module.exports = async function handler(req, res) {
   setCors(req, res);
@@ -84,11 +87,19 @@ module.exports = async function handler(req, res) {
   }
 
   const db = admin.firestore();
-  const ref = db.collection("email_otps").doc(email);
+  const hashedRef = db.collection("email_otps").doc(otpDocumentId(email));
+  const legacyRef = db.collection("email_otps").doc(email);
 
   try {
-    const snap = await ref.get();
-    if (!snap.exists) {
+    // Transitional compatibility: OTPs issued immediately before V3.0.2
+    // used the normalized email as the document ID. Read that legacy record
+    // only if no hashed record exists, so an in-flight 10-minute OTP remains
+    // verifiable across deployment. New sends never write the legacy ID.
+    const hashedSnap = await hashedRef.get();
+    const legacySnap = hashedSnap.exists ? null : await legacyRef.get();
+    const snap = hashedSnap.exists ? hashedSnap : legacySnap;
+    const ref = hashedSnap.exists ? hashedRef : legacyRef;
+    if (!snap || !snap.exists) {
       return res.status(400).json({ error: "Request a new code — this one expired or was never sent." });
     }
     const data = snap.data();

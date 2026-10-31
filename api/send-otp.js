@@ -40,6 +40,15 @@ function hashCode(code, email) {
   if (!secret) throw new Error("Missing OTP_SIGNING_SECRET");
   return crypto.createHmac("sha256", secret).update(`${email}|${code}`).digest("hex");
 }
+function hashIdentifier(value) {
+  return crypto.createHash("sha256").update(String(value)).digest("hex");
+}
+function rateLimitError(message, retryAfterMs) {
+  const error = new Error(message);
+  error.rateLimited = true;
+  error.retryAfterMs = retryAfterMs || 0;
+  return error;
+}
 
 function setCors(req, res) {
   const origin = req.headers.origin;
@@ -99,62 +108,76 @@ module.exports = async function handler(req, res) {
   }, 8000);
 
   try {
-    const ip = String((req.headers["x-forwarded-for"] || "").split(",")[0] || req.socket?.remoteAddress || "unknown").trim();
-    const ipRef = db.collection("otp_ip_limits").doc(ip.replace(/[^a-zA-Z0-9.:_-]/g, "_") || "unknown");
-    const ref = db.collection("email_otps").doc(email);
-
-    stage("reading limits");
-    const [ipSnap, existing] = await Promise.all([
-      ipRef.get().catch(e => { console.warn("send-otp: IP rate-limit read failed (continuing)", e.message); return null; }),
-      ref.get(),
-    ]);
-    stage("limits read");
-
+    // Express trust proxy is configured to one trusted proxy in server.js.
+    // Never parse X-Forwarded-For here: arbitrary client-supplied values are not
+    // rate-limit identities. All limit-document IDs are irreversible hashes.
+    const ip = String(req.ip || (req.socket && req.socket.remoteAddress) || "unknown").trim().slice(0, 128);
+    const emailKey = hashIdentifier("otp-email|" + email);
+    const ipKey = hashIdentifier("otp-ip|" + ip);
+    const ref = db.collection("email_otps").doc(emailKey);
+    const legacyRef = db.collection("email_otps").doc(email); // read-only cooldown bridge for pre-v3.0.2 OTP records
+    const emailLimitRef = db.collection("otp_email_limits").doc(emailKey);
+    const ipRef = db.collection("otp_ip_limits").doc(ipKey);
+    const reservationId = crypto.randomUUID();
     const now = Date.now();
-    try {
-      if (ipSnap && ipSnap.exists) {
-        const d = ipSnap.data();
-        if (now - (d.windowStart || 0) < IP_WINDOW_MS) {
-          if ((d.count || 0) >= IP_MAX_SENDS) return done(429, { error: "Too many code requests from this connection — try again later." });
-          ipRef.set({ windowStart: d.windowStart, count: (d.count || 0) + 1 }, { merge: true }).catch(() => {}); // background: don't make the person wait
-        } else {
-          ipRef.set({ windowStart: now, count: 1 }).catch(() => {});
-        }
-      } else if (ipSnap) {
-        ipRef.set({ windowStart: now, count: 1 }).catch(() => {});
-      }
-    } catch (e) {
-      console.warn("send-otp: IP rate-limit bookkeeping failed (continuing)", e.message);
-    }
 
-    if (existing.exists) {
-      const age = Date.now() - (existing.data().createdAt || 0);
-      if (age < RESEND_COOLDOWN_MS) {
-        return done(429, { error: `Wait ${Math.ceil((RESEND_COOLDOWN_MS - age) / 1000)}s before requesting another code.` });
+    stage("atomic limits reservation");
+    try {
+      await db.runTransaction(async (tx) => {
+        const snaps = await Promise.all([tx.get(ipRef), tx.get(emailLimitRef), tx.get(ref), tx.get(legacyRef)]);
+        const ipData = snaps[0].exists ? snaps[0].data() || {} : {};
+        const emailData = snaps[1].exists ? snaps[1].data() || {} : {};
+        const currentOtp = snaps[2].exists ? snaps[2].data() || {} : {};
+        const legacyOtp = snaps[3].exists ? snaps[3].data() || {} : {};
+        const lastSendAt = Math.max(Number(emailData.lastSendAt) || 0, Number(currentOtp.createdAt) || 0, Number(legacyOtp.createdAt) || 0);
+        const emailAge = lastSendAt ? now - lastSendAt : RESEND_COOLDOWN_MS;
+        if (emailAge < RESEND_COOLDOWN_MS) {
+          throw rateLimitError("Email cooldown active.", RESEND_COOLDOWN_MS - emailAge);
+        }
+        const inWindow = ipData.windowStart && now - Number(ipData.windowStart) < IP_WINDOW_MS;
+        const count = inWindow ? Number(ipData.count) || 0 : 0;
+        if (count >= IP_MAX_SENDS) throw rateLimitError("IP send limit reached.", IP_WINDOW_MS - (now - Number(ipData.windowStart)));
+        tx.set(emailLimitRef, { lastSendAt: now, reservationId, updatedAt: now });
+        tx.set(ipRef, { windowStart: inWindow ? ipData.windowStart : now, count: count + 1, updatedAt: now });
+      });
+    } catch (e) {
+      if (e && e.rateLimited) {
+        const seconds = Math.max(1, Math.ceil((e.retryAfterMs || 1000) / 1000));
+        const message = /Email cooldown/.test(e.message)
+          ? "Wait " + seconds + "s before requesting another code."
+          : "Too many code requests from this connection — try again later.";
+        return done(429, { error: message });
       }
+      console.error("send-otp: atomic rate-limit reservation failed:", e && e.message);
+      return done(503, { error: "Code delivery is temporarily unavailable. Please try again." });
     }
 
     // crypto.randomInt = OS CSPRNG; only an HMAC of the code is stored.
     const code = String(crypto.randomInt(100000, 1000000));
     const codeHash = hashCode(code, email);
-    // Store the code and send the email AT THE SAME TIME (not one after the other).
-    // The code is always stored before the person can read the email and type it in.
-
-    // Send DIRECTLY (not via send-email.js): that route reports success even
-    // when Brevo rejected the mail and only queued it — fine for a receipt,
-    // wrong for a sign-up code the person is staring at the screen waiting
-    // for. Here a failed send is reported honestly, with a reason.
     const { sendEmailFast } = require("./email-shared");
-    const [stored, result] = await Promise.all([
-      ref.set({ codeHash, createdAt: Date.now(), expiresAt: Date.now() + CODE_TTL_MS, attempts: 0 }).then(() => true, (e) => { console.error("send-otp: could not store code:", e.message); return false; }),
-      sendEmailFast({ templateKey: "verify", to: { email }, params: { code } }),
-    ]);
-    stage("code stored=" + stored);
-    if (!stored) return done(500, { error: "Could not send the code. Please try again." });
+    try {
+      await ref.set({ codeHash, createdAt: now, expiresAt: now + CODE_TTL_MS, attempts: 0 });
+    } catch (e) {
+      console.error("send-otp: could not store code:", e && e.message);
+      return done(503, { error: "Code delivery is temporarily unavailable. Please try again." });
+    }
+    stage("code stored");
+
+    const result = await sendEmailFast({ templateKey: "verify", to: { email }, params: { code } });
     stage(result.ok ? "email sent" : "email FAILED");
     if (!result.ok) {
       console.error("send-otp: Brevo send failed:", result.error);
-      await ref.delete().catch(() => {}); // don't make them wait out the cooldown for a code that never left
+      await ref.delete().catch(() => {});
+      // Release only this request's email cooldown reservation. Keep the IP
+      // attempt counted so a failed provider call cannot be used for free
+      // high-volume retries.
+      await db.runTransaction(async (tx) => {
+        const snap = await tx.get(emailLimitRef);
+        if (snap.exists && (snap.data() || {}).reservationId === reservationId) {
+          tx.set(emailLimitRef, { lastSendAt: 0, reservationId: null, updatedAt: Date.now() }, { merge: true });
+        }
+      }).catch((e) => console.warn("send-otp: could not release email cooldown:", e && e.message));
       const msg = String(result.error || "");
       let friendly = "Could not send the code email. Please try again.";
       if (/BREVO_API_KEY not set|BREVO_TPL_VERIFY not set/.test(msg)) friendly = "Email service is not fully set up yet. Please contact support.";

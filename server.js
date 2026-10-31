@@ -135,6 +135,7 @@ const ENDPOINTS = [
   'paystack-webhook',
   'get-product-fulfilment',
   'process-email-queue',
+  'lifecycle-event',
   'feed',
   'product',
   'admin-payment-mode',
@@ -169,7 +170,7 @@ const AFFILIATE_ENDPOINTS = {
   'process-abandon-emails': './api/affiliate/abandon-emails',
 };
 for (const [name, path] of Object.entries(AFFILIATE_ENDPOINTS)) {
-  app.all(`/api/${name}`, require(path));
+  app.all(`/api/${name}`, safeHandler(require(path)));
 }
 
 // ---- LEXDEN NOVA CREATOR (Stage A: data model + auth + state machine) ----
@@ -299,17 +300,14 @@ if (process.env.CREATOR_CRON_IN_PROCESS === 'true') {
 // first sweep runs shortly after startup. Suppression checks happen again
 // inside the processor before every email.
 if (process.env.LIFECYCLE_CRON_IN_PROCESS === 'true') {
-  const lifecycleUrl = `http://127.0.0.1:${PORT}/api/process-abandon-emails`;
+  const { getDb } = require('./api/affiliate/shared');
+  const { runJob } = require('./api/automation/runner');
   const runLifecycleSweep = () => {
-    fetch(lifecycleUrl, { headers: { 'cache-control': 'no-cache' } })
-      .then(async (r) => {
-        const body = await r.text();
-        if (!r.ok) throw new Error(`HTTP ${r.status}: ${body.slice(0, 300)}`);
-        console.log('Lifecycle email sweep:', body.slice(0, 500));
-      })
+    runJob(getDb(), 'lifecycleEmails', { trigger: 'in-process' })
+      .then((result) => console.log('Lifecycle email sweep:', JSON.stringify(result).slice(0, 500)))
       .catch((e) => console.error('Lifecycle email sweep failed:', e.message));
   };
   setTimeout(runLifecycleSweep, 30 * 1000).unref();
   setInterval(runLifecycleSweep, 15 * 60 * 1000).unref();
-  console.log('Lifecycle email scheduler: in-process timer enabled (every 15 min while awake).');
+  console.log('Lifecycle email scheduler: internal locked job timer enabled (every 15 min while awake).');
 }

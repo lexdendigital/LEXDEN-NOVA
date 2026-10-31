@@ -426,16 +426,12 @@ service cloud.firestore {
     }
 
     // productViewEvents/{id} — feeds the abandoned-product-view reminder
-    // email (requirement #14). NOT the same collection as productViews
-    // above (that one is the public view-count aggregate with a
-    // different {count} shape) — kept separate on purpose so the two
-    // features can never collide or corrupt each other's data. A shopper
-    // can log their own view (their own email attached); only the
-    // backend (process-abandon-emails.js, Admin SDK) reads or marks them
-    // emailed.
+    // Lifecycle recovery records are entirely server-managed. Browser
+    // requests must pass through /api/lifecycle-event, which verifies the
+    // Firebase ID token, validates recipient authority and applies rate
+    // limits before an Admin SDK transaction creates the event.
     match /productViewEvents/{eventId} {
-      allow create: if request.resource.data.email is string && request.resource.data.email.size() > 3;
-      allow read, update, delete: if false;
+      allow read, create, update, delete: if false;
     }
 
     // mcpAuthCodes / mcpAccessTokens / mcpRefreshTokens / mcpAuditLog —

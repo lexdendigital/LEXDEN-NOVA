@@ -1,5 +1,5 @@
 // Minimal in-memory Firestore double: collection/doc get/set(merge)/add,
-// where(==), limit, orderBy (ignored), runTransaction (serialised).
+// common where operators, limit/orderBy, runTransaction (serialised).
 function clone(v) { return v === undefined ? v : JSON.parse(JSON.stringify(v, (k, x) => (x && x._sentinel ? undefined : x))); }
 function merge(a, b) {
   const out = { ...a };
@@ -13,27 +13,58 @@ function makeDb(seed = {}) {
   const store = {};
   for (const [c, docs] of Object.entries(seed)) for (const [id, d] of Object.entries(docs)) (store[c] = store[c] || {})[id] = clone(d);
   let auto = 0;
-  const snapOf = (id, data) => ({ id, exists: data !== undefined, data: () => clone(data) });
+  const snapOf = (id, data, ref) => ({ id, exists: data !== undefined, data: () => clone(data), ref });
   const docRef = (c, id) => ({
     id,
-    async get() { return snapOf(id, store[c] && store[c][id]); },
+    async get() { return snapOf(id, store[c] && store[c][id], docRef(c, id)); },
     async set(data, opts) {
       store[c] = store[c] || {};
       store[c][id] = opts && opts.merge ? merge(store[c][id] || {}, clone(data)) : clone(data);
     },
     async update(data) { store[c][id] = merge(store[c][id] || {}, clone(data)); },
+    async delete() { if (store[c]) delete store[c][id]; },
     // create(): fails like Firestore if the doc already exists (gRPC code 6)
     async create(data) {
       if (store[c] && store[c][id] !== undefined) throw Object.assign(new Error('ALREADY_EXISTS'), { code: 6 });
       store[c] = store[c] || {}; store[c][id] = clone(data);
     },
   });
-  const query = (c, filters = []) => ({
-    where(f, op, v) { return query(c, [...filters, [f, v]]); },
-    orderBy() { return this; },
-    limit() { return this; },
+  function scalar(v) {
+    if (v && typeof v.toMillis === 'function') return v.toMillis();
+    if (v instanceof Date) return v.getTime();
+    if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(v)) {
+      const parsed = Date.parse(v);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+    return v;
+  }
+  function matches(actual, op, expected) {
+    const a = scalar(actual), b = scalar(expected);
+    if (op === '==') return a === b;
+    if (op === '<=') return a <= b;
+    if (op === '<') return a < b;
+    if (op === '>=') return a >= b;
+    if (op === '>') return a > b;
+    if (op === 'in') return Array.isArray(expected) && expected.map(scalar).includes(a);
+    throw new Error('fake-firestore unsupported operator: ' + op);
+  }
+  const query = (c, filters = [], orders = [], max = null) => ({
+    where(f, op, v) { return query(c, [...filters, [f, op, v]], orders, max); },
+    orderBy(f, direction = 'asc') { return query(c, filters, [...orders, [f, direction]], max); },
+    limit(n) { return query(c, filters, orders, n); },
     async get() {
-      const docs = Object.entries(store[c] || {}).filter(([, d]) => filters.every(([f, v]) => d[f] === v)).map(([id, d]) => snapOf(id, d));
+      let rows = Object.entries(store[c] || {}).filter(([, d]) => filters.every(([f, op, v]) => matches(d[f], op, v)));
+      if (orders.length) rows.sort(([, a], [, b]) => {
+        for (const [f, direction] of orders) {
+          const av = scalar(a[f]), bv = scalar(b[f]);
+          if (av === bv) continue;
+          const cmp = av < bv ? -1 : 1;
+          return String(direction).toLowerCase() === 'desc' ? -cmp : cmp;
+        }
+        return 0;
+      });
+      if (max != null) rows = rows.slice(0, max);
+      const docs = rows.map(([id, d]) => snapOf(id, d, docRef(c, id)));
       return { docs, empty: docs.length === 0, size: docs.length };
     },
   });

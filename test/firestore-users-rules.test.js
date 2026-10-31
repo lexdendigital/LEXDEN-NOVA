@@ -21,6 +21,7 @@ if (!RUN_FIRESTORE_RULE_TESTS) {
     getDoc,
     setDoc,
     updateDoc,
+    deleteDoc,
   } = require('firebase/firestore');
 
   const PROJECT_ID = 'demo-lexden-nova-v301';
@@ -219,6 +220,50 @@ test('additional: create rejects UID or email that contradict Firebase Auth', as
 
   await assertFails(setDoc(doc(db, 'users', 'alice'), normalProfile('bob', 'alice@example.com')));
   await assertFails(setDoc(doc(db, 'users', 'alice'), normalProfile('alice', 'attacker@example.com')));
+});
+
+test('V3.0.2 lifecycle: unauthenticated client cannot create lifecycle events', async () => {
+  const db = testEnv.unauthenticatedContext().firestore();
+  await assertFails(setDoc(doc(db, 'productViewEvents', 'e1'), { email: 'guest@example.com' }));
+});
+
+test('V3.0.2 lifecycle: anonymous authenticated client cannot create lifecycle events directly', async () => {
+  const db = testEnv.authenticatedContext('anon-session', { firebase: { sign_in_provider: 'anonymous' } }).firestore();
+  await assertFails(setDoc(doc(db, 'productViewEvents', 'e1'), { email: 'guest@example.com' }));
+});
+
+test('V3.0.2 lifecycle: signed-in shopper cannot create lifecycle events directly', async () => {
+  const db = authedDb();
+  await assertFails(setDoc(doc(db, 'productViewEvents', 'e1'), { email: 'alice@example.com' }));
+});
+
+test('V3.0.2 lifecycle: clients cannot read, update or delete lifecycle events', async () => {
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await setDoc(doc(context.firestore(), 'productViewEvents', 'e1'), {
+      schemaVersion: 1,
+      source: 'lifecycle-event-api',
+      email: 'alice@example.com',
+      lifecycleState: 'pending',
+    });
+  });
+
+  const shopper = authedDb();
+  const guest = testEnv.unauthenticatedContext().firestore();
+  await assertFails(getDoc(doc(shopper, 'productViewEvents', 'e1')));
+  await assertFails(getDoc(doc(guest, 'productViewEvents', 'e1')));
+  await assertFails(updateDoc(doc(shopper, 'productViewEvents', 'e1'), { lifecycleState: 'completed' }));
+  await assertFails(deleteDoc(doc(shopper, 'productViewEvents', 'e1')));
+});
+
+test('V3.0.2 lifecycle: Admin SDK-equivalent rules-disabled processing remains possible', async () => {
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    const ref = doc(context.firestore(), 'productViewEvents', 'server-event');
+    await assertSucceeds(setDoc(ref, { source: 'lifecycle-event-api', lifecycleState: 'pending' }));
+    await assertSucceeds(updateDoc(ref, { lifecycleState: 'completed' }));
+    const snap = await assertSucceeds(getDoc(ref));
+    assert.equal(snap.data().lifecycleState, 'completed');
+    await assertSucceeds(deleteDoc(ref));
+  });
 });
 
 }

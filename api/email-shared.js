@@ -157,8 +157,11 @@ function scheduleQueueDrain(delayMs) {
   drainTimer = setTimeout(async () => {
     drainTimer = null;
     try {
-      const { callHandler } = require('../mcp/lib/callHandler');
-      await callHandler(require('./process-email-queue'), { method: 'GET' });
+      // Use the same automation lock/worker as the authenticated route and
+      // scheduled job. This avoids an unauthenticated loopback HTTP request.
+      const { getDb } = require('./affiliate/shared');
+      const { runJob } = require('./automation/runner');
+      await runJob(getDb(), 'emailQueue', { trigger: 'background-drain', force: true });
     } catch (e) { console.error('email-shared: queue drain failed:', e.message); }
   }, delayMs);
   if (drainTimer.unref) drainTimer.unref();
