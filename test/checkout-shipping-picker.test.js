@@ -52,3 +52,18 @@ test('shipping retry does not enable payment or weaken quote validation',()=>{
   assert.match(state,/shippingQuoteId\s*\|\|/);
   assert.match(state,/shipping quote is missing or expired/i);
 });
+
+test('manual delivery retry reuses an idempotency key for the same quote payload',()=>{
+  assert.match(state,/function createCjShippingRequestId\(/);
+  assert.match(state,/previousAttempt\.fingerprint===fingerprint/);
+  assert.match(state,/quotePayload\.requestId=requestId/);
+  assert.match(state,/cjRefreshShippingEstimate\(product,selectedVariant,true\)/);
+});
+
+test('the backend deduplicates in-flight and completed retries for the same request ID',()=>{
+  const route=fs.readFileSync(path.join(__dirname,'..','api','fulfillment-shipping-quote.js'),'utf8');
+  assert.match(route,/const requestCache=new Map\(\)/);
+  assert.match(route,/cache\.get\(requestId\)/);
+  assert.match(route,/existing\.fingerprint!==fingerprint/);
+  assert.match(route,/entry\.promise/);
+});
