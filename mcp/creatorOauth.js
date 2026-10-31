@@ -134,6 +134,17 @@ function creatorSignInHtml(ctx) {
   .warn{background:#3a1f1f;border:1px solid #7a3b3b;color:#ffb4b4;border-radius:10px;padding:10px 12px;font-size:13px;margin-bottom:14px;}
   ul{margin:0 0 14px 18px;padding:0;color:#c9d4ee;font-size:13px;line-height:1.55;} .no{color:#ffcf8a;}
   .hidden{display:none;} .sep{text-align:center;color:#5d6f94;font-size:12px;margin:2px 0 8px;}
+
+  .password-visibility-wrap{position:relative;display:block;width:100%;margin-bottom:10px;}
+  .password-visibility-wrap input{width:100%;box-sizing:border-box;margin-bottom:0;padding-right:48px;}
+  button.password-visibility-toggle{
+    position:absolute;top:50%;right:7px;transform:translateY(-50%);
+    display:flex;align-items:center;justify-content:center;
+    width:36px;height:36px;padding:0;margin:0;border:0;border-radius:7px;
+    background:transparent;color:#93a3c4;cursor:pointer;
+  }
+  button.password-visibility-toggle:focus-visible{outline:2px solid #d4af37;outline-offset:2px;}
+  button.password-visibility-toggle svg{display:block;width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;}
 </style></head>
 <body>
 <div class="card">
@@ -142,7 +153,10 @@ function creatorSignInHtml(ctx) {
     <p>Sign in with your LEXDEN NOVA creator account. You'll be asked to confirm before anything is connected.</p>
     <div class="err" id="err"></div>
     <input id="email" type="email" placeholder="Email" autocomplete="username">
-    <input id="pass" type="password" placeholder="Password" autocomplete="current-password">
+    <div class="password-visibility-wrap">
+      <input id="pass" type="password" placeholder="Password" autocomplete="current-password">
+      <button type="button" class="password-visibility-toggle" id="toggle-pass" aria-label="Show password" aria-controls="pass" aria-pressed="false" title="Show password"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle></svg></button>
+    </div>
     <button class="primary" id="btn-email">Sign in</button>
     <div class="sep">or</div>
     <button class="secondary" id="btn-google">Continue with Google</button>
@@ -174,6 +188,19 @@ function creatorSignInHtml(ctx) {
   import { getAuth, signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
   const ctx = JSON.parse(document.getElementById('ctx').textContent);
   const $ = (id) => document.getElementById(id);
+
+  const passwordInput = $('pass');
+  const passwordToggle = $('toggle-pass');
+  const passwordEyeIcon = "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><path d=\"M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z\"></path><circle cx=\"12\" cy=\"12\" r=\"3\"></circle></svg>";
+  const passwordEyeOffIcon = "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><path d=\"m3 3 18 18\"></path><path d=\"M10.6 10.6a2 2 0 0 0 2.8 2.8\"></path><path d=\"M9.9 5.2A10.5 10.5 0 0 1 12 5c6.4 0 10 7 10 7a16 16 0 0 1-3 4.1\"></path><path d=\"M6.6 6.6C3.8 8.3 2 12 2 12s3.6 7 10 7c.9 0 1.8-.1 2.6-.4\"></path></svg>";
+  passwordToggle.addEventListener('click', () => {
+    const reveal = passwordInput.type === 'password';
+    passwordInput.type = reveal ? 'text' : 'password';
+    passwordToggle.setAttribute('aria-pressed', String(reveal));
+    passwordToggle.setAttribute('aria-label', reveal ? 'Hide password' : 'Show password');
+    passwordToggle.title = reveal ? 'Hide password' : 'Show password';
+    passwordToggle.innerHTML = reveal ? passwordEyeOffIcon : passwordEyeIcon;
+  });
   const app = initializeApp({
     apiKey: "AIzaSyBk4WD0D5m6386sb62KC-5KKMpUuOLC9fs",
     authDomain: "lexden-nova.firebaseapp.com",
