@@ -32,6 +32,10 @@ function makeDb(seed = {}) {
   function scalar(v) {
     if (v && typeof v.toMillis === 'function') return v.toMillis();
     if (v instanceof Date) return v.getTime();
+    if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(v)) {
+      const parsed = Date.parse(v);
+      if (Number.isFinite(parsed)) return parsed;
+    }
     return v;
   }
   function matches(actual, op, expected) {
