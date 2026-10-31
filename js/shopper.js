@@ -589,6 +589,7 @@ function screenProductDetail(id){
       ${p.productType==='PHYSICAL' ? physicalStockBlock(p) : ''}
     </div>
 
+    ${productTrustStrip(p, selectedEffectivePrice)}
     ${productExperiencePanel(p)}
     </div>
     </div>
@@ -646,6 +647,19 @@ function screenProductDetail(id){
       <div id="pdStickyAction" style="flex:2;">${stickyPurchaseActionHtml(p,selectedVariant)}</div>
     </div>
   </div>`;
+}
+/* Trust strip beside the buy area: only statements that are true for every product. */
+function productTrustStrip(p, price){
+  const seller = escapeHtml(p.seller || 'LEXDEN NOVA');
+  const paid = Number(price) > 0;
+  const physical = p.productType === 'PHYSICAL';
+  const items = [
+    `<li><span aria-hidden="true">🏷️</span><span>Sold by <strong>${seller}</strong></span></li>`,
+    paid ? `<li><span aria-hidden="true">🔒</span><span>Secure payment with Paystack</span></li>` : '',
+    paid ? `<li><span aria-hidden="true">🚚</span><span>${physical ? 'Delivery cost and time are shown before you pay' : 'Access details are sent once payment is confirmed'}</span></li>` : '',
+    `<li><span aria-hidden="true">↩️</span><a href="legal/refunds.html">Refund and return rules</a></li>`,
+  ].filter(Boolean).join('');
+  return `<ul class="trust-strip" aria-label="Buying with confidence">${items}</ul>`;
 }
 function setActiveMedia(productId, idx){
   const p = findProduct(productId);
