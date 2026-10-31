@@ -1,7 +1,7 @@
 'use strict';
 const test=require('node:test');
 const assert=require('node:assert/strict');
-const {getShippingPolicy,conservativeDeliveryDays,evaluateShippingPolicy}=require('../api/fulfillment/policy');
+const {getShippingPolicy,conservativeDeliveryDays,conservativeDeliveryBounds,evaluateShippingPolicy}=require('../api/fulfillment/policy');
 
 test('no delivery-time or freight ceiling is invented by default',()=>{
   const p=getShippingPolicy({});
@@ -91,6 +91,18 @@ test('CJ unitless delivery ranges are treated as calendar days with processing a
   });
   assert.equal(gate.eligible,true);
   assert.deepEqual(gate.reasons,[]);
+});
+
+test('delivery parser preserves min and max bounds for each displayed service',()=>{
+  assert.deepEqual(conservativeDeliveryBounds({logisticAging:'12-50'},5),{minDays:17,maxDays:55});
+  assert.deepEqual(conservativeDeliveryBounds({deliveryRange:'20-60'},5),{minDays:25,maxDays:65});
+  assert.deepEqual(conservativeDeliveryBounds({deliveryRange:'12-50 business days'},5),{minDays:22,maxDays:75});
+  assert.deepEqual(conservativeDeliveryBounds({deliveryRange:'50'},5),{minDays:55,maxDays:55});
+  assert.equal(conservativeDeliveryBounds({deliveryRange:'60-20'},5),null);
+  assert.deepEqual(conservativeDeliveryBounds({
+    estimatedOrderToDoorMinDays:8,
+    estimatedOrderToDoorMaxDays:14,
+  },5),{minDays:8,maxDays:14});
 });
 
 test('business-day ETA is normalized conservatively',()=>{
