@@ -128,6 +128,17 @@ function firebaseSignInHtml({ authError }) {
   button{width:100%;padding:11px;border-radius:8px;border:none;background:#d4af37;color:#111;font-weight:700;cursor:pointer;font-size:14px;}
   button:disabled{opacity:.6;cursor:default;}
   .err{color:#ff8a8a;font-size:13px;margin-bottom:10px;min-height:16px;}
+
+  .password-visibility-wrap{position:relative;display:block;width:100%;margin-bottom:10px;}
+  .password-visibility-wrap input{width:100%;box-sizing:border-box;margin-bottom:0;padding-right:48px;}
+  button.password-visibility-toggle{
+    position:absolute;top:50%;right:7px;transform:translateY(-50%);
+    display:flex;align-items:center;justify-content:center;
+    width:36px;height:36px;padding:0;margin:0;border:0;border-radius:7px;
+    background:transparent;color:#93a3c4;cursor:pointer;
+  }
+  button.password-visibility-toggle:focus-visible{outline:2px solid #d4af37;outline-offset:2px;}
+  button.password-visibility-toggle svg{display:block;width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;}
 </style></head>
 <body>
   <div class="card">
@@ -135,7 +146,10 @@ function firebaseSignInHtml({ authError }) {
     <p class="sub">Sign in with the admin account to authorize this assistant to access your admin tools.</p>
     <div class="err" id="err">${authError ? String(authError).replace(/</g, '&lt;') : ''}</div>
     <input id="email" type="email" placeholder="Admin email" autocomplete="username">
-    <input id="pass" type="password" placeholder="Password" autocomplete="current-password">
+    <div class="password-visibility-wrap">
+      <input id="pass" type="password" placeholder="Password" autocomplete="current-password">
+      <button type="button" class="password-visibility-toggle" id="toggle-pass" aria-label="Show password" aria-controls="pass" aria-pressed="false" title="Show password"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle></svg></button>
+    </div>
     <button id="btn">Sign In &amp; Authorize</button>
   </div>
   <script type="module">
@@ -148,6 +162,19 @@ function firebaseSignInHtml({ authError }) {
       appId: "1:421157476875:web:c42a605fdb056c8282450e"
     });
     const auth = getAuth(app);
+
+    const passwordInput = document.getElementById('pass');
+    const passwordToggle = document.getElementById('toggle-pass');
+    const passwordEyeIcon = "<svg viewBox='0 0 24 24' aria-hidden='true' focusable='false'><path d='M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z'></path><circle cx='12' cy='12' r='3'></circle></svg>";
+    const passwordEyeOffIcon = "<svg viewBox='0 0 24 24' aria-hidden='true' focusable='false'><path d='m3 3 18 18'></path><path d='M10.6 10.6a2 2 0 0 0 2.8 2.8'></path><path d='M9.9 5.2A10.5 10.5 0 0 1 12 5c6.4 0 10 7 10 7a16 16 0 0 1-3 4.1'></path><path d='M6.6 6.6C3.8 8.3 2 12 2 12s3.6 7 10 7c.9 0 1.8-.1 2.6-.4'></path></svg>";
+    passwordToggle.addEventListener('click', () => {
+      const reveal = passwordInput.type === 'password';
+      passwordInput.type = reveal ? 'text' : 'password';
+      passwordToggle.setAttribute('aria-pressed', String(reveal));
+      passwordToggle.setAttribute('aria-label', reveal ? 'Hide password' : 'Show password');
+      passwordToggle.title = reveal ? 'Hide password' : 'Show password';
+      passwordToggle.innerHTML = reveal ? passwordEyeOffIcon : passwordEyeIcon;
+    });
     const btn = document.getElementById('btn');
     const err = document.getElementById('err');
     const qs = new URLSearchParams(location.search);

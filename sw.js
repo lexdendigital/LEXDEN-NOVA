@@ -10,11 +10,11 @@
       window(s) once, so even an installed PWA that was left open updates itself.
    4. Firebase Cloud Messaging background push.
    Catalog DATA always comes live from Firestore; it is never read from here. */
-const CACHE_VERSION = 'nova-shell-v3';
+const CACHE_VERSION = 'nova-shell-v4';
 const SHELL_FILES = [
   './', './index.html', './manifest.json', './css/app.css',
   './js/firebase.js', './js/data.js', './js/state.js', './js/core.js', './js/support.js',
-  './js/shopper.js', './js/nova-ai.js', './js/update.js', './js/boot.js',
+  './js/shopper.js', './js/password-visibility.js', './js/nova-ai.js', './js/update.js', './js/boot.js',
   // admin portal + creator workspace (their own pages)
   './admin/', './admin/index.html', './admin/admin.js', './admin/main.js',
   './creator/', './creator/index.html', './creator/creator.js', './creator/main.js',
