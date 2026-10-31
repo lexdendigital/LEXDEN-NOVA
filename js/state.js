@@ -977,13 +977,7 @@ function updateCjShippingChoice(product,selectedVariant){
   if(quote.requiresExplicitChoice===true)message+=' This is a slower alternative, not NOVA Verified Delivery. Continue only if you accept the longer estimate.';
   const policy=(DB.content&&DB.content.commercePricingPolicy&&DB.content.commercePricingPolicy.shipping)||{};
   const warningRatio=Math.min(Number(policy.highShippingItemPriceRatioWarning)||0.25,0.25);
-  const blockRatio=Math.min(Number(policy.highShippingItemPriceRatioBlock)||0.35,0.35);
-  if(ratio!==null&&ratio>=blockRatio){
-    message+=' This route exceeds the shipping-to-item affordability limit.';
-    el.textContent=message+' Select another route or a locally stocked/bundled alternative.';
-    btn.disabled=true;
-    return;
-  } else if(ratio!==null&&ratio>=warningRatio)message+=' Shipping is high relative to this item price, so compare routes before paying.';
+  if(ratio!==null&&ratio>=warningRatio)message+=' Shipping is high relative to this item price, so compare routes before paying.';
   el.textContent=message;
   btn.disabled=false;
 }
