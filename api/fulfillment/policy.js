@@ -52,17 +52,22 @@ function conservativeDeliveryDays(option = {}, processingFallback = 0) {
   }
 
   const text = String(option.deliveryRange || option.logisticAging || '').trim();
-  const range = text.match(/(\d+)\s*(?:-|–|—|to)\s*(\d+)\s*(business\s*)?days?/i);
+  // CJ commonly returns bare ranges such as "12-50" without a "days" suffix.
+  // Treat a unitless numeric range as calendar days; explicitly stated business
+  // days are converted conservatively to calendar days.
+  const range = text.match(/^\s*(\d+)\s*(?:-|–|—|to)\s*(\d+)\s*(?:(business\s*)?(?:days?|d))?\s*$/i);
   if (range) {
+    const min = Number(range[1]);
     const max = Number(range[2]);
-    if (!Number.isFinite(max)) return null;
+    if (!Number.isFinite(min) || !Number.isFinite(max) || max < min) return null;
     const transitMax = range[3] ? Math.ceil(max * 7 / 5) : max;
     return transitMax + (Number.isFinite(processing) && processing >= 0 ? processing : 0);
   }
 
-  const one = text.match(/^\s*(\d+)\s*(business\s*)?days?\s*$/i);
+  const one = text.match(/^\s*(\d+)\s*(?:(business\s*)?(?:days?|d))?\s*$/i);
   if (!one) return null;
   const days = Number(one[1]);
+  if (!Number.isFinite(days) || days < 0) return null;
   const transitMax = one[2] ? Math.ceil(days * 7 / 5) : days;
   return transitMax + (Number.isFinite(processing) && processing >= 0 ? processing : 0);
 }
