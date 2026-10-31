@@ -20,3 +20,70 @@ test('insufficient stock, max cost and minimum margin all reject the quote',asyn
 test('no default ETA or freight ceiling is imposed on an otherwise verified route',async()=>{const d=deliverySettings({content:{commercePricingPolicy:{shipping:{maxDeliveryDays:45}}}});assert.equal(d.max,null);assert.equal(d.settings.content.commercePricingPolicy.shipping.maxDeliveryDays,45);const{service,store}=setup({adapters:{'provider-a':{options:[{shippingMethod:'Slow',supplierShippingCost:24,currency:'USD',deliveryRange:'20-25 days'}]}}});const r=await service.quote({productId:'prod-1',variantId:'nova-red',destinationCountryCode:'NG'});assert.equal(r.ok,true);assert.equal(store.quotes.size,1);assert.equal(store.quotes.get('quote-1').estimatedOrderToDoorMaxDays,30);});
 test('an explicitly configured central delivery limit is enforced',async()=>{const{service,store}=setup({settings:{shippingPolicy:{maxDeliveryDays:20}},adapters:{'provider-a':{options:[{shippingMethod:'Slow',supplierShippingCost:5,currency:'USD',deliveryRange:'21-25 days'}]}}});const r=await service.quote({productId:'prod-1',variantId:'nova-red',destinationCountryCode:'NG'});assert.equal(r.ok,false);assert.equal(store.quotes.size,0);});
 test('rejects invalid destination and currency before contacting provider',async()=>{const{service,calls}=setup({adapters:{'provider-a':{}}});assert.equal((await service.quote({productId:'prod-1',destinationCountryCode:'Atlantis'})).code,'INVALID_DESTINATION');assert.equal((await service.quote({productId:'prod-1',destinationCountryCode:'NG',currency:'EUR'})).code,'UNSUPPORTED_CURRENCY');assert.equal(calls['provider-a'].length,0);});
+test('returns separately persisted Smart, Economy and Express quotes with exact supplier routes',async()=>{
+  const options=[
+    {shippingMethod:'CJPacket Postal',supplierShippingCost:8,currency:'USD',deliveryRange:'5-10'},
+    {shippingMethod:'CJPacket Liquid Line',supplierShippingCost:4,currency:'USD',deliveryRange:'20-50'},
+    {shippingMethod:'DHL Official',supplierShippingCost:18,currency:'USD',deliveryRange:'1-3'},
+  ];
+  const settings={commercePricingPolicy:{shipping:{
+    maxDeliveryDays:45,
+    processingDays:5,
+    smartMaxShippingPremiumPct:0.4,
+    economyMinSavingUSD:2.5,
+    economyMinSavingPct:0.2,
+    allowEconomyOverMaxDays:true,
+    expressMethods:['DHL Official'],
+  }}};
+  const{service,store}=setup({
+    adapters:{'provider-a':{options}},
+    settings,
+    ids:['smart-quote','economy-quote','express-quote'],
+  });
+  const result=await service.quote({
+    productId:'prod-1',
+    variantId:'nova-red',
+    destinationCountryCode:'NG',
+    currency:'USD',
+  });
+
+  assert.equal(result.ok,true);
+  assert.deepEqual(result.options.map(option=>option.serviceLevel),['smart','economy','express']);
+  assert.deepEqual(result.options.map(option=>option.serviceLabel),['NOVA Smart','NOVA Economy','NOVA Express']);
+  assert.deepEqual(result.options.map(option=>option.logisticName),['CJPacket Postal','CJPacket Liquid Line','DHL Official']);
+  assert.deepEqual(result.options.map(option=>option.logisticPrice),[8,4,18]);
+  assert.deepEqual(result.options.map(option=>option.estimatedOrderToDoorMaxDays),[15,55,8]);
+  assert.equal(result.options[0].requiresExplicitChoice,false);
+  assert.equal(result.options[1].requiresExplicitChoice,true);
+  assert.equal(result.options[2].requiresExplicitChoice,true);
+
+  for(const option of result.options){
+    const saved=store.quotes.get(option.quoteId);
+    assert.ok(saved,'each visible service has its own persisted quote');
+    assert.equal(saved.status,'open');
+    assert.equal(saved.quoteId,option.quoteId);
+    assert.equal(saved.serviceLevel,option.serviceLevel);
+    assert.equal(saved.logisticName,option.logisticName);
+    assert.equal(saved.deliveryEstimate,option.deliveryEstimate);
+    assert.equal(saved.estimatedOrderToDoorMaxDays,option.estimatedOrderToDoorMaxDays);
+    assert.equal(saved.supplierId,option.supplierId);
+    assert.equal(saved.externalVariantId,'EXT-V1');
+  }
+});
+
+test('only genuinely available NOVA service levels are returned',async()=>{
+  const{service,store}=setup({
+    adapters:{'provider-a':{options:[
+      {shippingMethod:'CJPacket Liquid Line',supplierShippingCost:4,currency:'USD',deliveryRange:'20-50'},
+    ]}},
+    settings:{commercePricingPolicy:{shipping:{maxDeliveryDays:45,processingDays:5,allowEconomyOverMaxDays:true}}},
+    ids:['economy-only'],
+  });
+  const result=await service.quote({productId:'prod-1',variantId:'nova-red',destinationCountryCode:'NG',currency:'USD'});
+  assert.equal(result.ok,true);
+  assert.deepEqual(result.options.map(option=>option.serviceLevel),['economy']);
+  assert.equal(result.options[0].serviceLabel,'NOVA Economy');
+  assert.equal(result.options[0].logisticName,'CJPacket Liquid Line');
+  assert.equal(store.quotes.size,1);
+});
+

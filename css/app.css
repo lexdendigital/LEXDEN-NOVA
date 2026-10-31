@@ -1230,6 +1230,36 @@ img{max-width:100%;display:block;}
 .card.csel-host,.section.csel-host{overflow:visible;z-index:90;}
 .csel.open .csel-panel{-webkit-overflow-scrolling:touch;overscroll-behavior:contain;}
 
+/* Live NOVA delivery service picker */
+#csel_dd_shippingMethod .csel-panel{max-height:300px;}
+#csel_dd_shippingMethod .csel-btn{min-height:46px;}
+#csel_dd_shippingMethod .csel-btn:disabled{opacity:.65;cursor:not-allowed;}
+#csel_dd_shippingMethod .nova-shipping-option{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  align-items:center;
+  gap:4px 12px;
+  width:100%;
+  padding:13px 14px;
+  border:0;
+  border-bottom:1px solid var(--border);
+  border-radius:0;
+  background:transparent;
+  color:var(--text);
+  font:inherit;
+  text-align:left;
+  cursor:pointer;
+}
+#csel_dd_shippingMethod .nova-shipping-option:last-child{border-bottom:0;}
+#csel_dd_shippingMethod .nova-shipping-option:hover,
+#csel_dd_shippingMethod .nova-shipping-option.active{
+  background:var(--card);
+  color:var(--accent);
+}
+.nova-shipping-option-name{min-width:0;font-size:13px;font-weight:750;}
+.nova-shipping-option-price{white-space:nowrap;font-size:13px;font-weight:800;color:var(--accent);}
+.nova-shipping-option-details{grid-column:1/-1;color:var(--text-2);font-size:11px;line-height:1.45;}
+
 /* ---- Sign-up wizard ---- */
 .wizard-dots{display:flex;gap:6px;justify-content:center;margin-bottom:18px;}
 .wizard-dots span{width:7px;height:7px;border-radius:50%;background:var(--border);display:block;}

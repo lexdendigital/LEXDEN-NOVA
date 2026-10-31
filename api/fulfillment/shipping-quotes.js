@@ -2,9 +2,9 @@
 
 const crypto = require('node:crypto');
 const { resolveProductSelection } = require('../product-variants');
-const { getCommercePricingPolicy, rateForCurrency, calculateShippingCharge } = require('../commerce-pricing');
+const { getCommercePricingPolicy, rateForCurrency, calculateShippingCharge, selectShippingServices } = require('../commerce-pricing');
 const { resolveRegisteredSupplier, resolveSupplierMapping } = require('./product-mapping');
-const { getShippingPolicy, conservativeDeliveryDays, evaluateShippingPolicy } = require('./policy');
+const { getShippingPolicy, conservativeDeliveryBounds, evaluateShippingPolicy } = require('./policy');
 
 const clean = (value, max = 180) => value == null ? '' : String(value).trim().slice(0, max);
 
@@ -251,7 +251,9 @@ function createShippingQuoteService(options = {}) {
           const supplierAmount = Number(option.supplierShippingCost ?? option.logisticPrice);
           const supplierCurrency = clean(option.currency || option.supplierShippingCurrency, 3).toUpperCase();
           const shippingUSD = toUsd(supplierAmount, supplierCurrency, settings);
-          const totalMaxDeliveryDays = conservativeDeliveryDays(option, commerce.shipping.processingDays);
+          const deliveryBounds = conservativeDeliveryBounds(option, commerce.shipping.processingDays);
+          const totalMinDeliveryDays = deliveryBounds ? deliveryBounds.minDays : null;
+          const totalMaxDeliveryDays = deliveryBounds ? deliveryBounds.maxDays : null;
           if (!method || shippingUSD == null) continue;
 
           freight.push({
@@ -260,6 +262,7 @@ function createShippingQuoteService(options = {}) {
             supplierShippingCurrency: supplierCurrency,
             supplierShippingCostUSD: shippingUSD,
             logisticAging: option.deliveryRange || option.logisticAging || null,
+            totalMinDeliveryDays,
             totalMaxDeliveryDays,
             startCountryCode: warehouse.countryCode,
             sourceWarehouse: warehouse.warehouse,
@@ -356,85 +359,109 @@ function createShippingQuoteService(options = {}) {
       a.totalMaxDeliveryDays - b.totalMaxDeliveryDays
     );
 
-    const best = candidates[0];
-    const ttlMs = Math.min(getCommercePricingPolicy(settings).shipping.quoteTtlMinutes, 30) * 60 * 1000;
+    // Turn the live supplier candidates into the three NOVA customer-facing
+    // service levels. The classifier consumes the conservative door-to-door
+    // bounds already calculated above, so processing days are never added twice.
+    const serviceSelections = selectShippingServices(candidates.map((candidate, candidateIndex) => ({
+      candidateIndex,
+      logisticName: candidate.logisticName,
+      logisticPrice: candidate.supplierShippingCostUSD,
+      estimatedOrderToDoorMinDays: candidate.totalMinDeliveryDays,
+      estimatedOrderToDoorMaxDays: candidate.totalMaxDeliveryDays,
+    })), settings, { processingDays: 0 });
+
+    if (!serviceSelections.length) {
+      return {
+        ok: false,
+        code: 'NO_ELIGIBLE_NOVA_SERVICE',
+        error: 'No NOVA delivery service is available for this product and destination.',
+        rejectedRoutes,
+      };
+    }
+
+    const ttlMs = Math.min(commerce.shipping.quoteTtlMinutes, 30) * 60 * 1000;
     const rawNow = now();
     const createdAt = rawNow instanceof Date ? rawNow : new Date(rawNow);
     const expiresAt = new Date(createdAt.getTime() + ttlMs);
-    const quoteId = createId();
-
-    const doc = {
-      quoteId,
-      status: 'open',
-      productId,
-      variantId: selection.variantId,
-      supplierId: String(best.supplier.id),
-      providerKey: best.providerKey,
-      externalProductId: best.mapping.externalProductId,
-      externalVariantId: best.externalVariantId,
-      quantity,
-      destination,
-      endCountryCode: destinationCode,
-      startCountryCode: best.startCountryCode,
-      sourceWarehouse: best.sourceWarehouse,
-      quotePrecision: best.quotePrecision,
-      shippingMethod: best.logisticName,
-      logisticName: best.logisticName,
-      supplierShippingCost: best.supplierShippingCost,
-      supplierShippingCurrency: best.supplierShippingCurrency,
-      supplierShippingCostUSD: best.supplierShippingCostUSD,
-      stockVerified: true,
-      shippingVerified: true,
-      deliveryVerified: true,
-      currency,
-      productAmountMajor: best.productAmountMajor,
-      shippingAmountMajor: best.shippingAmountMajor,
-      customerShippingAmountMajor: best.shippingAmountMajor,
-      totalAmountMajor: best.totalAmountMajor,
-      shippingAmountUSD: best.supplierShippingCostUSD,
-      logisticAging: best.logisticAging,
-      estimatedOrderToDoorMaxDays: best.totalMaxDeliveryDays,
-      serviceLevel: 'verified',
-      serviceLabel: 'NOVA Verified Delivery',
-      deliveryEstimate: best.totalMaxDeliveryDays == null ? null : best.totalMaxDeliveryDays + ' days or less',
-      requiresExplicitChoice: false,
-      grossMarginPct: best.grossMarginPct,
-      policyMaxDeliveryDays: policy.maxDeliveryDays,
-      policyMaxShippingUSD: policy.maxShippingUSD,
-      routeScore: best.score,
-      providerRequestId: best.providerRequestId,
-      cjVariantId: best.providerKey === 'cj' ? best.externalVariantId : null,
-      createdAt,
-      expiresAt,
+    const serviceLabels = {
+      smart: 'NOVA Smart',
+      economy: 'NOVA Economy',
+      express: 'NOVA Express',
     };
+    const options = [];
 
-    await db.collection('shippingQuotes').doc(quoteId).create(doc);
+    // Each visible service gets its OWN supplier-bound quote record. Checkout
+    // later reserves only the quote the shopper selected; cj-order.js verifies
+    // that exact record and sends its exact logisticName to CJ.
+    for (const service of serviceSelections) {
+      const best = candidates[service.candidateIndex];
+      if (!best) continue;
+      const quoteId = createId();
+      const serviceLevel = service.serviceLevel;
+      const serviceLabel = serviceLabels[serviceLevel];
+      if (!serviceLabel) continue;
+      const deliveryEstimate = service.deliveryEstimate
+        || (best.totalMaxDeliveryDays == null ? null : best.totalMaxDeliveryDays + ' days or less');
 
-    return {
-      ok: true,
-      productId,
-      variantId: selection.variantId,
-      quantity,
-      currency,
-      supplier: { supplierId: doc.supplierId, providerKey: doc.providerKey, name: clean(best.supplier.name, 120) },
-      selectedRoute: { supplierId: doc.supplierId, providerKey: doc.providerKey },
-      eligibleRoutes: candidates.map(candidate => ({
-        supplierId: String(candidate.supplier.id),
-        providerKey: candidate.providerKey,
-        shippingUSD: candidate.supplierShippingCostUSD,
-        totalMaxDeliveryDays: candidate.totalMaxDeliveryDays,
-        totalSupplierCostUSD: candidate.totalSupplierCostUSD,
-        score: candidate.score,
-      })),
-      rejectedRoutes,
-      productAmountMajor: doc.productAmountMajor,
-      quoteExpiresAt: expiresAt.toISOString(),
-      options: [{
+      const doc = {
+        quoteId,
+        status: 'open',
+        productId,
+        variantId: selection.variantId,
+        supplierId: String(best.supplier.id),
+        providerKey: best.providerKey,
+        externalProductId: best.mapping.externalProductId,
+        externalVariantId: best.externalVariantId,
+        quantity,
+        destination,
+        endCountryCode: destinationCode,
+        startCountryCode: best.startCountryCode,
+        sourceWarehouse: best.sourceWarehouse,
+        quotePrecision: best.quotePrecision,
+        shippingMethod: best.logisticName,
+        logisticName: best.logisticName,
+        supplierShippingCost: best.supplierShippingCost,
+        supplierShippingCurrency: best.supplierShippingCurrency,
+        supplierShippingCostUSD: best.supplierShippingCostUSD,
+        stockVerified: true,
+        shippingVerified: true,
+        deliveryVerified: true,
+        currency,
+        productAmountMajor: best.productAmountMajor,
+        shippingAmountMajor: best.shippingAmountMajor,
+        customerShippingAmountMajor: best.shippingAmountMajor,
+        totalAmountMajor: best.totalAmountMajor,
+        shippingAmountUSD: best.supplierShippingCostUSD,
+        logisticAging: best.logisticAging,
+        estimatedOrderToDoorMinDays: best.totalMinDeliveryDays,
+        estimatedOrderToDoorMaxDays: best.totalMaxDeliveryDays,
+        processingAllowanceDays: commerce.shipping.processingDays,
+        deliveryEstimate,
+        serviceLevel,
+        serviceLabel,
+        serviceRationale: service.serviceRationale || null,
+        requiresExplicitChoice: service.requiresExplicitChoice === true,
+        grossMarginPct: best.grossMarginPct,
+        policyMaxDeliveryDays: policy.maxDeliveryDays,
+        policyMaxShippingUSD: policy.maxShippingUSD,
+        routeScore: best.score,
+        providerRequestId: best.providerRequestId,
+        cjVariantId: best.providerKey === 'cj' ? best.externalVariantId : null,
+        createdAt,
+        expiresAt,
+      };
+
+      await db.collection('shippingQuotes').doc(quoteId).create(doc);
+      options.push({
         quoteId,
         supplierId: doc.supplierId,
+        supplierName: clean(best.supplier.name, 120),
         providerKey: doc.providerKey,
         shippingMethod: doc.shippingMethod,
         logisticName: doc.logisticName,
+        logisticPrice: best.supplierShippingCostUSD,
+        supplierShippingCost: doc.supplierShippingCost,
+        supplierShippingCurrency: doc.supplierShippingCurrency,
         currency,
         productAmountMajor: doc.productAmountMajor,
         shippingAmountMajor: doc.shippingAmountMajor,
@@ -442,14 +469,51 @@ function createShippingQuoteService(options = {}) {
         sourceWarehouse: doc.sourceWarehouse,
         startCountryCode: doc.startCountryCode,
         destinationCountryCode: destinationCode,
-        deliveryEstimate: doc.deliveryEstimate,
+        logisticAging: doc.logisticAging,
+        deliveryEstimate: doc.deliveryEstimate || deliveryEstimate,
+        estimatedOrderToDoorMinDays: doc.estimatedOrderToDoorMinDays,
         estimatedOrderToDoorMaxDays: doc.estimatedOrderToDoorMaxDays,
-        serviceLevel: doc.serviceLevel,
-        serviceLabel: doc.serviceLabel,
-        requiresExplicitChoice: false,
+        serviceLevel,
+        serviceLabel,
+        serviceRationale: doc.serviceRationale,
+        requiresExplicitChoice: doc.requiresExplicitChoice,
         quotePrecision: doc.quotePrecision,
         quoteExpiresAt: expiresAt.toISOString(),
-      }],
+      });
+    }
+
+    if (!options.length) {
+      return {
+        ok: false,
+        code: 'NO_ELIGIBLE_NOVA_SERVICE',
+        error: 'No NOVA delivery service is available for this product and destination.',
+        rejectedRoutes,
+      };
+    }
+
+    const first = options[0];
+    return {
+      ok: true,
+      productId,
+      variantId: selection.variantId,
+      quantity,
+      currency,
+      supplier: { supplierId: first.supplierId, providerKey: first.providerKey, name: first.supplierName },
+      selectedRoute: null,
+      eligibleRoutes: candidates.map(candidate => ({
+        supplierId: String(candidate.supplier.id),
+        providerKey: candidate.providerKey,
+        logisticName: candidate.logisticName,
+        shippingUSD: candidate.supplierShippingCostUSD,
+        totalMinDeliveryDays: candidate.totalMinDeliveryDays,
+        totalMaxDeliveryDays: candidate.totalMaxDeliveryDays,
+        totalSupplierCostUSD: candidate.totalSupplierCostUSD,
+        score: candidate.score,
+      })),
+      rejectedRoutes,
+      productAmountMajor: first.productAmountMajor,
+      quoteExpiresAt: expiresAt.toISOString(),
+      options,
     };
   }
 
