@@ -1,3 +1,23 @@
+# Search and assistant crawlers that send shoppers to the site: welcome.
+User-agent: Googlebot
+Allow: /
+
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: Claude-SearchBot
+Allow: /
+
+User-agent: Claude-User
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+# Everyone else (including AI-training crawlers) is also allowed for now.
 User-agent: *
 Allow: /
 
