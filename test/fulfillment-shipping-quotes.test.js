@@ -87,3 +87,47 @@ test('only genuinely available NOVA service levels are returned',async()=>{
   assert.equal(store.quotes.size,1);
 });
 
+
+
+test('CJ uses the live stock request as its checkout connectivity and authentication check',async()=>{
+  const cjSupplier={...A,providerKey:'cj'};
+  const p=product({providerKey:'cj',mappings:[map(A.id,'cj')]});
+  const{service,calls}=setup({
+    products:[p],
+    suppliers:[cjSupplier],
+    adapters:{cj:{}},
+  });
+  const result=await service.quote({
+    productId:'prod-1',
+    variantId:'nova-red',
+    destinationCountryCode:'NG',
+    currency:'USD',
+  });
+  assert.equal(result.ok,true);
+  assert.equal(calls.cj.includes('health'),false,'do not spend an extra CJ rate-limit slot on a category probe');
+  assert.equal(calls.cj.some(call=>call&&call.op==='stock'),true,'live stock must still be verified');
+  assert.equal(calls.cj.some(call=>call&&call.op==='quote'),true,'freight must still be quoted live');
+});
+
+test('freight is requested once per distinct origin country, retaining the highest-stock warehouse',async()=>{
+  const warehouses=[
+    {countryCode:'CN',warehouse:'CN-LOW',quantity:8},
+    {countryCode:'US',warehouse:'US-ONLY',quantity:12},
+    {countryCode:'CN',warehouse:'CN-HIGH',quantity:35},
+    {countryCode:'CN',warehouse:'CN-MID',quantity:20},
+  ];
+  const{service,calls}=setup({
+    adapters:{'provider-a':{warehouses}},
+  });
+  const result=await service.quote({
+    productId:'prod-1',
+    variantId:'nova-red',
+    destinationCountryCode:'NG',
+    currency:'USD',
+  });
+  assert.equal(result.ok,true);
+  const freightCalls=calls['provider-a'].filter(call=>call&&call.op==='quote');
+  assert.equal(freightCalls.length,2,'three Chinese warehouses share one freight request, plus one US request');
+  assert.deepEqual(freightCalls.map(call=>call.input.originCountryCode),['CN','US']);
+  assert.equal(freightCalls[0].input.sourceWarehouse,'CN-HIGH','use the warehouse with the most verified stock for that country');
+});

@@ -456,14 +456,38 @@ function cjBackendUrl(){
   // admin manually pasted in the one URL that's always correct anyway.
   return `${API_BASE}/api`;
 }
-async function cjApiPost(path, body){
+async function cjApiPost(path, body, timeoutMs){
   const base = cjBackendUrl();
   if(!base) return {ok:false, error:'Set the CJ backend API base URL below first.'};
+  const requestTimeoutMs = Number.isFinite(Number(timeoutMs)) && Number(timeoutMs) > 0
+    ? Math.min(Number(timeoutMs), 90000)
+    : 20000;
   try{
-    const r = await withTimeout(fetch(base+path, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body||{})}), 20000, 'CJ backend did not respond in time.');
-    return await r.json();
+    const r = await withTimeout(
+      fetch(base+path, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body||{})}),
+      requestTimeoutMs,
+      'CJ backend did not respond in time.'
+    );
+    const data = await r.json();
+    if(!r.ok){
+      const retryable = r.status === 408 || r.status === 429 || r.status >= 500;
+      return Object.assign({}, data && typeof data === 'object' ? data : {}, {
+        ok:false,
+        code:(data && data.code) || (retryable ? 'HTTP_SERVER_ERROR' : 'HTTP_'+r.status),
+        retryable,
+        error:(data && data.error) || ('CJ backend returned HTTP '+r.status+'.')
+      });
+    }
+    return data;
   }catch(e){
-    return {ok:false, error:e.message||'Could not reach the CJ backend.'};
+    const message = e && e.message ? String(e.message) : 'Could not reach the CJ backend.';
+    const timedOut = /timed out|timeout/i.test(message);
+    return {
+      ok:false,
+      code:timedOut ? 'TIMEOUT' : 'NETWORK_ERROR',
+      retryable:true,
+      error:message
+    };
   }
 }
 

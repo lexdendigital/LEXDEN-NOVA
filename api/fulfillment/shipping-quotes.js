@@ -214,8 +214,16 @@ function createShippingQuoteService(options = {}) {
       if (!cost) return reject('PRICE_UNVERIFIED', { providerKey });
       const productCostUsd = cost.usd * quantity;
 
-      const health = await registry.checkProviderHealth(providerKey, { purpose: 'checkout_quote', supplierId });
-      if (!health || !health.ok) return reject('API_UNAVAILABLE', { providerKey });
+      // CJ's stock operation is itself a live, authenticated CJ API call.
+      // A separate category health probe would consume another rate-limit
+      // slot without adding a checkout safety check: the stock response below
+      // already proves authentication, connectivity and real inventory.
+      // Keep the separate preflight for providers whose stock operation is
+      // not the authoritative live connectivity check.
+      if (providerKey !== 'cj') {
+        const health = await registry.checkProviderHealth(providerKey, { purpose: 'checkout_quote', supplierId });
+        if (!health || !health.ok) return reject('API_UNAVAILABLE', { providerKey });
+      }
 
       const stock = await registry.callProvider(providerKey, 'checkStock', {
         externalProductId: mapping.externalProductId,
@@ -229,8 +237,22 @@ function createShippingQuoteService(options = {}) {
       const warehouses = warehouseRows(stock.data, mapping, quantity);
       if (!warehouses.length) return reject('OUT_OF_STOCK', { providerKey });
 
+      // Freight requests are scoped by origin country, not warehouse ID:
+      // the CJ adapter sends only origin/destination country + variant to CJ.
+      // Warehouses in the same country therefore produce identical requests.
+      // warehouseRows() sorts by verified quantity descending, so retaining
+      // the first warehouse for each origin preserves the strongest stock row.
+      const freightOrigins = [];
+      const seenOriginCountries = new Set();
+      for (const warehouse of warehouses) {
+        if (seenOriginCountries.has(warehouse.countryCode)) continue;
+        seenOriginCountries.add(warehouse.countryCode);
+        freightOrigins.push(warehouse);
+        if (freightOrigins.length >= 5) break;
+      }
+
       const freight = [];
-      await Promise.all(warehouses.slice(0, 5).map(async warehouse => {
+      await Promise.all(freightOrigins.map(async warehouse => {
         const response = await registry.callProvider(providerKey, 'quoteShipping', {
           externalProductId: mapping.externalProductId,
           externalVariantId,
