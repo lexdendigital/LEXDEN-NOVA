@@ -56,14 +56,22 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) return;
   event.respondWith((async () => {
     const cache = await caches.open(CACHE_VERSION);
-    try {
+    const fromNetwork = (async () => {
       let res;
       try { res = await fetch(req, { cache: 'no-cache' }); } catch (e) { if (e && e.name === 'TypeError' && req.mode === 'navigate') throw e; res = await fetch(req.url, { cache: 'no-cache' }); }
       if (res && res.ok) cache.put(req, res.clone());
       return res;
-    } catch (e) {
-      const hit = await cache.match(req, { ignoreSearch: true });
-      if (hit) return hit;
+    })();
+    // Network first, so a new deploy is always picked up. On a slow connection (common on
+    // mobile data) wait at most 3 seconds, then show the saved copy while the network
+    // request carries on and refreshes the cache for next time.
+    const cached = await cache.match(req, { ignoreSearch: true });
+    if (cached) {
+      const slow = new Promise((resolve) => setTimeout(() => resolve(null), 3000));
+      const winner = await Promise.race([fromNetwork.catch(() => null), slow]);
+      return winner || cached;
+    }
+    try { return await fromNetwork; } catch (e) {
       if (req.mode === 'navigate') { const shell = await cache.match('./index.html'); if (shell) return shell; }
       throw e;
     }
