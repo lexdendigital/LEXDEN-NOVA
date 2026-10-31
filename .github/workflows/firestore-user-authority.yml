@@ -1,9 +1,10 @@
-name: V3.0.1 Firestore user authority tests
+name: V3 Firestore authority and lifecycle rules tests
 
 on:
   push:
     branches:
       - security/v3.0.1-user-authority-lockdown
+      - security/v3.0.2-email-lifecycle-lockdown
   pull_request:
     branches:
       - main
@@ -12,7 +13,7 @@ permissions:
   contents: read
 
 jobs:
-  firestore-user-authority:
+  firestore-security-rules:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
