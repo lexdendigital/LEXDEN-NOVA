@@ -436,6 +436,7 @@ function createShippingQuoteService(options = {}) {
         estimatedOrderToDoorMinDays: best.totalMinDeliveryDays,
         estimatedOrderToDoorMaxDays: best.totalMaxDeliveryDays,
         processingAllowanceDays: commerce.shipping.processingDays,
+        deliveryEstimate,
         serviceLevel,
         serviceLabel,
         serviceRationale: service.serviceRationale || null,
