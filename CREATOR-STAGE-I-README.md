@@ -33,7 +33,7 @@ A job that ran recently is skipped, so calling the scheduler often is harmless. 
 4. **Publish `firestore.rules`** (new collections below).
 5. Optional: `BREVO_TPL_CREATOR_SLA` (email template for deadline emails; no template = no email, never an error).
 
-**No new Firestore indexes** are needed.
+**Stage I itself required no new indexes. V3.0.2 later adds lifecycle/queue indexes; see `EMAIL-LIFECYCLE-V3.0.2.md`.**
 
 ## New collections (rules included)
 `adminAlerts`, `automationRuns` (admin read) · `creatorNotifications` (owner read) · `automationLocks`, `automationSettings` (no client access). All writes are server-only.
@@ -66,3 +66,23 @@ SSRF protection on link checks (blocks private/loopback/metadata IPs in any spel
 **Brevo templates (created, active)**: 22 Creator SLA Alert · 23 Order Confirmation v2 · 24 Order Update v2 (shipping + tracking).
 **Render env vars set**: BREVO_TPL_CREATOR_SLA=22, ORDER=23, ORDER_UPDATE=24, CREATOR_ACCOUNT_STATUS=21, CREATOR_APPLICATION_UPDATE=20, ABANDONED_PRODUCT=19, VERIFY=17, NEWSLETTER=18, ADMIN=16.
 Old templates 1–8 are untouched (WELCOME, RESET, CONTACT, SECURITY keep whatever IDs you already set).
+
+
+---
+
+## V3.0.2 email lifecycle scheduler integration
+
+V3.0.2 adds the `lifecycleEmails` automation job with a **15-minute minimum interval**. It uses the same transaction-backed `automationLocks` mechanism as the other Stage I jobs, so an external cron call, the optional in-process lifecycle timer, and an authenticated manual processing request cannot run the lifecycle sweep concurrently.
+
+The `emailQueue` job now calls the shared queue worker directly rather than simulating an unauthenticated HTTP request. The fast background drain in `api/email-shared.js` uses that same locked job. Queue items are claimed with a lease before Brevo is called; an abandoned lease can be reclaimed after it expires.
+
+Public processing routes are now wrappers only:
+
+- `GET|POST /api/process-email-queue`
+- `GET|POST /api/process-abandon-emails`
+
+Both require the existing `CRON_SECRET` (minimum 16 characters) as either `Authorization: Bearer <secret>` or `x-cron-secret`. Query-string secrets are intentionally ignored. Missing/invalid server configuration returns 503; missing/wrong caller credentials return 401; unsupported methods return 405.
+
+Do not print or paste the secret while checking Render. Verify only that the variable named `CRON_SECRET` exists and its configured value is at least 16 characters.
+
+Lifecycle recovery itself is documented in `EMAIL-LIFECYCLE-V3.0.2.md`.
