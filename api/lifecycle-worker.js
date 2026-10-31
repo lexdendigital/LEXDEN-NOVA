@@ -98,7 +98,7 @@ async function enqueueStage(db, eventId, event, nowMs) {
     tx.set(eventRef, {
       lifecycleState: checkoutFirst ? 'pending' : 'completed',
       stage: checkoutFirst ? 1 : stage + 1,
-      nextAttemptAt: checkoutFirst ? nowMs + 22 * HOUR : null,
+      nextAttemptAt: checkoutFirst ? new Date(nowMs + 22 * HOUR) : null,
       lastProcessedAt: new Date(nowMs), lastQueueMessageId: messageId, suppressionReason: null,
     }, { merge: true });
     tx.set(countRef, { count: count + 1, windowStart: dayStart, updatedAt: new Date(nowMs) }, { merge: true });
