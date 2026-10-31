@@ -631,11 +631,7 @@ function startPaystackCheckout(productId, variantId, deliveryDetails, confirmed)
     try{
       window.logLifecycleEvent && window.logLifecycleEvent('checkout_started', email, {
         productId: p.id,
-        productName: p.name,
-        productUrl: location.origin + location.pathname + '#product/' + p.id,
-        checkoutUrl: location.origin + location.pathname + '#product/' + p.id,
-        variant: selectedVariant ? variantLabel(p, selectedVariant) : null,
-        amount: chargeCode + ' ' + amountMajor
+        variant: selectedVariant ? String(selectedVariant.id || variantLabel(p, selectedVariant)) : null
       });
     }catch(e){}
     if(chargeCode !== selectedCode && !creatorInfo){

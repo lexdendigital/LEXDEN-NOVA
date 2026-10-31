@@ -9,7 +9,8 @@
   "scripts": {
     "start": "node server.js",
     "test": "node --test",
-    "build:policies": "node scripts/build-policies.js"
+    "build:policies": "node scripts/build-policies.js",
+    "audit:lifecycle:legacy": "node scripts/audit-lifecycle-events.js"
   },
   "dependencies": {
     "express": "^4.19.2",
