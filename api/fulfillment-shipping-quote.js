@@ -79,14 +79,32 @@ function createHandler(options={}){
       currency:b.currency
     };
 
+    const startedAt=Date.now();
+    const requestId=typeof b.requestId==='string'&&REQUEST_ID_PATTERN.test(b.requestId)?b.requestId:null;
     try{
-      const requestId=typeof b.requestId==='string'&&REQUEST_ID_PATTERN.test(b.requestId)?b.requestId:null;
       const result=requestId
         ? await runQuoteOnce(requestId,payload)
         : {statusCode:200,body:await quoteService.quote(payload)};
-      return res.status(result.statusCode).json(result.body);
+      const body=result.body||{};
+      // Timing diagnostics deliberately exclude street, city, postcode, and
+      // other shopper delivery details. They let us verify real quote latency
+      // in Render without writing personal address data to application logs.
+      console.info('[shipping.quote]',JSON.stringify({
+        requestId,
+        statusCode:result.statusCode,
+        ok:body.ok===true,
+        code:body.code||null,
+        durationMs:Date.now()-startedAt,
+        optionCount:Array.isArray(body.options)?body.options.length:0,
+        rejectedRouteCount:Array.isArray(body.rejectedRoutes)?body.rejectedRoutes.length:0
+      }));
+      return res.status(result.statusCode).json(body);
     }catch(e){
-      console.error('Provider-neutral shipping quote failed:',e&&e.code||'UNEXPECTED_ERROR');
+      console.error('[shipping.quote] failed',JSON.stringify({
+        requestId,
+        code:e&&e.code||'UNEXPECTED_ERROR',
+        durationMs:Date.now()-startedAt
+      }));
       return res.status(200).json({ok:false,code:'SHIPPING_QUOTE_FAILED',retryable:true,error:'A live supplier delivery quote could not be completed. No payment has been taken.'});
     }
   };
