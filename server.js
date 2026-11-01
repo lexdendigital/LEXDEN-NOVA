@@ -141,6 +141,8 @@ for (const name of ENDPOINTS) {
 }
 
 // ---- Live sitemap + robots (real catalog only; see api/sitemap.js) ----
+const catalogHandler = require('./api/catalog');
+app.all(['/api/catalog', '/api/catalog/:id'], safeHandler(catalogHandler));
 const sitemapHandler = require('./api/sitemap');
 app.get(['/sitemap.xml', '/api/sitemap'], safeHandler(sitemapHandler));
 app.get('/robots.txt', sitemapHandler.robots);

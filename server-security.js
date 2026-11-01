@@ -22,6 +22,7 @@ function securityHeaders(req, res, next) {
 const DEFAULT_LIMITS = {
   '/api/nova-ai': { max: 30, windowMs: 10 * 60 * 1000 },
   '/api/affiliate-ai': { max: 30, windowMs: 10 * 60 * 1000 },
+  '/api/catalog': { max: 60, windowMs: 60 * 1000 },
   '/api/send-otp': { max: 6, windowMs: 10 * 60 * 1000 },
   '/api/verify-otp': { max: 20, windowMs: 10 * 60 * 1000 },
   '/api/send-email': { max: 10, windowMs: 10 * 60 * 1000 },
@@ -40,7 +41,7 @@ function createRateLimiter(limits, now) {
 
   return function rateLimit(req, res, next) {
     if (req.method === 'OPTIONS') return next();
-    const rule = rules[req.path];
+    const rule = rules[req.path] || rules[req.path.replace(/^(\/api\/[^/]+)\/.*$/, '$1')];
     if (!rule) return next();
     const key = req.path + '|' + (req.ip || 'unknown');
     const t = clock();
