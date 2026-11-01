@@ -12,7 +12,6 @@
 - Read-only MCP server (no sign-in, no purchase tools): https://lexden-nova.onrender.com/mcp/public
 
 ## Products
-- [MOBILE APP CREATION COURSE](https://lexdendigital.github.io/LEXDEN-NOVA/product/p1/) (USD 9.06): Learn How To Create Professional Mobile Applications Using Just Your Smartphone :
 - [Power Bank 12000mAh Ultra-thin Aluminum Alloy Power Bank](https://lexdendigital.github.io/LEXDEN-NOVA/product/p2/) (USD 17.08): 12000mAh ultra-thin aluminum alloy power bank with polymer lithium-ion battery, 10W charging power, multi-U port output, Gold and Silver variants.
 - [CARTOON ANIMATION COURSE [PRO]](https://lexdendigital.github.io/LEXDEN-NOVA/product/p3/) (USD 2.90): This Cartoon Animation Course is created for anyone who wants to learn a valuable creative skill and turn it into a source of income.
 - [Graphic Design Course](https://lexdendigital.github.io/LEXDEN-NOVA/product/p4/) (USD 5.43): Learn the core of visual communication with this Graphic Designing Course built to help beginners and aspiring creators turn ideas into clean, professional, and eye-catching designs.

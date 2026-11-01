@@ -1,21 +1,8 @@
 {
   "name": "LEXDEN NOVA",
   "site": "https://lexdendigital.github.io/LEXDEN-NOVA/",
-  "productCount": 25,
+  "productCount": 24,
   "products": [
-    {
-      "id": "p1",
-      "name": "MOBILE APP CREATION COURSE",
-      "description": "Learn How To Create Professional Mobile Applications Using Just Your Smartphone :",
-      "type": "course",
-      "category": "courses",
-      "seller": "Selar",
-      "price": 9.06,
-      "currency": "USD",
-      "availability": "InStock",
-      "url": "https://lexdendigital.github.io/LEXDEN-NOVA/product/p1/",
-      "image": "https://res.cloudinary.com/z4nut80g/image/upload/v1786383087/x5e96gyqdmyqpvru8uum.jpg"
-    },
     {
       "id": "p2",
       "name": "Power Bank 12000mAh Ultra-thin Aluminum Alloy Power Bank",
