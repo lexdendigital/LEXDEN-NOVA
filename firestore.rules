@@ -258,6 +258,26 @@ service cloud.firestore {
       allow read, write: if isAdmin();
     }
 
+    // ---- public aggregate counters: the only shapes a client may write ----
+    // Counters are public and anyone (even signed out) may bump them, so the Rules pin
+    // down exactly what a bump looks like: the document holds only `count`, a new
+    // counter starts at 1, and an update moves it by exactly one step (never a jump to a
+    // made-up number). Likes and wishlists may also step down by one (unlike / remove)
+    // but never below zero. A script can still repeat +1, but it can no longer set
+    // `count` to 999999 in one write. (increment() is resolved server-side, so these
+    // checks see the resulting value.)
+    function counterCreateValid() {
+      return request.resource.data.keys().hasOnly(['count'])
+        && request.resource.data.count is int
+        && request.resource.data.count == 1;
+    }
+    function counterStepValid(step) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['count'])
+        && request.resource.data.count is int
+        && request.resource.data.count == resource.data.count + step
+        && request.resource.data.count >= 0;
+    }
+
     // ---- feedLikes/{postId}, feedViews/{postId}, productViews/{id},
     //      productWishlists/{id} ----
     // Public aggregate counters (e.g. "128 likes", "1.2k views") shown
@@ -274,41 +294,41 @@ service cloud.firestore {
     // would error, since `resource` is null until the document exists)
     match /feedLikes/{postId} {
       allow read: if true;
-      allow create: if request.resource.data.keys().hasOnly(['count']);
-      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['count']);
+      allow create: if counterCreateValid();
+      allow update: if counterStepValid(1) || counterStepValid(-1);
     }
     match /feedViews/{postId} {
       allow read: if true;
-      allow create: if request.resource.data.keys().hasOnly(['count']);
-      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['count']);
+      allow create: if counterCreateValid();
+      allow update: if counterStepValid(1);
     }
     match /productViews/{productId} {
       allow read: if true;
-      allow create: if request.resource.data.keys().hasOnly(['count']);
-      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['count']);
+      allow create: if counterCreateValid();
+      allow update: if counterStepValid(1);
     }
     match /productWishlists/{productId} {
       allow read: if true;
-      allow create: if request.resource.data.keys().hasOnly(['count']);
-      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['count']);
+      allow create: if counterCreateValid();
+      allow update: if counterStepValid(1) || counterStepValid(-1);
     }
     // productClicks/{id}, productShares/{id}, feedShares/{id} — same public
     // aggregate-counter pattern as the four above, added to feed clicks and
     // shares into trendingScore()/feedHotScore() on the client.
     match /productClicks/{productId} {
       allow read: if true;
-      allow create: if request.resource.data.keys().hasOnly(['count']);
-      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['count']);
+      allow create: if counterCreateValid();
+      allow update: if counterStepValid(1);
     }
     match /productShares/{productId} {
       allow read: if true;
-      allow create: if request.resource.data.keys().hasOnly(['count']);
-      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['count']);
+      allow create: if counterCreateValid();
+      allow update: if counterStepValid(1);
     }
     match /feedShares/{postId} {
       allow read: if true;
-      allow create: if request.resource.data.keys().hasOnly(['count']);
-      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['count']);
+      allow create: if counterCreateValid();
+      allow update: if counterStepValid(1);
     }
 
     // ---- clicks/{id} ----
