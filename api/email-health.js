@@ -12,7 +12,7 @@ const { attemptSend } = require('./email-shared');
 
 const TEMPLATE_KEYS = [
   'welcome', 'verify', 'reset', 'contact', 'order', 'order_update', 'security', 'admin', 'newsletter',
-  'creator_application_update', 'creator_account_status', 'creator_sla', 'abandoned_product',
+  'creator_application_update', 'creator_account_status', 'creator_sla', 'abandoned_product', 'review_request',
 ];
 
 function same(a, b) {

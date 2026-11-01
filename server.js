@@ -162,6 +162,10 @@ const AFFILIATE_ENDPOINTS = {
   // direct Firestore write — see api/affiliate/signup.js.
   'affiliate-signup': './api/affiliate/signup',
   'process-abandon-emails': './api/affiliate/abandon-emails',
+  // Verified-purchase review labeling and the 7-day "please review it" email — both
+  // admin-SDK sweeps, cron-callable the same way as the line above.
+  'mark-verified-reviews': './api/affiliate/mark-verified-reviews',
+  'review-requests': './api/affiliate/review-requests',
 };
 // The email sweep sends real emails. When CRON_SECRET is configured (16+ chars) it must
 // be presented; the in-process scheduler below sends it. Without a secret the old open
@@ -175,12 +179,13 @@ function guardSweep(handler) {
     return handler(req, res);
   };
 }
+const GUARDED_SWEEPS = new Set(['process-abandon-emails', 'mark-verified-reviews', 'review-requests']);
 if (!process.env.CRON_SECRET || process.env.CRON_SECRET.length < 16) {
-  console.warn('SECURITY: CRON_SECRET is not set (16+ chars); /api/process-abandon-emails is open. Set it in Render.');
+  console.warn('SECURITY: CRON_SECRET is not set (16+ chars); the sweep endpoints (process-abandon-emails, mark-verified-reviews, review-requests) are open. Set it in Render.');
 }
 for (const [name, path] of Object.entries(AFFILIATE_ENDPOINTS)) {
   const handler = require(path);
-  app.all(`/api/${name}`, name === 'process-abandon-emails' ? guardSweep(handler) : handler);
+  app.all(`/api/${name}`, GUARDED_SWEEPS.has(name) ? guardSweep(handler) : handler);
 }
 
 // ---- LEXDEN NOVA CREATOR (Stage A: data model + auth + state machine) ----
@@ -310,15 +315,21 @@ if (process.env.CREATOR_CRON_IN_PROCESS === 'true') {
 // first sweep runs shortly after startup. Suppression checks happen again
 // inside the processor before every email.
 if (process.env.LIFECYCLE_CRON_IN_PROCESS === 'true') {
-  const lifecycleUrl = `http://127.0.0.1:${PORT}/api/process-abandon-emails`;
-  const runLifecycleSweep = () => {
-    fetch(lifecycleUrl, { headers: { 'cache-control': 'no-cache', 'x-cron-secret': process.env.CRON_SECRET || '' } })
+  const sweep = (path) => {
+    fetch(`http://127.0.0.1:${PORT}${path}`, { headers: { 'cache-control': 'no-cache', 'x-cron-secret': process.env.CRON_SECRET || '' } })
       .then(async (r) => {
         const body = await r.text();
         if (!r.ok) throw new Error(`HTTP ${r.status}: ${body.slice(0, 300)}`);
-        console.log('Lifecycle email sweep:', body.slice(0, 500));
+        console.log(`Lifecycle sweep ${path}:`, body.slice(0, 500));
       })
-      .catch((e) => console.error('Lifecycle email sweep failed:', e.message));
+      .catch((e) => console.error(`Lifecycle sweep ${path} failed:`, e.message));
+  };
+  const runLifecycleSweep = () => {
+    sweep('/api/process-abandon-emails');
+    // Reviews only need labeling/requesting every so often, not every 15 minutes — they ride
+    // the same timer but are cheap no-ops once caught up (both dedupe on their own flag).
+    sweep('/api/mark-verified-reviews');
+    sweep('/api/review-requests');
   };
   setTimeout(runLifecycleSweep, 30 * 1000).unref();
   setInterval(runLifecycleSweep, 15 * 60 * 1000).unref();

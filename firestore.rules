@@ -53,7 +53,12 @@ service cloud.firestore {
     // (matches deleteReviewFromCloud, an admin-dashboard-only action).
     match /reviews/{reviewId} {
       allow read: if true;
-      allow create: if isSignedIn() && request.resource.data.email == request.auth.token.email;
+      // verifiedPurchase is never client-set: a shopper could otherwise just write true on
+      // their own review. Only the admin SDK (the mark-verified-reviews sweep, which checks
+      // the real orders collection) is allowed to set it, via the admin-only update rule below.
+      allow create: if isSignedIn()
+        && request.resource.data.email == request.auth.token.email
+        && !('verifiedPurchase' in request.resource.data);
       allow update: if isAdmin();
       allow delete: if isAdmin();
     }

@@ -631,7 +631,7 @@ function screenProductDetail(id){
         <div class="review-card">
           <div class="avatar">${r.name.slice(0,2).toUpperCase()}</div>
           <div>
-            <div class="flex gap-8" style="align-items:center;"><strong style="font-size:13.5px;">${escapeHtml(r.name)}</strong><span class="stars" style="font-size:11px;">${'★'.repeat(r.rating)}${'☆'.repeat(5-r.rating)}</span></div>
+            <div class="flex gap-8" style="align-items:center;flex-wrap:wrap;"><strong style="font-size:13.5px;">${escapeHtml(r.name)}</strong><span class="stars" style="font-size:11px;">${'★'.repeat(r.rating)}${'☆'.repeat(5-r.rating)}</span>${r.verifiedPurchase?`<span class="chip" style="background:var(--success,#1aa36b);color:#fff;font-size:10.5px;padding:2px 7px;">✓ Verified Purchase</span>`:''}</div>
             <p class="text-2" style="font-size:13px;margin-top:2px;">${escapeHtml(r.text)}</p>
             <span class="small text-2">${r.date}</span>
           </div>
