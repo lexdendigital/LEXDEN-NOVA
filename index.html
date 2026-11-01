@@ -111,7 +111,17 @@ setInterval(function(){if(!document.hidden)fetch(b+'/health',{mode:'no-cors',cac
   }catch(e){ document.documentElement.setAttribute('data-theme', 'light'); }
 })();
 </script>
-<div id="app"><div id="boot-splash" style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--bg,#f5f6fa);color:var(--mut,#5a6378);font:600 14px system-ui,sans-serif;letter-spacing:.08em">LEXDEN NOVA…</div></div>
+<div id="app"><div id="boot-splash" style="min-height:100vh;display:flex;flex-direction:column;gap:14px;align-items:center;justify-content:center;padding:24px;text-align:center;background:var(--bg,#f5f6fa);color:var(--mut,#5a6378);font:600 14px system-ui,sans-serif">
+  <div style="letter-spacing:.08em">LEXDEN NOVA…</div>
+  <p style="max-width:420px;font-weight:400;line-height:1.5;margin:0">Courses, digital products, services and selected gadgets, with an affiliate programme.</p>
+  <nav aria-label="Site sections" style="display:flex;flex-wrap:wrap;gap:6px 14px;justify-content:center;font-weight:600">
+    <a href="product/" style="color:inherit">Products</a>
+    <a href="feed/" style="color:inherit">Feed</a>
+    <a href="affiliate-program/" style="color:inherit">Affiliate programme</a>
+    <a href="legal/" style="color:inherit">Legal</a>
+  </nav>
+  <noscript><p style="font-weight:400">This app needs JavaScript. You can still browse the <a href="product/">product list</a>.</p></noscript>
+</div></div>
 <div id="toast-stack"></div>
 
 <script type="module" src="js/firebase.js"></script>
