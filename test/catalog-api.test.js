@@ -24,3 +24,11 @@ test('catalog API is read-only and public', async () => {
   assert.equal(res.statusCode, 405);
   assert.equal(res.headers['Access-Control-Allow-Origin'], '*');
 });
+
+test('public MCP tools are read-only and registered without any auth-bound tool', () => {
+  const { register } = require('../mcp/publicTools');
+  const names = []; const annotations = [];
+  register({ registerTool(name, cfg) { names.push(name); annotations.push(cfg.annotations); } });
+  assert.deepEqual(names.sort(), ['get_product', 'list_categories', 'search_products']);
+  assert.ok(annotations.every((a) => a.readOnlyHint === true && a.destructiveHint === false));
+});

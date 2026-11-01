@@ -46,6 +46,8 @@ function buildLlmsTxt(catalog) {
     '- [Feed](' + PAGES_BASE + '/feed/)',
     '- [Affiliate programme](' + PAGES_BASE + '/affiliate-program/)',
     '- [Machine-readable catalogue (JSON)](' + PAGES_BASE + '/catalog.json)',
+    '- Live read-only API: https://lexden-nova.onrender.com/api/catalog (search with ?q=, filter with ?type=)',
+    '- Read-only MCP server (no sign-in, no purchase tools): https://lexden-nova.onrender.com/mcp/public',
     '',
     '## Products',
   ];

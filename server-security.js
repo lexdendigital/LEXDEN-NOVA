@@ -22,6 +22,7 @@ function securityHeaders(req, res, next) {
 const DEFAULT_LIMITS = {
   '/api/nova-ai': { max: 30, windowMs: 10 * 60 * 1000 },
   '/api/affiliate-ai': { max: 30, windowMs: 10 * 60 * 1000 },
+  '/mcp/public': { max: 120, windowMs: 60 * 1000 },
   '/api/catalog': { max: 60, windowMs: 60 * 1000 },
   '/api/send-otp': { max: 6, windowMs: 10 * 60 * 1000 },
   '/api/verify-otp': { max: 20, windowMs: 10 * 60 * 1000 },

@@ -24,6 +24,7 @@ const creatorOauth = require('./creatorOauth');
 const creatorTools = require('./creatorTools');
 const { isAdminEmail } = require('../api/affiliate/shared');
 const gptActions = require('./gptActions');
+const publicTools = require('./publicTools');
 
 const CREATOR_INSTRUCTIONS = [
   'LEXDEN NOVA Creator connector. You act ONLY for the signed-in creator; every tool is already scoped to their account.',
@@ -79,6 +80,15 @@ function buildServer(authInfo) {
 
   const uid = authInfo && authInfo.extra ? authInfo.extra.uid : null;
   for (const mod of TOOL_MODULES) mod.register(mcpServer, { email, uid });
+  return mcpServer;
+}
+
+function buildPublicServer() {
+  const mcpServer = new McpServer(
+    { name: 'lexden-nova-catalog', version: '1.0.0' },
+    { capabilities: { tools: {} }, instructions: publicTools.INSTRUCTIONS }
+  );
+  publicTools.register(mcpServer);
   return mcpServer;
 }
 
@@ -185,6 +195,10 @@ function mountMcp(app) {
       creator: (authInfo) => creatorOauth.creatorIdentityCheck(authInfo),
     },
   });
+
+  // ---- Public realm: read-only catalogue for AI assistants. No sign-in, no write tools.
+  const publicNode = toNodeHandler(createMcpHandler(() => buildPublicServer(), { legacy: 'stateless' }));
+  app.all('/mcp/public', (req, res) => { res.setHeader('Access-Control-Allow-Origin', '*'); publicNode(req, res, req.body); });
 
   app.all('/mcp/creator', creatorGate, (req, res) => {
     console.log(`[mcp/creator] authenticated method=${req.method}`);
