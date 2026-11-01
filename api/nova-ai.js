@@ -26,6 +26,7 @@ const MAX_PRODUCT_IMAGES = 8;
 const MAX_FEED_IMAGES = 6;
 const MAX_TOTAL_IMAGES = 12;
 const MAX_IMAGE_BYTES = 3 * 1024 * 1024; // 3MB safety cap per image
+const MAX_CONTEXT_CHARS = 200 * 1000;
 const IMAGE_FETCH_TIMEOUT_MS = 2500; // images are a bonus — never let them slow the answer
 
 const imageCache = new Map(); // url -> {mime, base64}
@@ -37,8 +38,20 @@ function arrayBufferToBase64(buffer) {
   return Buffer.from(buffer).toString("base64");
 }
 
+// The shopper's browser sends the catalogue context, so every image URL in it is untrusted.
+// Only fetch https images from the hosts the store actually uses; anything else (internal
+// addresses, cloud-metadata URLs, random sites) is ignored instead of being fetched.
+const IMAGE_HOST_ALLOWLIST = [/(^|\.)cloudinary\.com$/i, /(^|\.)cjdropshipping\.com$/i, /(^|\.)unsplash\.com$/i, /(^|\.)googleusercontent\.com$/i];
+function isAllowedImageUrl(url) {
+  try {
+    const u = new URL(String(url));
+    if (u.protocol !== "https:" || u.username || u.password || u.port) return false;
+    return IMAGE_HOST_ALLOWLIST.some((re) => re.test(u.hostname));
+  } catch { return false; }
+}
+
 async function fetchImageInline(url) {
-  if (!url) return null;
+  if (!url || !isAllowedImageUrl(url)) return null;
   const cached = imageCache.get(url);
   if (cached) return cached;
 
@@ -149,6 +162,11 @@ module.exports = async function handler(req, res) {
   if (!message || typeof message !== "string") {
     return res.status(400).json({ text: "No message provided." });
   }
+  // The context is built by the browser; cap its size so this endpoint cannot be used to
+  // push megabytes of arbitrary text through the Gemini quota.
+  if (JSON.stringify(context || {}).length > MAX_CONTEXT_CHARS) {
+    return res.status(413).json({ text: "Request too large." });
+  }
 
   const keys = getApiKeys();
   if (keys.length === 0) {
@@ -190,3 +208,5 @@ module.exports = async function handler(req, res) {
     return res.status(200).json({ fallback: true });
   }
 };
+
+module.exports.isAllowedImageUrl = isAllowedImageUrl;

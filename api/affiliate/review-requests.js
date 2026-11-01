@@ -72,6 +72,7 @@ async function handler(req, res) {
         templateKey: 'review_request',
         to: { email: o.email, name: (o.deliveryName || '').trim() || undefined },
         params: {
+          FIRSTNAME: ((o.deliveryName || '').trim().split(/\s+/)[0]) || String(o.email).split('@')[0],
           product_name: o.productName || 'your recent purchase',
           product_id: o.productId,
           review_url: 'https://lexdendigital.github.io/LEXDEN-NOVA/index.html?product=' + encodeURIComponent(o.productId) + '#product/' + encodeURIComponent(o.productId),
