@@ -1,26 +1,19 @@
 rules_version = '2';
 
-// LEXDEN NOVA v2.0.1 — Firestore security rules.
+// LEXDEN NOVA — Firestore security rules.
 //
-// v2.0.1 CHANGE: the previous firestore.rules.txt only defined the
-// "orders" collection and explicitly said other collections needed to be
-// merged in by hand. This file was built by reading every
-// collection(fbDb, "...") / doc(fbDb, "...") call in index.html and
-// writing a rule for each one based on how the app actually reads/writes
-// it — nothing here is guessed. Deploy with:
-//   firebase deploy --only firestore:rules
-//
-// If you've added collections since this was generated, they are NOT
-// covered — anything not matched below falls through to the final
-// catch-all (deny), so a missed collection fails safely (no access)
-// rather than silently open. Add a matching block for anything new.
+// Client-facing collections are listed explicitly below. Collections used
+// only by the Render backend remain denied to browser SDKs. Unmatched paths
+// are also denied by Firestore.
 
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Must exactly match ADMIN_EMAIL in index.html.
+    // Admin access requires the fixed administrator identity and a verified email.
     function isAdmin() {
-      return request.auth != null && request.auth.token.email == "ruthanselem2@gmail.com";
+      return request.auth != null
+        && request.auth.token.email == "ruthanselem2@gmail.com"
+        && request.auth.token.email_verified == true;
     }
     function isSignedIn() {
       return request.auth != null;
@@ -33,11 +26,8 @@ service cloud.firestore {
 
     // ---- catalog/{products|categories|settings} ----
     // Admin-authored storefront data (product list, categories, site
-    // settings incl. exchange rates). Every shopper's browser reads this
-    // on load, and it's ALSO read publicly (no auth) by the Vercel
-    // link-preview microsite (api/feed.js, api/product.js,
-    // api/verify-paystack.js) via Firestore's REST API — so read must
-    // stay open with no auth requirement. Only admin writes it.
+    // settings incl. exchange rates). The storefront and public product/feed
+    // previews need unauthenticated reads. Only the verified admin may write.
     match /catalog/{docId} {
       allow read: if true;
       allow write: if isAdmin();
@@ -64,7 +54,7 @@ service cloud.firestore {
     }
 
     // ---- orders/{reference} ----
-    // Written ONLY by the /api/verify-paystack serverless function via
+    // Written ONLY by the Render /api/verify-paystack route via
     // the Firebase Admin SDK — Admin SDK calls bypass these rules
     // entirely, so there is intentionally no create/update clause for
     // regular clients. A shopper can read their own orders; the admin
@@ -83,10 +73,6 @@ service cloud.firestore {
     // generalAffiliateConsumed is intentionally NOT in either allow-list:
     // verify-paystack.js owns that commission-consumption marker through
     // the Firebase Admin SDK, and Admin SDK writes bypass client Rules.
-    //
-    // affiliateAttributions remains client-writable for compatibility with
-    // affiliate/index.html's existing localStorage -> profile merge. No
-    // server payout/commission reader of that field exists in this version.
     //
     // Existing profile code uses set(..., {merge:true}) and re-submits some
     // unchanged identity/metadata fields. diff().affectedKeys() evaluates
@@ -115,8 +101,7 @@ service cloud.firestore {
           'profileSetupDone',
           'provider',
           'updatedAt',
-          'createdAt',
-          'affiliateAttributions'
+          'createdAt'
         ]);
       }
 
@@ -143,8 +128,7 @@ service cloud.firestore {
           'profileSetupDone',
           'provider',
           'updatedAt',
-          'createdAt',
-          'affiliateAttributions'
+          'createdAt'
         ]);
       }
 
@@ -154,9 +138,7 @@ service cloud.firestore {
             || (('email' in request.auth.token)
               && request.resource.data.email == request.auth.token.email))
           && (!('provider' in request.resource.data)
-            || request.resource.data.provider in ['google', 'password'])
-          && (!('affiliateAttributions' in request.resource.data)
-            || request.resource.data.affiliateAttributions is map);
+            || request.resource.data.provider in ['google', 'password']);
       }
 
       function userUpdateIdentityValid(uid) {
@@ -174,16 +156,12 @@ service cloud.firestore {
           && (!affected.hasAny(['provider'])
             || (!('provider' in resource.data)
               && ('provider' in request.resource.data)
-              && request.resource.data.provider in ['google', 'password']))
-          && (!affected.hasAny(['affiliateAttributions'])
-            || (('affiliateAttributions' in request.resource.data)
-              && request.resource.data.affiliateAttributions is map));
+              && request.resource.data.provider in ['google', 'password']));
       }
 
       allow read: if isOwner(uid) || isAdmin();
 
-      // Creation may be either the normal full profile upsert or the
-      // affiliate page's narrow merge if it wins an initial-write race.
+      // Profile creation is limited to the authenticated owner's UID.
       // Identity fields are optional, but when present they must agree
       // with Firebase Authentication.
       allow create: if isOwner(uid)
@@ -343,7 +321,7 @@ service cloud.firestore {
 
     // ---- cjSyncLogs/{id} ----
     // CJ Dropshipping integration audit trail (README §28) — written only
-    // by the Vercel cj-*.js routes via the Admin SDK (writeSyncLog() in
+    // by the Render cj-*.js routes via the Admin SDK (writeSyncLog() in
     // api/cj-shared.js), which bypasses these rules entirely. Readable
     // only by the admin (Admin → CJ Dropshipping → Sync Logs). No client
     // write path exists or should ever exist here.
@@ -362,16 +340,16 @@ service cloud.firestore {
       allow write: if false;
     }
 
-    // ---- cjAuth/{doc} ----
-    // Cached CJ access/refresh tokens (api/cj-shared.js). Deliberately has
-    // NO match block at all, anywhere in this file — every other
-    // collection above has an explicit rule, even the ones that end up
-    // admin-only, so its total absence here is intentional and load-
-    // bearing: it falls through to Firestore's default deny for BOTH read
-    // and write from every client SDK, admin included, with no rule that
-    // could ever be loosened by mistake. Only the Admin SDK (which
-    // bypasses rules entirely) can ever touch it — see cj-shared.js's own
-    // comment on saveToken()/getValidToken().
+    // Credentials, OTP state, rate limits and fulfillment quotes are backend-only.
+    // The Render API accesses these paths through the Firebase Admin SDK.
+    match /cjAuth/{id} { allow read, write: if false; }
+    match /email_otps/{id} { allow read, write: if false; }
+    match /otp_ip_limits/{id} { allow read, write: if false; }
+    match /shippingQuotes/{id} { allow read, write: if false; }
+    match /storeFulfillmentJobs/{id} { allow read, write: if false; }
+
+    // cjAuth is explicitly denied above. Cached CJ access/refresh tokens are
+    // accessed only by the Render backend through the Admin SDK.
 
     // ---- NOVA AFFILIATE PROGRAM (mega-update) ----
     // Settings for the program (commission %, fee %, min withdrawal,
@@ -379,24 +357,13 @@ service cloud.firestore {
     // doc above — no new rule needed for those, the catalog/{docId} block
     // already covers it.
 
-    // affiliates/{uid} — an affiliate's own account (balances, payout
-    // details, status). Only the backend (Admin SDK, bypasses rules) ever
-    // writes balances or changes status — a client can only ever create
-    // their OWN application doc, pre-approval, with zero balance fields,
-    // matching the onboarding flow in affiliate/index.html exactly.
+    // Affiliate account records contain balances, payout details and status.
+    // Every mutation is performed by the Render backend through the Firebase
+    // Admin SDK. No browser client, including the admin dashboard, may create,
+    // update or delete these records directly.
     match /affiliates/{affiliateId} {
       allow read: if isOwner(affiliateId) || isAdmin();
-      // FIX (mega-fix batch #2): signup now goes through
-      // POST /api/affiliate-signup (Admin SDK, bypasses these rules)
-      // instead of a direct client write — see api/affiliate/signup.js.
-      // That endpoint is what decides active vs pending (auto-approve,
-      // with a pending fallback if it can't). Client-side creation is
-      // fully closed off here; this is what makes "signup breaks because
-      // the published rules don't match this version's expected shape"
-      // structurally impossible going forward, instead of something that
-      // has to be kept in sync by hand on every change to the flow.
-      allow create: if false;
-      allow update, delete: if isAdmin();
+      allow write: if false;
     }
 
     // affiliateCommissions/{reference} — one per order that earned a
