@@ -403,7 +403,6 @@ auth.onAuthStateChanged(async (user)=>{
       'Timed out loading your profile — the free server may be waking up from sleep (can take up to ~50s the first time).'
     );
     state.userDoc = userSnap.exists ? userSnap.data() : null;
-    await mergePendingAttributionsToProfile(user.uid);
 
     const affSnap = await withTimeout(
       db.collection('affiliates').doc(user.uid).get(),
@@ -454,18 +453,6 @@ function renderAccountLoadError(code, message){
   document.getElementById('btnRetryLoad').onclick = ()=>{ location.reload(); };
 }
 
-
-async function mergePendingAttributionsToProfile(uid){
-  const pending = {};
-  for(let i=0;i<localStorage.length;i++){
-    const k = localStorage.key(i);
-    if(k && k.indexOf('nova_aff_')===0){
-      try{ pending[k]=JSON.parse(localStorage.getItem(k)); }catch(e){}
-    }
-  }
-  if(Object.keys(pending).length===0) return;
-  try{ await db.collection('users').doc(uid).set({affiliateAttributions: pending}, {merge:true}); }catch(e){}
-}
 
 async function loadDashboardData(){
   // Products live as a `list` array inside catalog/products (same doc
