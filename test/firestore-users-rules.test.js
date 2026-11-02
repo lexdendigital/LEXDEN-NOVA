@@ -21,6 +21,7 @@ if (!RUN_FIRESTORE_RULE_TESTS) {
     getDoc,
     setDoc,
     updateDoc,
+    deleteDoc,
   } = require('firebase/firestore');
 
   const PROJECT_ID = 'demo-lexden-nova-v301';
@@ -55,13 +56,28 @@ function normalProfile(uid = 'alice', email = 'alice@example.com') {
   };
 }
 
-function authedDb(uid = 'alice', email = 'alice@example.com') {
-  return testEnv.authenticatedContext(uid, { email }).firestore();
+function authedDb(uid = 'alice', email = 'alice@example.com', claims = {}) {
+  return testEnv.authenticatedContext(uid, { email, ...claims }).firestore();
+}
+
+function adminDb(emailVerified = true) {
+  return authedDb('admin-user', 'ruthanselem2@gmail.com', { email_verified: emailVerified });
 }
 
 async function seedUser(uid, data) {
   await testEnv.withSecurityRulesDisabled(async (context) => {
     await setDoc(doc(context.firestore(), 'users', uid), data);
+  });
+}
+
+async function seedAffiliate(uid, data = {}) {
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await setDoc(doc(context.firestore(), 'affiliates', uid), {
+      status: 'active',
+      balanceAvailable: 0,
+      totalEarned: 0,
+      ...data,
+    });
   });
 }
 
@@ -187,7 +203,7 @@ test('J normal merge preserves existing server-owned state', async () => {
   assert.equal(snap.data().name, 'Alice Merge Edit');
 });
 
-test('K affiliateAttributions remains compatible client-owned legacy state', async () => {
+test('K browser clients cannot write affiliateAttributions into shopper profiles', async () => {
   await seedUser('alice', normalProfile());
   const db = authedDb();
 
@@ -195,14 +211,58 @@ test('K affiliateAttributions remains compatible client-owned legacy state', asy
     nova_aff_general: { ref: 'affiliate-123', ts: 1793307600000 },
   };
 
-  await assertSucceeds(setDoc(
+  await assertFails(setDoc(
     doc(db, 'users', 'alice'),
     { affiliateAttributions: pending },
     { merge: true },
   ));
+});
 
-  const snap = await assertSucceeds(getDoc(doc(db, 'users', 'alice')));
-  assert.deepEqual(snap.data().affiliateAttributions, pending);
+test('L admin access requires the designated account and a verified email', async () => {
+  const unverifiedAdmin = adminDb(false);
+  const verifiedAdmin = adminDb(true);
+
+  await assertFails(setDoc(doc(unverifiedAdmin, 'catalog', 'settings'), { content: {} }));
+  await assertSucceeds(setDoc(doc(verifiedAdmin, 'catalog', 'settings'), { content: {} }));
+});
+
+test('M no browser client, including admin, can mutate affiliate account records', async () => {
+  await seedAffiliate('alice', { payoutAccount: { accountNumber: '1234567890' } });
+  const owner = authedDb();
+  const verifiedAdmin = adminDb(true);
+
+  await assertSucceeds(getDoc(doc(owner, 'affiliates', 'alice')));
+  await assertSucceeds(getDoc(doc(verifiedAdmin, 'affiliates', 'alice')));
+
+  await assertFails(setDoc(doc(owner, 'affiliates', 'alice'), { balanceAvailable: 999999 }, { merge: true }));
+  await assertFails(updateDoc(doc(owner, 'affiliates', 'alice'), { balanceAvailable: 999999 }));
+  await assertFails(deleteDoc(doc(owner, 'affiliates', 'alice')));
+
+  await assertFails(setDoc(doc(verifiedAdmin, 'affiliates', 'bob'), { balanceAvailable: 999999 }));
+  await assertFails(updateDoc(doc(verifiedAdmin, 'affiliates', 'alice'), { balanceAvailable: 999999 }));
+  await assertFails(deleteDoc(doc(verifiedAdmin, 'affiliates', 'alice')));
+});
+
+test('N server-only collections reject reads and writes from browser SDKs', async () => {
+  const client = authedDb();
+  const serverOnly = [
+    'cjAuth',
+    'email_otps',
+    'otp_ip_limits',
+    'shippingQuotes',
+    'storeFulfillmentJobs',
+  ];
+
+  for (const collectionName of serverOnly) {
+    const ref = doc(client, collectionName, 'rules-test');
+    await assertFails(getDoc(ref));
+    await assertFails(setDoc(ref, { clientWrite: true }));
+  }
+});
+
+test('O affiliate dashboard does not attempt the removed profile attribution write', () => {
+  const affiliateHtml = fs.readFileSync(path.join(__dirname, '..', 'affiliate', 'index.html'), 'utf8');
+  assert.doesNotMatch(affiliateHtml, /affiliateAttributions|mergePendingAttributionsToProfile/);
 });
 
 test('additional: createdAt cannot be rewritten after it exists', async () => {
