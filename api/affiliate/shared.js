@@ -104,14 +104,16 @@ function setCors(res) {
 // the exact rule you set: request today -> next eligible request is after
 // 7 days that count, with Sundays not counted toward those 7 (you're at
 // church, no processing happens that day anyway). Returns a Date.
+const NG_OFFSET_MS = 60 * 60 * 1000; // Nigeria is UTC+1 all year (no daylight saving)
 function addNonSundayDays(from, n) {
-  const d = new Date(from.getTime());
+  let t = from.getTime();
   let added = 0;
   while (added < n) {
-    d.setDate(d.getDate() + 1);
-    if (d.getDay() !== 0) added++; // 0 = Sunday
+    t += 24 * 60 * 60 * 1000;
+    // Decide "is it Sunday" in Nigerian time, not the server's UTC.
+    if (new Date(t + NG_OFFSET_MS).getUTCDay() !== 0) added++;
   }
-  return d;
+  return new Date(t);
 }
 
 // Same Firebase Admin app as getDb(), just handed back as the Auth client

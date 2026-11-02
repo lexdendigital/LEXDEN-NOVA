@@ -243,6 +243,33 @@ async function attributeAffiliateCommission(db, { reference, buyerUid, productId
   const affSnap = await db.collection('affiliates').doc(affiliateRef).get();
   if (!affSnap.exists || affSnap.data().status !== 'active') return;
 
+  // ---- Self-referral guard: an affiliate must not earn commission on their own (or a sock-puppet's) purchase.
+  {
+    const aff = affSnap.data();
+    const digits = (v) => String(v || '').replace(/\D/g, '').slice(-10);
+    const buyerSnap = await db.collection('users').doc(buyerUid).get();
+    const buyer = buyerSnap.exists ? buyerSnap.data() : {};
+    const buyerEmail = String(buyer.email || '').trim().toLowerCase();
+    const affEmail = String(aff.email || '').trim().toLowerCase();
+    let blockReason = null;
+    if (buyerEmail && affEmail && buyerEmail === affEmail) blockReason = 'SAME_EMAIL';
+    if (!blockReason && digits(buyer.phone) && digits(buyer.phone) === digits(aff.whatsapp)) blockReason = 'SAME_PHONE';
+    const affAcct = aff.payoutAccount && String(aff.payoutAccount.accountNumber || '').trim();
+    if (!blockReason && affAcct) {
+      const buyerAffSnap = await db.collection('affiliates').doc(buyerUid).get();
+      const buyerAcct = buyerAffSnap.exists && buyerAffSnap.data().payoutAccount && String(buyerAffSnap.data().payoutAccount.accountNumber || '').trim();
+      if (buyerAcct && buyerAcct === affAcct) blockReason = 'SAME_PAYOUT_ACCOUNT';
+    }
+    if (blockReason) {
+      console.warn('affiliate commission blocked:', blockReason, { reference, affiliateRef, buyerUid });
+      await db.collection('affiliateFlags').add({
+        type: 'SELF_REFERRAL_BLOCKED', reason: blockReason, reference, affiliateId: affiliateRef, buyerId: buyerUid,
+        productId: productId || null, createdAt: FieldValue.serverTimestamp(),
+      }).catch(() => {});
+      return;
+    }
+  }
+
   // General-link commissions only ever pay out ONCE per buyer (first
   // product bought after tapping the general store link) — authoritative
   // check lives server-side (users/{uid}.generalAffiliateConsumed) so a
@@ -262,8 +289,30 @@ async function attributeAffiliateCommission(db, { reference, buyerUid, productId
   const content = (settingsDoc && settingsDoc.content) || {};
   const defaultPct = typeof content.affiliateCommissionDefaultPct === 'number' ? content.affiliateCommissionDefaultPct : 10;
   const pct = productInfo.commissionPct != null ? productInfo.commissionPct : defaultPct;
-  const commissionAmount = Math.round(amountMajor * pct) / 100;
-  if (commissionAmount <= 0) return;
+  const commissionInSaleCurrency = Math.round(amountMajor * pct) / 100;
+  if (commissionInSaleCurrency <= 0) return;
+
+  // Affiliate balances and withdrawals are NATURAL NAIRA. Convert if the buyer paid in another currency.
+  // content.exchangeRates is "units of currency per 1 USD" (rates.USD = 1).
+  const rates = (content && content.exchangeRates) || {};
+  let fxRate = 1;
+  if (currency !== 'NGN') {
+    const ngnPerUsd = Number(rates.NGN), curPerUsd = Number(rates[currency]);
+    fxRate = (ngnPerUsd > 0 && curPerUsd > 0) ? ngnPerUsd / curPerUsd : null;
+  }
+  if (fxRate === null) {
+    // No usable rate: do NOT credit a wrong amount. Save the commission for the admin to resolve.
+    console.error('affiliate commission needs review: no exchange rate for', currency, reference);
+    await db.collection('affiliateCommissions').doc(reference).set({
+      affiliateId: affiliateRef, buyerId: buyerUid, productId, productName: productName || null,
+      variantId: variantId || null, variantName: productInfo.variantName, orderId: reference,
+      saleAmount: amountMajor, currency, commissionPct: pct,
+      commissionAmount: 0, commissionAmountSaleCurrency: commissionInSaleCurrency,
+      status: 'needs_review', createdAt: FieldValue.serverTimestamp(),
+    }).catch(() => {});
+    return;
+  }
+  const commissionAmount = Math.round(commissionInSaleCurrency * fxRate * 100) / 100; // NGN
 
   try {
     // Doc ID = reference, same idempotency guarantee as the orders/{reference}
@@ -283,6 +332,9 @@ async function attributeAffiliateCommission(db, { reference, buyerUid, productId
       currency,
       commissionPct: pct,
       commissionAmount,
+      commissionCurrency: 'NGN',
+      commissionAmountSaleCurrency: commissionInSaleCurrency,
+      fxRate,
       status: 'available',
       createdAt: FieldValue.serverTimestamp(),
     });
@@ -322,7 +374,7 @@ async function attributeAffiliateCommission(db, { reference, buyerUid, productId
         params: {
           FIRSTNAME: displayName.split(' ')[0] || undefined,
           product_name: productName || 'a LEXDEN NOVA product',
-          commission: String(currency || '') + ' ' + commissionAmount.toLocaleString('en-NG'),
+          commission: '₦ ' + commissionAmount.toLocaleString('en-NG'),
           affiliate_url: 'https://lexdendigital.github.io/LEXDEN-NOVA/affiliate/'
         }
       });

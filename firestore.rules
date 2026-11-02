@@ -390,6 +390,12 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // affiliateFlags/{id} — suspicious-activity records written by the backend (Admin SDK). Admin read only.
+    match /affiliateFlags/{flagId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
     // affiliateLinkStats/{ref_pid} — the fast per-link {clicks, sales}
     // counters shown on an affiliate's own My Store tab. Doc carries a
     // `ref` field (the owning affiliate's uid) so ownership can be

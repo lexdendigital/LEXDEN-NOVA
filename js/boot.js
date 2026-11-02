@@ -54,7 +54,9 @@ function applyBootQueryString(){
   const productId = params.get('product');
   const feedId = params.get('feed') || params.get('post');
   const searchTerm = params.get('s');
-  if(productId && findProduct(productId)){
+  if(productId){
+    // No findProduct() guard: at boot the Firestore catalog may not have loaded yet, and the old
+    // guard silently dropped the deep link. The product screen shows a loading state until it arrives.
     location.hash = '#product/'+productId;
   } else if(feedId && DB.feed.find(x=>x.id===feedId)){
     location.hash = '#feed/'+feedId;

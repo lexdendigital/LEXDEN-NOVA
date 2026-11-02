@@ -125,6 +125,8 @@ button{font-family:inherit;}
 .status-approved{background:rgba(0,212,255,.15);color:var(--cyber);}
 .status-paid{background:rgba(46,230,166,.15);color:var(--ok);}
 .status-rejected{background:rgba(255,92,115,.15);color:var(--danger);}
+.status-processing{background:rgba(0,212,255,.15);color:var(--cyber);}
+.status-needs_review{background:rgba(212,175,55,.15);color:var(--gold);}
 
 .invite{border-radius:var(--radius);padding:18px;background:linear-gradient(135deg,rgba(0,212,255,.12),rgba(212,175,55,.10));
   border:1px solid rgba(255,255,255,.1);margin-bottom:14px;}
@@ -709,9 +711,12 @@ async function submitOnboarding(){
 
 function renderPendingApproval(){
   const reason = (state.affiliate||{}).autoApproveReason;
-  const reasonText = reason === 'DUPLICATE_PAYOUT_ACCOUNT'
-    ? 'Your payout account is already linked to another affiliate account, so this needs a quick manual check.'
-    : 'Applications are approved automatically — this one needs a quick manual look first.';
+  const reasonMap = {
+    DUPLICATE_PAYOUT_ACCOUNT: 'Your payout account is already linked to another affiliate account, so this needs a quick manual check.',
+    UNVERIFIED_PAYOUT_ACCOUNT: 'We could not auto-verify your bank account, so we will confirm the account name before approving you.',
+    MISSING_EMAIL: 'Your account has no email address, so we need to check your details before approving you.',
+  };
+  const reasonText = reasonMap[reason] || 'Applications are approved automatically — this one needs a quick manual look first.';
   root().innerHTML = `
   <div class="screen loader" style="padding-top:0;">
     <div class="pill pending" style="margin-bottom:10px;">PENDING APPROVAL</div>
@@ -819,7 +824,7 @@ function renderMiniChart(daily){
 
 function screenStore(){
   const uid = state.user.uid;
-  const generalUrl = `${API_BASE}/go/${uid}`;
+  const generalUrl = `${API_BASE}/go/${encodeURIComponent(uid)}`;
   const generalStats = state.linkStats[`${uid}_general`] || {clicks:0,sales:0};
   return `
   <div class="screen">
@@ -835,7 +840,7 @@ function screenStore(){
       state.products.map(p=>{
         const stats = state.linkStats[`${uid}_${p.id}`] || {clicks:0,sales:0};
         const pct = p.affiliateCommissionPct ?? state.settings.commissionDefaultPct;
-        return linkRow(p.name||p.title||'Product', `${API_BASE}/go/${uid}/${p.id}`, `${pct}% commission`, stats);
+        return linkRow(p.name||p.title||'Product', `${API_BASE}/go/${encodeURIComponent(uid)}/${encodeURIComponent(p.id)}`, `${pct}% commission`, stats);
       }).join('')}
     </div>
   </div>`;
@@ -843,9 +848,9 @@ function screenStore(){
 function linkRow(name, url, sub, stats){
   const conv = stats.clicks>0 ? ((stats.sales/stats.clicks)*100).toFixed(1) : '0';
   return `
-  <div class="link-row" data-url="${escapeHtml(url)}">
+  <div class="link-row" data-url="${escapeHtml(url)}" data-name="${escapeHtml(name)}">
     <div class="top-row">
-      <div class="meta"><div class="pname">${escapeHtml(name)}</div><div class="purl">${sub || url}</div></div>
+      <div class="meta"><div class="pname">${escapeHtml(name)}</div>${sub ? `<div class="purl">${escapeHtml(sub)}</div>` : ''}<div class="purl">${escapeHtml(url)}</div></div>
       <button class="icon-btn btnCopy" title="Copy">${iconCopy()}</button>
       <button class="icon-btn btnShare" title="Share">${iconShare()}</button>
     </div>
@@ -963,13 +968,15 @@ function screenCommunity(){
 /* ---- shared event wiring ---- */
 function wireScreenEvents(){
   document.querySelectorAll('.btnCopy').forEach(b=>{
-    b.onclick = ()=>{ const url = b.closest('.link-row').dataset.url; navigator.clipboard && navigator.clipboard.writeText(url); toast('Link copied'); };
+    b.onclick = async ()=>{ const url = b.closest('.link-row').dataset.url; const ok = await copyText(url); toast(ok ? 'Link copied' : 'Press and hold the link to copy it'); };
   });
   document.querySelectorAll('.btnShare').forEach(b=>{
-    b.onclick = ()=>{
-      const url = b.closest('.link-row').dataset.url;
-      if(navigator.share){ navigator.share({url, title:'Check this out on LEXDEN NOVA'}); }
-      else { navigator.clipboard && navigator.clipboard.writeText(url); toast('Link copied'); }
+    b.onclick = async ()=>{
+      const row = b.closest('.link-row');
+      const url = row.dataset.url, name = row.dataset.name || 'LEXDEN NOVA';
+      const text = 'Check out ' + name + ' on LEXDEN NOVA: ' + url;
+      if(navigator.share){ try{ await navigator.share({ title:'LEXDEN NOVA', text, url }); }catch(e){ /* user closed the share sheet */ } }
+      else { const ok = await copyText(text); toast(ok ? 'Link copied' : 'Press and hold the link to copy it'); }
     };
   });
   const wdAmount = document.getElementById('wdAmount');
@@ -1123,6 +1130,14 @@ function iconShare(){return `<svg viewBox="0 0 24 24" width="16" height="16" fil
 /* ============================================================
    7. HELPERS
    ============================================================ */
+async function copyText(text){
+  try{ if(navigator.clipboard && navigator.clipboard.writeText){ await navigator.clipboard.writeText(text); return true; } }catch(e){}
+  try{ // fallback for in-app browsers where the Clipboard API is missing
+    const ta = document.createElement('textarea'); ta.value = text; ta.setAttribute('readonly','');
+    ta.style.position='fixed'; ta.style.opacity='0'; document.body.appendChild(ta); ta.select();
+    const ok = document.execCommand('copy'); ta.remove(); return !!ok;
+  }catch(e){ return false; }
+}
 function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
 function fmtDate(ts){
   if(!ts) return '';
@@ -1133,10 +1148,10 @@ function fmtDate(ts){
 // so the client-shown cooldown date always matches what the backend will
 // actually enforce.
 function addNonSundayDays(from, n){
-  const d = new Date(from.getTime());
-  let added = 0;
-  while(added < n){ d.setDate(d.getDate()+1); if(d.getDay()!==0) added++; }
-  return d;
+  const NG = 60*60*1000; // Nigeria is UTC+1 all year — must match api/affiliate/shared.js exactly
+  let t = from.getTime(), added = 0;
+  while(added < n){ t += 24*60*60*1000; if(new Date(t + NG).getUTCDay() !== 0) added++; }
+  return new Date(t);
 }
 
 })();

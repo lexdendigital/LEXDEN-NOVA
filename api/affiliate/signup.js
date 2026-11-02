@@ -58,14 +58,21 @@ module.exports = async function handler(req, res) {
   const targetReach = String(body.targetReach || '').trim();
   const payoutAccount = body.payoutAccount || {};
   const bank = String(payoutAccount.bank || '').trim();
-  const accountNumber = String(payoutAccount.accountNumber || '').trim();
+  const accountNumber = String(payoutAccount.accountNumber || '').replace(/\D/g, '');
   const accountName = String(payoutAccount.accountName || '').trim();
 
   if (!displayName || !whatsapp || !bank || !accountNumber || !accountName) {
     return res.status(400).json({ ok: false, code: 'BAD_INPUT', error: 'Please fill in every field.' });
   }
+  if (accountNumber.length !== 10) {
+    return res.status(400).json({ ok: false, code: 'BAD_ACCOUNT_NUMBER', error: 'Account number must be exactly 10 digits.' });
+  }
 
   const db = getDb();
+  let effectiveEmail = email;
+  if (!effectiveEmail) {
+    try { const u = await db.collection('users').doc(uid).get(); effectiveEmail = String((u.exists && u.data().email) || '').trim(); } catch (e) { /* non-fatal */ }
+  }
 
   // Already an affiliate? Don't clobber an existing record.
   const existing = await db.collection('affiliates').doc(uid).get();
@@ -77,22 +84,28 @@ module.exports = async function handler(req, res) {
   // auto-approval is deliberately withheld for.
   let autoApprove = { ok: true };
   try {
+    // Match on the account NUMBER alone: a manually typed bank has an empty bankCode, and
+    // spelling variants of a bank name must not let the same account through.
     const dupeSnap = await db.collection('affiliates')
       .where('payoutAccount.accountNumber', '==', accountNumber)
-      .where('payoutAccount.bankCode', '==', payoutAccount.bankCode || '')
-      .limit(1)
+      .limit(5)
       .get();
-    if (!dupeSnap.empty && dupeSnap.docs[0].id !== uid) {
-      autoApprove = { ok: false, reason: 'DUPLICATE_PAYOUT_ACCOUNT', detail: `Same account number already registered to affiliate ${dupeSnap.docs[0].id}.` };
+    const other = dupeSnap.docs.find((d) => d.id !== uid);
+    if (other) {
+      autoApprove = { ok: false, reason: 'DUPLICATE_PAYOUT_ACCOUNT', detail: `Same account number already registered to affiliate ${other.id}.` };
     }
   } catch (e) {
-    // A failed dupe-check must never block a legitimate signup outright —
-    // fall through to auto-approve; this is a nice-to-have check, not a gate.
     console.error('affiliate-signup dupe check failed (non-fatal):', e.message);
+  }
+  if (autoApprove.ok && payoutAccount.needsManualVerification) {
+    autoApprove = { ok: false, reason: 'UNVERIFIED_PAYOUT_ACCOUNT', detail: 'Bank account could not be auto-verified; admin must check the name before approval.' };
+  }
+  if (autoApprove.ok && !effectiveEmail) {
+    autoApprove = { ok: false, reason: 'MISSING_EMAIL', detail: 'No email on the account, so payout notices cannot be delivered.' };
   }
 
   const baseDoc = {
-    displayName, email, whatsapp,
+    displayName, email: effectiveEmail, whatsapp,
     payoutAccount: { bank, bankCode: payoutAccount.bankCode || '', accountNumber, accountName, needsManualVerification: !!payoutAccount.needsManualVerification },
     targetReach,
     balanceAvailable: 0, totalEarned: 0, totalWithdrawn: 0,
@@ -104,9 +117,9 @@ module.exports = async function handler(req, res) {
     const doc = { ...baseDoc, status, autoApprove };
     if (status === 'active') doc.approvedAt = FieldValue.serverTimestamp();
     await db.collection('affiliates').doc(uid).set(doc);
-    queueEmailBackground({
+    if (effectiveEmail) queueEmailBackground({
       templateKey: 'affiliate_welcome_status',
-      to: { email, name: displayName },
+      to: { email: effectiveEmail, name: displayName },
       params: {
         FIRSTNAME: displayName.split(' ')[0] || undefined,
         status,
@@ -123,9 +136,9 @@ module.exports = async function handler(req, res) {
         ...baseDoc, status: 'pending',
         autoApprove: { ok: false, reason: 'WRITE_FAILED', detail: e.message },
       });
-      queueEmailBackground({
+      if (effectiveEmail) queueEmailBackground({
         templateKey: 'affiliate_welcome_status',
-        to: { email, name: displayName },
+        to: { email: effectiveEmail, name: displayName },
         params: {
           FIRSTNAME: displayName.split(' ')[0] || undefined,
           status: 'pending',

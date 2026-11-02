@@ -52,8 +52,15 @@ async function suspendAffiliate({ affiliateId }) {
 async function approveWithdrawal({ withdrawalId }) {
   if (!withdrawalId) throw Object.assign(new Error('Missing withdrawalId.'), { status: 400 });
   const db = getDb();
-  await db.collection('affiliateWithdrawals').doc(withdrawalId)
-    .update({ status: 'approved', decidedAt: FieldValue.serverTimestamp() });
+  const wdRef = db.collection('affiliateWithdrawals').doc(withdrawalId);
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(wdRef);
+    if (!snap.exists) throw Object.assign(new Error('Withdrawal not found.'), { status: 404 });
+    const status = snap.data().status;
+    // A rejected withdrawal has ALREADY been refunded to the balance; approving it would pay twice.
+    if (status !== 'pending') throw Object.assign(new Error(`Only pending withdrawals can be approved (this one is "${status}").`), { status: 400 });
+    tx.update(wdRef, { status: 'approved', decidedAt: FieldValue.serverTimestamp() });
+  });
   return { ok: true };
 }
 
@@ -65,6 +72,11 @@ async function markWithdrawalPaid({ withdrawalId }) {
     const wdSnap = await tx.get(wdRef);
     if (!wdSnap.exists) throw Object.assign(new Error('Withdrawal not found.'), { status: 404 });
     const wd = wdSnap.data();
+    // Never on rejected (funds were refunded) or already-paid (would double-count totalWithdrawn).
+    // 'processing' is allowed so an admin can finish a payout that got stuck after money moved.
+    if (!['pending', 'approved', 'processing'].includes(wd.status)) {
+      throw Object.assign(new Error(`Cannot mark as paid: this withdrawal is "${wd.status}".`), { status: 400 });
+    }
     tx.update(wdRef, { status: 'paid', decidedAt: FieldValue.serverTimestamp() });
     tx.update(db.collection('affiliates').doc(wd.affiliateId), {
       totalWithdrawn: FieldValue.increment(wd.amountRequested),
@@ -104,44 +116,58 @@ async function payWithdrawalViaPaystack({ withdrawalId }) {
   if (!withdrawalId) throw Object.assign(new Error('Missing withdrawalId.'), { status: 400 });
   const db = getDb();
   const wdRef = db.collection('affiliateWithdrawals').doc(withdrawalId);
-  const wdSnap = await wdRef.get();
-  if (!wdSnap.exists) throw Object.assign(new Error('Withdrawal not found.'), { status: 404 });
-  const wd = wdSnap.data();
-  if (wd.status !== 'approved') {
-    throw Object.assign(new Error('Approve the withdrawal first.'), { status: 400 });
-  }
+
+  // Step 1 — CLAIM it inside a transaction. Only one caller can move 'approved' -> 'processing'.
+  const wd = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(wdRef);
+    if (!snap.exists) throw Object.assign(new Error('Withdrawal not found.'), { status: 404 });
+    const data = snap.data();
+    if (data.status !== 'approved') {
+      throw Object.assign(new Error(`A withdrawal must be "approved" to pay it (this one is "${data.status}"). If it says "processing", a payout is already in progress — do not retry.`), { status: 400 });
+    }
+    const a = data.payoutAccount;
+    if (!a || !a.bankCode || !a.accountNumber || !a.accountName) {
+      throw Object.assign(new Error('This affiliate has no bank code on file — ask them to re-verify their bank in onboarding, or use Mark Paid instead.'), { status: 400 });
+    }
+    tx.update(wdRef, { status: 'processing', processingAt: FieldValue.serverTimestamp() });
+    return data;
+  });
+
   const acct = wd.payoutAccount;
-  if (!acct || !acct.bankCode || !acct.accountNumber || !acct.accountName) {
-    throw Object.assign(new Error('This affiliate has no bank code on file — ask them to re-verify their bank in onboarding, or use Mark Paid instead.'), { status: 400 });
+  // Deterministic reference => Paystack itself rejects a second transfer with the same reference.
+  const reference = 'nova-wd-' + String(withdrawalId).toLowerCase().replace(/[^a-z0-9_-]/g, '');
+
+  // Step 2 — talk to Paystack. If this fails, put the withdrawal back to 'approved' so it can be retried.
+  let recipientCode, transfer;
+  try {
+    const recipient = await paystackFetch('/transferrecipient', {
+      method: 'POST',
+      body: JSON.stringify({ type: 'nuban', currency: 'NGN', name: acct.accountName, account_number: acct.accountNumber, bank_code: acct.bankCode }),
+    });
+    recipientCode = recipient.data.recipient_code;
+    transfer = await paystackFetch('/transfer', {
+      method: 'POST',
+      body: JSON.stringify({
+        source: 'balance',
+        amount: Math.round(wd.amountPayable * 100), // kobo
+        recipient: recipientCode,
+        reference,
+        reason: `LEXDEN NOVA affiliate payout — withdrawal ${withdrawalId}`,
+      }),
+    });
+  } catch (e) {
+    await wdRef.update({ status: 'approved', lastPayoutError: String((e && e.message) || e).slice(0, 300), lastPayoutErrorAt: FieldValue.serverTimestamp() });
+    throw e;
   }
 
-  // Step 1: create (or reuse) a transfer recipient.
-  const recipient = await paystackFetch('/transferrecipient', {
-    method: 'POST',
-    body: JSON.stringify({
-      type: 'nuban', currency: 'NGN',
-      name: acct.accountName, account_number: acct.accountNumber, bank_code: acct.bankCode,
-    }),
-  });
-  const recipientCode = recipient.data.recipient_code;
-
-  // Step 2: initiate the transfer (amount in kobo).
-  const transfer = await paystackFetch('/transfer', {
-    method: 'POST',
-    body: JSON.stringify({
-      source: 'balance',
-      amount: Math.round(wd.amountPayable * 100),
-      recipient: recipientCode,
-      reason: `LEXDEN NOVA affiliate payout — withdrawal ${withdrawalId}`,
-    }),
-  });
-
+  // Step 3 — record success. If THIS write fails the status stays 'processing', which safely blocks a second payout.
   await db.runTransaction(async (tx) => {
     tx.update(wdRef, {
       status: 'paid', decidedAt: FieldValue.serverTimestamp(),
       paystackRecipientCode: recipientCode,
       paystackTransferCode: transfer.data.transfer_code || null,
       paystackTransferStatus: transfer.data.status || null,
+      paystackReference: reference,
     });
     tx.update(db.collection('affiliates').doc(wd.affiliateId), {
       totalWithdrawn: FieldValue.increment(wd.amountRequested),
@@ -162,7 +188,7 @@ async function listAffiliates() {
   let swept = 0;
   snap.forEach((d) => {
     const a = d.data();
-    const named = a.autoApprove && a.autoApprove.ok === false && ['DUPLICATE_PAYOUT_ACCOUNT', 'WRITE_FAILED'].includes(a.autoApprove.reason);
+    const named = a.autoApprove && a.autoApprove.ok === false && ['DUPLICATE_PAYOUT_ACCOUNT', 'WRITE_FAILED', 'UNVERIFIED_PAYOUT_ACCOUNT', 'MISSING_EMAIL'].includes(a.autoApprove.reason);
     if (a.status !== 'active' && a.status !== 'suspended' && !named) {
       batch.update(d.ref, { status: 'active', approvedAt: FieldValue.serverTimestamp(), autoApprove: { ok: true, sweptFromLegacy: true } });
       a.status = 'active'; swept++;

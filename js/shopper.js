@@ -522,6 +522,9 @@ function structuredProductSections(p){
 }
 function screenProductDetail(id){
   const p = findProduct(id);
+  if(!p && !window.__catalogLoaded){
+    return `<div class="screen"><div class="empty-state"><div class="ic">${icon('package')}</div><h3>Loading product…</h3><p>One moment.</p></div></div>`;
+  }
   if(!p){
     return `<div class="screen"><div class="empty-state"><div class="ic">${icon('package')}</div><h3>Product not found</h3><p>It may have been removed.</p><button class="btn btn-primary" onclick="navigate('#products')">Back to Products</button></div></div>`;
   }
@@ -1052,11 +1055,15 @@ function captureAffiliateAttribution(){
   try{ localStorage.setItem(key, JSON.stringify({ref, ts:Date.now()})); }catch(e){}
 }
 function resolveAffiliateAttribution(productId){
+  // Window in days comes from Admin settings (content.affiliateAttributionDays). 0 or missing = never expires (current behaviour).
+  const days = Number((DB.content && DB.content.affiliateAttributionDays) || 0);
+  const maxAgeMs = days > 0 ? days * 24*60*60*1000 : 0;
+  const fresh = (parsed) => parsed && parsed.ref && (!maxAgeMs || (Date.now() - Number(parsed.ts || 0)) <= maxAgeMs);
   try{
     const productKey = localStorage.getItem('nova_aff_'+productId);
-    if(productKey){ const parsed = JSON.parse(productKey); return { affiliateRef: parsed.ref, affiliateRefSource: 'product' }; }
+    if(productKey){ const parsed = JSON.parse(productKey); if(fresh(parsed)) return { affiliateRef: parsed.ref, affiliateRefSource: 'product' }; }
     const generalKey = localStorage.getItem('nova_aff_general');
-    if(generalKey){ const parsed = JSON.parse(generalKey); return { affiliateRef: parsed.ref, affiliateRefSource: 'general' }; }
+    if(generalKey){ const parsed = JSON.parse(generalKey); if(fresh(parsed)) return { affiliateRef: parsed.ref, affiliateRefSource: 'general' }; }
   }catch(e){}
   return { affiliateRef: null, affiliateRefSource: null };
 }

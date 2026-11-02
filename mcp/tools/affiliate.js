@@ -48,7 +48,7 @@ function register(server) {
   server.registerTool('nova_list_withdrawals', {
     title: 'List affiliate withdrawal requests',
     description: 'Lists withdrawal requests (`affiliateWithdrawals` collection) — status, amount, and the payout bank details on file.',
-    inputSchema: { status: z.enum(['pending', 'approved', 'rejected', 'paid']).optional(), limit: z.number().int().min(1).max(500).default(100) },
+    inputSchema: { status: z.enum(['pending', 'approved', 'processing', 'rejected', 'paid']).optional(), limit: z.number().int().min(1).max(500).default(100) },
   }, async ({ status, limit }) => {
     let list = await listCollection(getDb(), 'affiliateWithdrawals', 500);
     if (status) list = list.filter((w) => w.status === status);
@@ -57,7 +57,7 @@ function register(server) {
 
   server.registerTool('nova_approve_withdrawal', {
     title: 'Approve withdrawal',
-    description: 'Marks a pending withdrawal request approved — doesn\'t move money by itself; follow with nova_pay_withdrawal_via_paystack or pay manually and call nova_mark_withdrawal_paid. Requires confirm: true.',
+    description: 'Marks a PENDING withdrawal request approved (rejected, paid or processing ones are refused) — doesn\'t move money by itself; follow with nova_pay_withdrawal_via_paystack or pay manually and call nova_mark_withdrawal_paid. Requires confirm: true.',
     inputSchema: { withdrawalId: z.string(), confirm: z.literal(true) },
   }, async ({ withdrawalId }) => {
     const result = await actions.approveWithdrawal({ withdrawalId });
@@ -84,7 +84,7 @@ function register(server) {
 
   server.registerTool('nova_pay_withdrawal_via_paystack', {
     title: 'Pay withdrawal via Paystack Transfers',
-    description: 'Actually moves money: creates a Paystack transfer recipient and sends the payout automatically. Only works once Paystack Transfers is enabled on your business account and the withdrawal is already approved. This is real, irreversible money movement — requires confirm: true and should only be called after you\'ve reviewed the withdrawal with nova_list_withdrawals.',
+    description: 'Actually moves money (the withdrawal is locked as "processing" first, so a double click cannot pay twice): creates a Paystack transfer recipient and sends the payout automatically. Only works once Paystack Transfers is enabled on your business account and the withdrawal is already approved. This is real, irreversible money movement — requires confirm: true and should only be called after you\'ve reviewed the withdrawal with nova_list_withdrawals.',
     inputSchema: { withdrawalId: z.string(), confirm: z.literal(true) },
   }, async ({ withdrawalId }) => {
     const result = await actions.payWithdrawalViaPaystack({ withdrawalId });
