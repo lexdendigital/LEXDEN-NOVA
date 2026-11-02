@@ -74,7 +74,6 @@ service cloud.firestore {
     // verify-paystack.js owns that commission-consumption marker through
     // the Firebase Admin SDK, and Admin SDK writes bypass client Rules.
     //
-    //
     // Existing profile code uses set(..., {merge:true}) and re-submits some
     // unchanged identity/metadata fields. diff().affectedKeys() evaluates
     // the resulting document, so unchanged fields do not count as edits.
@@ -139,8 +138,7 @@ service cloud.firestore {
             || (('email' in request.auth.token)
               && request.resource.data.email == request.auth.token.email))
           && (!('provider' in request.resource.data)
-            || request.resource.data.provider in ['google', 'password'])
-;
+            || request.resource.data.provider in ['google', 'password']);
       }
 
       function userUpdateIdentityValid(uid) {
@@ -158,8 +156,7 @@ service cloud.firestore {
           && (!affected.hasAny(['provider'])
             || (!('provider' in resource.data)
               && ('provider' in request.resource.data)
-              && request.resource.data.provider in ['google', 'password']))
-;
+              && request.resource.data.provider in ['google', 'password']));
       }
 
       allow read: if isOwner(uid) || isAdmin();
