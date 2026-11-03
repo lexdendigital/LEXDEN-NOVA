@@ -163,6 +163,10 @@ const AFFILIATE_ENDPOINTS = {
   // FIX (mega-fix batch #2): server-side signup, replacing the client's
   // direct Firestore write — see api/affiliate/signup.js.
   'affiliate-signup': './api/affiliate/signup',
+  // Coupon-code attribution (affiliate's own code + public checkout validity check).
+  'affiliate-coupon': './api/affiliate/coupon',
+  // Frees commissions after their 8-day hold (affiliate dashboard + scheduler call this).
+  'affiliate-release': './api/affiliate/release',
   'process-abandon-emails': './api/affiliate/abandon-emails',
   // Verified-purchase review labeling and the 7-day "please review it" email — both
   // admin-SDK sweeps, cron-callable the same way as the line above.
@@ -332,6 +336,7 @@ if (process.env.LIFECYCLE_CRON_IN_PROCESS === 'true') {
     // the same timer but are cheap no-ops once caught up (both dedupe on their own flag).
     sweep('/api/mark-verified-reviews');
     sweep('/api/review-requests');
+    sweep('/api/affiliate-release'); // frees commissions whose 8-day hold has ended
   };
   setTimeout(runLifecycleSweep, 30 * 1000).unref();
   setInterval(runLifecycleSweep, 15 * 60 * 1000).unref();

@@ -12,6 +12,7 @@ const { getDb, FieldValue, requireAffiliateAuth, setCors, addNonSundayDays } = r
 const cfg = require('../core/config');
 const M = require('../core/money');
 const { queueEmailBackground } = require('../email-shared');
+const { releaseDue } = require('./commissions');
 
 // FEE: the approved AFFILIATE withdrawal fee (5% of the requested GROSS amount). It is
 // computed server-side in integer kobo, shown to the affiliate BEFORE they submit
@@ -58,6 +59,9 @@ module.exports = async (req, res) => {
 
   const db = getDb();
   const affRef = db.collection('affiliates').doc(decoded.uid);
+
+  // Free any commission whose 8-day hold has ended so it counts toward this withdrawal.
+  try { await releaseDue(db, { affiliateId: decoded.uid }); } catch (e) { console.error('release before withdraw failed (non-fatal):', e.message); }
 
   try {
     const result = await db.runTransaction(async (tx) => {

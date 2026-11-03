@@ -59,6 +59,7 @@
 const { initializeApp, cert, getApps } = require('firebase-admin/app');
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const { queueEmailBackground } = require('./email-shared');
+const { holdDays, DAY_MS, isAlreadyExists } = require('./affiliate/commissions');
 const cjOrderHandler = require('./cj-order');
 const { resolveProductSelection } = require('./product-variants');
 const { validateProviderNeutralQuote } = require('./fulfillment/quote-validation');
@@ -236,7 +237,16 @@ async function getAffiliateProductInfo(productId, variantId) {
 // Fire-and-forget, called only after the order is already written — an
 // affiliate-attribution failure must never affect the payment response,
 // exactly like the email/CJ background calls below it.
-async function attributeAffiliateCommission(db, { reference, buyerUid, productId, variantId, productName, amountMajor, currency, affiliateRef, affiliateRefSource }) {
+async function attributeAffiliateCommission(db, { reference, buyerUid, productId, variantId, productName, amountMajor, currency, affiliateRef, affiliateRefSource, couponCode }) {
+  // A referral/coupon code typed at checkout is an explicit choice, so it beats any remembered link.
+  // It credits the owner of the code for THIS order only (no "first purchase only" rule).
+  if (couponCode) {
+    const code = String(couponCode).replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+    if (/^[A-Z0-9]{4,12}$/.test(code)) {
+      const cs = await db.collection('affiliateCoupons').doc(code).get();
+      if (cs.exists && cs.data().affiliateId) { affiliateRef = String(cs.data().affiliateId); affiliateRefSource = 'coupon'; }
+    }
+  }
   if (!affiliateRef || !buyerUid || affiliateRef === buyerUid) return; // no ref, or self-referral blocked
   if (!amountMajor || amountMajor <= 0) return; // free products earn nothing
 
@@ -314,47 +324,61 @@ async function attributeAffiliateCommission(db, { reference, buyerUid, productId
   }
   const commissionAmount = Math.round(commissionInSaleCurrency * fxRate * 100) / 100; // NGN
 
+  // Reserve the commission for the hold period (default 8 days = the 7-day refund window + 1).
+  // balancePending counts it as earned but NOT withdrawable; release.js frees it later.
+  const hold = holdDays(content);
+  const nowMs = Date.now();
+  const commissionStatus = hold > 0 ? 'pending' : 'available';
+  const balanceField = hold > 0 ? 'balancePending' : 'balanceAvailable';
+  const dayStr = new Date().toISOString().slice(0, 10);
+  const linkKey = `${affiliateRef}_${affiliateRefSource === 'general' ? 'general' : affiliateRefSource === 'coupon' ? 'coupon' : productId}`;
+  const dailyKey = `${affiliateRef}_${dayStr}`;
+
   try {
-    // Doc ID = reference, same idempotency guarantee as the orders/{reference}
-    // pattern above — safe if this ever runs twice for the same payment.
-    // Commissions go straight to 'available' — the admin's manual
-    // approve-before-payout step (Affiliate Program tab) is the fraud/
-    // refund checkpoint, not a separate hold timer.
-    await db.collection('affiliateCommissions').doc(reference).set({
-      affiliateId: affiliateRef,
-      buyerId: buyerUid,
-      productId,
-      productName: productName || null,
-      variantId: variantId || null,
-      variantName: productInfo.variantName,
-      orderId: reference,
-      saleAmount: amountMajor,
-      currency,
-      commissionPct: pct,
-      commissionAmount,
-      commissionCurrency: 'NGN',
-      commissionAmountSaleCurrency: commissionInSaleCurrency,
-      fxRate,
-      status: 'available',
-      createdAt: FieldValue.serverTimestamp(),
-    });
+    // Doc ID = reference, and create() (not set()) so a replay of the same payment can never
+    // credit the balance twice or flip an already-released commission back to pending.
+    try {
+      await db.collection('affiliateCommissions').doc(reference).create({
+        affiliateId: affiliateRef,
+        buyerId: buyerUid,
+        productId,
+        productName: productName || null,
+        variantId: variantId || null,
+        variantName: productInfo.variantName,
+        orderId: reference,
+        saleAmount: amountMajor,
+        currency,
+        commissionPct: pct,
+        commissionAmount,
+        commissionCurrency: 'NGN',
+        commissionAmountSaleCurrency: commissionInSaleCurrency,
+        fxRate,
+        status: commissionStatus,
+        releaseAtMs: nowMs + hold * DAY_MS,
+        source: affiliateRefSource || 'link',
+        linkKey,
+        dailyKey,
+        createdAt: FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      if (isAlreadyExists(e)) return; // this payment was already attributed
+      throw e;
+    }
     const displayName = affSnap.data().displayName || 'Affiliate';
     const maskedName = displayName.split(' ')[0] + (displayName.split(' ')[1] ? ' ' + displayName.split(' ')[1][0] + '.' : '');
-    const linkKey = `${affiliateRef}_${affiliateRefSource === 'general' ? 'general' : productId}`;
-    const dailyKey = `${affiliateRef}_${new Date().toISOString().slice(0, 10)}`;
     await Promise.all([
       db.collection('affiliates').doc(affiliateRef).update({
-        balanceAvailable: FieldValue.increment(commissionAmount),
+        [balanceField]: FieldValue.increment(commissionAmount),
         totalEarned: FieldValue.increment(commissionAmount),
       }),
       // Per-link sales counter (My Store tab — "X clicks, Y sales" per link).
       db.collection('affiliateLinkStats').doc(linkKey).set({
-        ref: affiliateRef, pid: affiliateRefSource === 'general' ? null : productId,
+        ref: affiliateRef, pid: affiliateRefSource === 'product' ? productId : null,
         sales: FieldValue.increment(1),
       }, { merge: true }),
       // Daily rollup (dashboard graph).
       db.collection('affiliateDailyStats').doc(dailyKey).set({
-        ref: affiliateRef, date: new Date().toISOString().slice(0, 10),
+        ref: affiliateRef, date: dayStr,
         sales: FieldValue.increment(1), earnings: FieldValue.increment(commissionAmount),
       }, { merge: true }),
       // Minimal leaderboard mirror — name + totals ONLY, never payout
@@ -375,6 +399,7 @@ async function attributeAffiliateCommission(db, { reference, buyerUid, productId
           FIRSTNAME: displayName.split(' ')[0] || undefined,
           product_name: productName || 'a LEXDEN NOVA product',
           commission: '₦ ' + commissionAmount.toLocaleString('en-NG'),
+          release_date: hold > 0 ? new Date(nowMs + hold * DAY_MS).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Africa/Lagos' }) : 'now',
           affiliate_url: 'https://lexdendigital.github.io/LEXDEN-NOVA/affiliate/'
         }
       });
@@ -475,7 +500,7 @@ module.exports = async function handler(req, res) {
     return res.status(405).json({ ok: false, error: 'Method not allowed — use POST.' });
   }
 
-  const { reference, uid, email, productId, productName, variantId, delivery, shippingQuoteId: requestShippingQuoteId, affiliateRef, affiliateRefSource, reservationId } = req.body || {};
+  const { reference, uid, email, productId, productName, variantId, delivery, shippingQuoteId: requestShippingQuoteId, affiliateRef, affiliateRefSource, couponCode, reservationId } = req.body || {};
   const safeReservationId = typeof reservationId === 'string' && /^[A-Za-z0-9_\-]{8,200}$/.test(reservationId) ? reservationId : null;
 
   if (!reference || typeof reference !== 'string') {
@@ -1005,7 +1030,7 @@ module.exports = async function handler(req, res) {
   attributeAffiliateCommission(db, {
     reference, buyerUid: uid, productId, variantId: selection.variantId, productName: orderProductName,
     amountMajor: merchandiseAmountMajor,
-    currency: paidCurrency, affiliateRef, affiliateRefSource,
+    currency: paidCurrency, affiliateRef, affiliateRefSource, couponCode,
   }).catch(e => console.error('affiliate commission attribution failed:', e.message));
 
   // Stage F: credit the creator's ledger. Fire-and-forget like the

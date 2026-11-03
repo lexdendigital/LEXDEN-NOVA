@@ -1054,7 +1054,7 @@ function captureAffiliateAttribution(){
   const key = pid ? ('nova_aff_'+pid) : 'nova_aff_general';
   try{ localStorage.setItem(key, JSON.stringify({ref, ts:Date.now()})); }catch(e){}
 }
-function resolveAffiliateAttribution(productId){
+function resolveAffiliateLinkAttribution(productId){
   // Window in days comes from Admin settings (content.affiliateAttributionDays). 0 or missing = never expires (current behaviour).
   const days = Number((DB.content && DB.content.affiliateAttributionDays) || 0);
   const maxAgeMs = days > 0 ? days * 24*60*60*1000 : 0;
@@ -1066,6 +1066,19 @@ function resolveAffiliateAttribution(productId){
     if(generalKey){ const parsed = JSON.parse(generalKey); if(fresh(parsed)) return { affiliateRef: parsed.ref, affiliateRefSource: 'general' }; }
   }catch(e){}
   return { affiliateRef: null, affiliateRefSource: null };
+}
+// What checkout sends to the server: the remembered link (if any) plus a referral/coupon code the
+// shopper typed within the last 24 hours. The server decides which one wins (a typed code wins).
+function resolveAffiliateAttribution(productId){
+  const base = resolveAffiliateLinkAttribution(productId);
+  try{
+    const raw = localStorage.getItem('nova_aff_coupon');
+    if(raw){
+      const parsed = JSON.parse(raw);
+      if(parsed && parsed.code && (Date.now() - Number(parsed.ts||0)) < 24*60*60*1000) return { ...base, couponCode: parsed.code };
+    }
+  }catch(e){}
+  return base;
 }
 // Abandoned-product-view reminder emails (requirement #14) — only logged
 // for a shopper we can actually email (signed in, or gave their email at

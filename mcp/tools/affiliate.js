@@ -27,6 +27,26 @@ function register(server) {
     return { content: [{ type: 'text', text: JSON.stringify(list.slice(0, limit), null, 2) }] };
   });
 
+  server.registerTool('nova_list_affiliate_commissions', {
+    title: 'List affiliate commissions',
+    description: 'Lists commissions (`affiliateCommissions`) — status is pending (reserved for the hold period, see releaseAtMs), available, reversed (order refunded) or needs_review (no exchange rate). Filter by status or affiliateId.',
+    inputSchema: { status: z.enum(['pending', 'available', 'reversed', 'needs_review']).optional(), affiliateId: z.string().optional(), limit: z.number().int().min(1).max(500).default(100) },
+  }, async ({ status, affiliateId, limit }) => {
+    let list = await listCollection(getDb(), 'affiliateCommissions', 500);
+    if (status) list = list.filter((c) => c.status === status);
+    if (affiliateId) list = list.filter((c) => c.affiliateId === affiliateId);
+    return { content: [{ type: 'text', text: JSON.stringify(list.slice(0, limit), null, 2) }] };
+  });
+
+  server.registerTool('nova_list_affiliate_flags', {
+    title: 'List affiliate fraud / risk flags',
+    description: 'Lists `affiliateFlags` — blocked self-referrals (SELF_REFERRAL_BLOCKED) and commissions reversed after they were already released (COMMISSION_REVERSED_AFTER_RELEASE, which may mean the affiliate was overpaid).',
+    inputSchema: { limit: z.number().int().min(1).max(500).default(100) },
+  }, async ({ limit }) => {
+    const list = await listCollection(getDb(), 'affiliateFlags', 500);
+    return { content: [{ type: 'text', text: JSON.stringify(list.slice(0, limit), null, 2) }] };
+  });
+
   server.registerTool('nova_approve_affiliate', {
     title: 'Approve affiliate',
     description: 'Activates a pending affiliate application (status -> active). Requires confirm: true.',

@@ -127,6 +127,8 @@ button{font-family:inherit;}
 .status-rejected{background:rgba(255,92,115,.15);color:var(--danger);}
 .status-processing{background:rgba(0,212,255,.15);color:var(--cyber);}
 .status-needs_review{background:rgba(212,175,55,.15);color:var(--gold);}
+.status-reversed{background:rgba(255,92,115,.15);color:var(--danger);}
+.code-big{flex:1;font-size:24px;font-weight:800;letter-spacing:2px;color:var(--gold);}
 
 .invite{border-radius:var(--radius);padding:18px;background:linear-gradient(135deg,rgba(0,212,255,.12),rgba(212,175,55,.10));
   border:1px solid rgba(255,255,255,.1);margin-bottom:14px;}
@@ -419,6 +421,7 @@ auth.onAuthStateChanged(async (user)=>{
     await loadDashboardData();
     diagAI.record('load_account', true);
     renderShell();
+    maybeReleaseDue(); // free any commission whose hold has ended (non-blocking)
   }catch(e){
     const {code, message} = classifyError(e, 'ACCOUNT_LOAD_FAILED');
     diagAI.record('load_account', false, code, message);
@@ -478,6 +481,7 @@ async function loadDashboardData(){
     commissionDefaultPct: content.affiliateCommissionDefaultPct ?? 10,
     withdrawalFeePct: (typeof content.affiliateWithdrawalFeeBps === 'number' ? content.affiliateWithdrawalFeeBps : 500) / 100, // display only; the server decides the real fee
     minWithdrawalNGN: content.affiliateMinWithdrawalNGN ?? 5000,
+    holdDays: (content.affiliateHoldDays !== null && content.affiliateHoldDays !== undefined && content.affiliateHoldDays !== '' && Number.isFinite(Number(content.affiliateHoldDays))) ? Number(content.affiliateHoldDays) : 8,
     whatsappCommunityUrl: content.affiliateWhatsappUrl || '',
     telegramCommunityUrl: content.affiliateTelegramUrl || '',
     inviteBannerText: content.affiliateInviteBannerText || 'Join the private Affiliate community for tips, early product drops and payout announcements.',
@@ -776,7 +780,7 @@ function screenDashboard(){
   return `
   <div class="screen">
     <div class="stat-grid">
-      <div class="card"><h3>Available Balance</h3><div class="big">${money(a.balanceAvailable)}</div></div>
+      <div class="card"><h3>Available Balance</h3><div class="big">${money(a.balanceAvailable)}</div>${(a.balancePending||0)>0 ? `<div class="hint">+ ${money(a.balancePending)} reserved for ${state.settings.holdDays} days</div>` : ''}</div>
       <div class="card"><h3>Total Earned</h3><div class="big">${money(a.totalEarned)}</div></div>
       <div class="card"><h3>Total Clicks</h3><div class="big">${totalClicks}</div></div>
       <div class="card"><h3>Sales · Rate</h3><div class="big">${totalSales} <small>(${convRate}%)</small></div></div>
@@ -794,9 +798,9 @@ function screenDashboard(){
       ${state.commissions.length===0 ? `<div class="hint" style="margin-top:8px;">No sales yet — share your links from the My Store tab to get started.</div>` :
       state.commissions.slice(0,10).map(c=>`
         <div class="txn">
-          <div class="l"><div>${escapeHtml(c.productName||'Product')}</div><small>${fmtDate(c.createdAt)}</small></div>
+          <div class="l"><div>${escapeHtml(c.productName||'Product')}</div><small>${fmtDate(c.createdAt)}${c.status==='pending' && c.releaseAtMs ? ' · available '+fmtDate(c.releaseAtMs) : ''}${c.source==='coupon' ? ' · coupon' : ''}</small></div>
           <div style="text-align:right"><div style="font-weight:700;">${money(c.commissionAmount)}</div>
-            <span class="status-chip status-${c.status}">${c.status}</span></div>
+            <span class="status-chip status-${c.status}">${c.status==='pending' ? 'reserved' : c.status}</span></div>
         </div>`).join('')}
     </div>
   </div>`;
@@ -828,6 +832,7 @@ function screenStore(){
   const generalStats = state.linkStats[`${uid}_general`] || {clicks:0,sales:0};
   return `
   <div class="screen">
+    ${couponCard()}
     <div class="card">
       <h3>General Store Link</h3>
       <div class="hint" style="margin-bottom:10px;">Sends people to the full store. You're paid on their <b>first</b> product purchase only.</div>
@@ -844,6 +849,70 @@ function screenStore(){
       }).join('')}
     </div>
   </div>`;
+}
+function couponCard(){
+  const code = (state.affiliate||{}).couponCode;
+  const st = state.linkStats[`${state.user.uid}_coupon`] || {sales:0};
+  if(code){
+    return `
+    <div class="card">
+      <h3>Your Coupon Code</h3>
+      <div class="hint" style="margin-bottom:10px;">Buyers type this at checkout and you earn commission on that order — even when they did not use your link (WhatsApp, voice notes, in person).</div>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <div class="code-big">${escapeHtml(code)}</div>
+        <button class="icon-btn btnCopyCode" data-code="${escapeHtml(code)}" title="Copy">${iconCopy()}</button>
+        <button class="icon-btn btnShareCode" data-code="${escapeHtml(code)}" title="Share">${iconShare()}</button>
+      </div>
+      <div class="stats-row" style="display:flex;gap:14px;margin-top:10px;"><div class="stat">Sales with this code<b>${st.sales||0}</b></div></div>
+    </div>`;
+  }
+  return `
+    <div class="card">
+      <h3>Your Coupon Code</h3>
+      <div class="hint" style="margin-bottom:10px;">Create one short code. Buyers type it at checkout and you earn commission on that order. Leave the box empty and we will make one for you.</div>
+      <div class="field"><input id="cpInput" maxlength="12" autocapitalize="characters" placeholder="Your code, e.g. COACH25 (optional)"></div>
+      <div id="cpErr" class="err hide"></div>
+      <button class="btn btn-gold" id="cpCreate">Create my code</button>
+    </div>`;
+}
+async function createCoupon(){
+  const input = document.getElementById('cpInput');
+  const errEl = document.getElementById('cpErr');
+  const btn = document.getElementById('cpCreate');
+  errEl.classList.add('hide');
+  btn.disabled = true; btn.textContent = 'Creating…';
+  try{
+    const idToken = await state.user.getIdToken();
+    const res = await withTimeout(fetch(`${API_BASE}/api/affiliate-coupon`, {
+      method:'POST', headers:{'Content-Type':'application/json','Authorization':'Bearer '+idToken},
+      body: JSON.stringify({ code: (input.value||'').trim() })
+    }), 20000, 'RENDER_COLD_START', 'Timed out — the free server may be waking up from sleep.');
+    const data = await res.json();
+    if(!data.ok) throw Object.assign(new Error(data.error||'Could not create that code.'), {code: data.code});
+    diagAI.record('create_coupon', true);
+    state.affiliate.couponCode = data.code;
+    renderShell();
+    toast('Your code is ready');
+  }catch(e){
+    const {code, message} = classifyError(e, 'CREATE_COUPON_FAILED');
+    // A taken/invalid code is the person's input, not a system fault: do not count it toward the diagnosis popup.
+    if(code !== 'CODE_TAKEN' && code !== 'BAD_CODE' && code !== 'RESERVED_CODE') diagAI.record('create_coupon', false, code, message);
+    errEl.innerHTML = `${escapeHtml(message)}`;
+    errEl.classList.remove('hide');
+    btn.disabled = false; btn.textContent = 'Create my code';
+  }
+}
+async function maybeReleaseDue(){
+  if(state.releaseChecked) return;
+  state.releaseChecked = true;
+  const now = Date.now();
+  if(!state.commissions.some(c => c.status==='pending' && Number(c.releaseAtMs) <= now)) return;
+  try{
+    const idToken = await state.user.getIdToken();
+    const r = await withTimeout(fetch(`${API_BASE}/api/affiliate-release`, { method:'POST', headers:{'Authorization':'Bearer '+idToken} }), 60000, 'timeout');
+    const d = await r.json();
+    if(d && d.ok && d.released > 0){ await loadDashboardData(); renderShell(); }
+  }catch(e){ /* silent: the server sweep and a withdrawal request also release due commissions */ }
 }
 function linkRow(name, url, sub, stats){
   const conv = stats.clicks>0 ? ((stats.sales/stats.clicks)*100).toFixed(1) : '0';
@@ -882,6 +951,7 @@ function screenWithdraw(){
       <h3>Available to Withdraw</h3>
       <div class="big">${money(a.balanceAvailable)}</div>
       <div class="hint">A ${fee}% processing fee applies. Minimum withdrawal ${money(min)}.</div>
+      <div class="hint">New commissions are reserved for ${state.settings.holdDays} days (the refund window), then become available.${(a.balancePending||0)>0 ? ' Currently reserved: '+money(a.balancePending)+'.' : ''}</div>
     </div>
     ${cooldownMsg}
     <div class="card">
@@ -979,6 +1049,19 @@ function wireScreenEvents(){
       else { const ok = await copyText(text); toast(ok ? 'Link copied' : 'Press and hold the link to copy it'); }
     };
   });
+  document.querySelectorAll('.btnCopyCode').forEach(b=>{
+    b.onclick = async ()=>{ const ok = await copyText(b.dataset.code); toast(ok ? 'Code copied' : 'Press and hold the code to copy it'); };
+  });
+  document.querySelectorAll('.btnShareCode').forEach(b=>{
+    b.onclick = async ()=>{
+      const code = b.dataset.code;
+      const text = 'Use my code ' + code + ' at checkout on LEXDEN NOVA: ' + STORE_URL;
+      if(navigator.share){ try{ await navigator.share({ title:'LEXDEN NOVA', text }); }catch(e){} }
+      else { const ok = await copyText(text); toast(ok ? 'Message copied' : 'Press and hold to copy'); }
+    };
+  });
+  const cpCreate = document.getElementById('cpCreate');
+  if(cpCreate) cpCreate.onclick = createCoupon;
   const wdAmount = document.getElementById('wdAmount');
   if(wdAmount){
     let wdTimer = null;

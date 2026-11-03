@@ -177,7 +177,7 @@ async function requestRefund(db, { orderId, idempotencyKey, amountMinor, paidMin
 /** Single guarded transition. Reads-then-writes inside a transaction so replays/races are safe. */
 async function transition(db, refundId, to, { by = null, role = 'admin', patch = {}, note = null } = {}) {
   const ref = col(db).doc(refundId);
-  return db.runTransaction(async (tx) => {
+  const result = await db.runTransaction(async (tx) => {
     const snap = await tx.get(ref);
     if (!snap.exists) throw new RefundError('Refund not found.', 'NOT_FOUND', 404);
     const cur = snap.data();
@@ -191,6 +191,15 @@ async function transition(db, refundId, to, { by = null, role = 'admin', patch =
     tx.set(ref, next);
     return { changed: true, refund: next };
   });
+  // A completed refund takes back the affiliate commission earned on that order (reserved or released).
+  // Fire-and-forget and fully guarded: affiliate bookkeeping must never break a buyer's refund.
+  if (result && result.changed && to === STATES.COMPLETED) {
+    try {
+      require('../affiliate/commissions').reverseForRefund(db, result.refund)
+        .catch((e) => console.error('affiliate commission reversal failed (non-fatal):', e && e.message));
+    } catch (e) { /* module unavailable: ignore */ }
+  }
+  return result;
 }
 
 /** Approve, then either call the provider (flag on) or enter the tracked MANUAL step. */

@@ -729,6 +729,10 @@ function isCjPhysicalProduct(product){
   return hasApprovedMapping||hasLegacyCj;
 }
 
+function storedCheckoutCoupon(){
+  try{ const p=JSON.parse(localStorage.getItem('nova_aff_coupon')||'null'); if(p&&p.code&&(Date.now()-Number(p.ts||0))<24*60*60*1000) return String(p.code); }catch(e){}
+  return '';
+}
 function openCheckoutReviewModal(product,variant,delivery,onContinue,external=false){
   if($('#checkoutReviewOverlay'))return;
   const overlay=document.createElement('div');overlay.id='checkoutReviewOverlay';overlay.className='modal-backdrop';overlay.setAttribute('role','presentation');
@@ -761,13 +765,29 @@ function openCheckoutReviewModal(product,variant,delivery,onContinue,external=fa
     +'<p class="text-2">'+escapeHtml(product.name)+'</p>'
     +(selectedName?'<div class="checkout-review-variant">'+escapeHtml(selectedName)+'</div>':'')
     +priceRows
+    +(!external && amount!==0 ? '<div class="checkout-review-coupon" style="margin:12px 0 6px;"><label class="text-2 small" for="checkoutCouponInput">Referral code (optional)</label><input type="text" id="checkoutCouponInput" maxlength="12" autocomplete="off" autocapitalize="characters" placeholder="e.g. COACH123" value="'+escapeHtml(storedCheckoutCoupon())+'" style="width:100%;margin-top:4px;padding:10px;border-radius:10px;border:1px solid var(--border);background:transparent;color:inherit;text-transform:uppercase;"><div id="checkoutCouponMsg" class="small" style="min-height:16px;margin-top:4px;"></div></div>' : '')
     +'<p id="checkoutReviewDelivery" class="text-2 small">'+deliveryCopy+'</p>'
     +'<div class="checkout-review-actions"><button type="button" class="btn btn-ghost" data-review-cancel>Change selection</button><button type="button" class="btn btn-primary" data-review-continue>Continue to payment</button></div>'
     +'</section>';
   document.body.appendChild(overlay);
   const close=()=>overlay.remove();
   overlay.querySelector('[data-review-cancel]')?.addEventListener('click',close);
-  overlay.querySelector('[data-review-continue]')?.addEventListener('click',()=>{close();onContinue();});
+  overlay.querySelector('[data-review-continue]')?.addEventListener('click',async()=>{
+    const input=overlay.querySelector('#checkoutCouponInput');
+    if(input){
+      const msg=overlay.querySelector('#checkoutCouponMsg');
+      const code=(input.value||'').replace(/[^A-Za-z0-9]/g,'').toUpperCase();
+      if(code){
+        if(!/^[A-Z0-9]{4,12}$/.test(code)){ msg.style.color='var(--error)'; msg.textContent='That code does not look right (4–12 letters or numbers).'; return; }
+        msg.style.color=''; msg.textContent='Checking code…';
+        let valid=null; // null = could not check; the server re-checks anyway, so never block payment on a network hiccup
+        try{ const r=await withTimeout(fetch(API_BASE+'/api/affiliate-coupon?check='+encodeURIComponent(code)),6000,'Code check timed out.'); const d=await r.json(); if(d&&d.ok) valid=!!d.valid; }catch(e){ valid=null; }
+        if(valid===false){ msg.style.color='var(--error)'; msg.textContent='We could not find that code. Check it, or clear the box to continue without one.'; return; }
+        try{ localStorage.setItem('nova_aff_coupon',JSON.stringify({code,ts:Date.now()})); }catch(e){}
+      } else { try{ localStorage.removeItem('nova_aff_coupon'); }catch(e){} }
+    }
+    close();onContinue();
+  });
   overlay.addEventListener('click',event=>{if(event.target===overlay)close();});
   overlay.addEventListener('keydown',event=>{if(event.key==='Escape')close();});
   overlay.querySelector('[data-review-continue]')?.focus();
@@ -1542,7 +1562,7 @@ async function verifyPaystackPayment(reference, product, email, showResult, deli
         );
         data = await res.json();
         lastErr = null;
-        if(res.ok && data.ok) break;
+        if(res.ok && data.ok){ try{ localStorage.removeItem('nova_aff_coupon'); }catch(e){} break; }
         if(!(data && RETRYABLE.test(String(data.error||'')))) break; // a definitive answer (e.g. underpayment) — don't hammer
       }catch(err){
         lastErr = err; res = null; data = null;

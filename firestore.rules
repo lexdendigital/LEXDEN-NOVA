@@ -390,6 +390,13 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // affiliateCoupons/{CODE} — one coupon code per affiliate, written only by /api/affiliate-coupon
+    // (Admin SDK). The browser never reads it: checkout validates through the API.
+    match /affiliateCoupons/{code} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
     // affiliateFlags/{id} — suspicious-activity records written by the backend (Admin SDK). Admin read only.
     match /affiliateFlags/{flagId} {
       allow read: if isAdmin();

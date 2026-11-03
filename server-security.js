@@ -28,6 +28,7 @@ const DEFAULT_LIMITS = {
   '/api/verify-otp': { max: 20, windowMs: 10 * 60 * 1000 },
   '/api/send-email': { max: 10, windowMs: 10 * 60 * 1000 },
   '/api/send-auth-email': { max: 10, windowMs: 10 * 60 * 1000 },
+  '/api/affiliate-coupon': { max: 40, windowMs: 10 * 60 * 1000 }, // public code check: stop guessing codes
 };
 
 function createRateLimiter(limits, now) {
