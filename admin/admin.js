@@ -3257,7 +3257,7 @@ function affiliateWithdrawalCardHtml(w, affiliates){
           <div style="font-weight:800;font-size:16px;">₦${(w.amountRequested||0).toLocaleString()}</div>
           <div class="text-2 small">Pay out: <strong>₦${(w.amountPayable||0).toLocaleString()}</strong> (fee ₦${(w.feeAmount||0).toLocaleString()})</div>
         </div>
-        <span class="chip" style="background:${w.status==='pending'?'var(--warn,#d4af37)':w.status==='approved'?'var(--accent)':w.status==='paid'?'#2ee6a6':'var(--error)'};color:#111;">${w.status}</span>
+        <span class="chip" style="background:${w.status==='pending'?'var(--warn,#d4af37)':w.status==='approved'?'var(--accent)':w.status==='paid'?'#2ee6a6':w.status==='processing'?'var(--warn,#d4af37)':'var(--error)'};color:#111;">${w.status}</span>
       </div>
       <div style="margin-top:8px;padding:10px;background:var(--bg-2,rgba(0,0,0,.03));border-radius:8px;">
         <div style="font-weight:700;">${escapeHtml(a?.displayName||w.affiliateId)}</div>
@@ -3276,6 +3276,11 @@ function affiliateWithdrawalCardHtml(w, affiliates){
           <button class="btn btn-outline btn-sm" onclick="adminMarkWithdrawalPaid('${w.id}')">Mark Paid (I sent it manually)</button>
         </div>
         <p class="small text-2" style="margin-top:6px;">"Pay Automatically" only works once Paystack Transfers is enabled on your account (Paystack dashboard → Settings → Preferences → enable Transfers, needs business verification). Until then, use "Mark Paid" after sending the transfer yourself.</p>` : ''}
+      ${w.status==='processing' ? `
+        <p class="small text-2" style="margin-top:8px;">A payout is in progress (started ${w.processingAt&&w.processingAt.seconds?new Date(w.processingAt.seconds*1000).toLocaleString():'just now'}). Do not retry. If it stays here for more than a few minutes, check the transfer in your Paystack dashboard first. Only if the money was actually sent, record it below.</p>
+        <div class="flex gap-8 mt-8">
+          <button class="btn btn-outline btn-sm" onclick="adminMarkProcessingPaid('${w.id}')">Money was sent - mark paid</button>
+        </div>` : ''}
       ${w.note ? `<p class="small text-2" style="margin-top:6px;">Note: ${escapeHtml(w.note)}</p>` : ''}
     </div>`;
 }
@@ -3315,6 +3320,11 @@ async function adminRejectWithdrawal(id){
 }
 async function adminMarkWithdrawalPaid(id){
   if(!confirm('Confirm you have already sent this bank transfer — this cannot be undone.')) return;
+  const r = await callAffiliateAdminAction('mark-withdrawal-paid', {withdrawalId:id});
+  if(r.ok){ toast('Marked paid','success'); fetchAffiliateWithdrawalsFromCloud(true).then(renderAdminTab); }
+}
+async function adminMarkProcessingPaid(id){
+  if(!confirm('This payout is still marked as in progress. Have you CHECKED in your Paystack dashboard that this exact transfer succeeded? Marking it paid cannot be undone.')) return;
   const r = await callAffiliateAdminAction('mark-withdrawal-paid', {withdrawalId:id});
   if(r.ok){ toast('Marked paid','success'); fetchAffiliateWithdrawalsFromCloud(true).then(renderAdminTab); }
 }
